@@ -176,7 +176,7 @@ impl XBarRChart {
         let mut r_values = Vec::with_capacity(self.subgroups.len());
 
         for subgroup in &self.subgroups {
-            let mean_val = u_numerics::stats::mean(subgroup)
+            let mean_val = u_numflow::stats::mean(subgroup)
                 .expect("subgroup should be non-empty with finite values");
             let range = subgroup_range(subgroup);
             xbar_values.push(mean_val);
@@ -184,9 +184,9 @@ impl XBarRChart {
         }
 
         // Grand mean and average range
-        let grand_mean = u_numerics::stats::mean(&xbar_values)
+        let grand_mean = u_numflow::stats::mean(&xbar_values)
             .expect("xbar_values should be non-empty with finite values");
-        let r_bar = u_numerics::stats::mean(&r_values)
+        let r_bar = u_numflow::stats::mean(&r_values)
             .expect("r_values should be non-empty with finite values");
 
         // X-bar chart limits
@@ -361,18 +361,18 @@ impl XBarSChart {
         let mut s_values = Vec::with_capacity(self.subgroups.len());
 
         for subgroup in &self.subgroups {
-            let mean_val = u_numerics::stats::mean(subgroup)
+            let mean_val = u_numflow::stats::mean(subgroup)
                 .expect("subgroup should be non-empty with finite values");
-            let sd = u_numerics::stats::std_dev(subgroup)
+            let sd = u_numflow::stats::std_dev(subgroup)
                 .expect("subgroup should have >= 2 elements for std_dev");
             xbar_values.push(mean_val);
             s_values.push(sd);
         }
 
         // Grand mean and average S
-        let grand_mean = u_numerics::stats::mean(&xbar_values)
+        let grand_mean = u_numflow::stats::mean(&xbar_values)
             .expect("xbar_values should be non-empty with finite values");
-        let s_bar = u_numerics::stats::mean(&s_values)
+        let s_bar = u_numflow::stats::mean(&s_values)
             .expect("s_values should be non-empty with finite values");
 
         // X-bar chart limits
@@ -552,9 +552,9 @@ impl IndividualMRChart {
             .collect();
 
         // X-bar and MR-bar
-        let x_bar = u_numerics::stats::mean(&self.observations)
+        let x_bar = u_numflow::stats::mean(&self.observations)
             .expect("observations should be non-empty with finite values");
-        let mr_bar = u_numerics::stats::mean(&mr_values)
+        let mr_bar = u_numflow::stats::mean(&mr_values)
             .expect("mr_values should be non-empty with finite values");
 
         // I chart limits
@@ -661,9 +661,9 @@ impl ControlChart for IndividualMRChart {
 /// Uses `expect` — callers must ensure `subgroup` is non-empty with finite values.
 fn subgroup_range(subgroup: &[f64]) -> f64 {
     let max_val =
-        u_numerics::stats::max(subgroup).expect("subgroup should be non-empty without NaN");
+        u_numflow::stats::max(subgroup).expect("subgroup should be non-empty without NaN");
     let min_val =
-        u_numerics::stats::min(subgroup).expect("subgroup should be non-empty without NaN");
+        u_numflow::stats::min(subgroup).expect("subgroup should be non-empty without NaN");
     max_val - min_val
 }
 

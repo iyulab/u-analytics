@@ -13,7 +13,7 @@
 //! - Chan, Cheng & Spiring (1988), "A New Measure of Process Capability: Cpm",
 //!   *Journal of Quality Technology* 20(3), pp. 162--175.
 
-use u_numerics::stats;
+use u_numflow::stats;
 
 /// Input specification for process capability analysis.
 ///

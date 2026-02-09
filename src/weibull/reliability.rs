@@ -3,7 +3,7 @@
 //! Provides reliability function, hazard rate, MTBF, B-life, and other
 //! common reliability engineering metrics.
 
-use u_numerics::special::gamma;
+use u_numflow::special::gamma;
 
 /// Reliability analysis results from a fitted Weibull distribution.
 ///

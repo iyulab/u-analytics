@@ -83,7 +83,7 @@ let signals = cusum.signal_points(&data);
 
 ## Dependencies
 
-- [`u-numerics`](https://crates.io/crates/u-numerics) -- statistics, special functions, probability distributions
+- [`u-numflow`](https://crates.io/crates/u-numflow) -- statistics, special functions, probability distributions
 
 ## References
 
@@ -95,7 +95,7 @@ let signals = cusum.signal_points(&data);
 
 ## Related
 
-- [u-numerics](https://crates.io/crates/u-numerics) -- Mathematical optimization primitives
+- [u-numflow](https://crates.io/crates/u-numflow) -- Mathematical optimization primitives
 - [u-metaheur](https://crates.io/crates/u-metaheur) -- Metaheuristic algorithms
 - [u-geometry](https://crates.io/crates/u-geometry) -- Computational geometry
 - [u-schedule](https://crates.io/crates/u-schedule) -- Scheduling framework
