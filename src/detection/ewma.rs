@@ -39,6 +39,19 @@
 /// Implements the Exponentially Weighted Moving Average control chart for
 /// detecting small sustained shifts in the process mean.
 ///
+/// # Examples
+///
+/// ```
+/// use u_analytics::detection::Ewma;
+///
+/// let ewma = Ewma::new(50.0, 2.0).unwrap();
+/// // In-control data
+/// let data = [50.5, 49.8, 50.2, 49.9, 50.0, 50.1, 49.7, 50.3];
+/// let results = ewma.analyze(&data);
+/// assert_eq!(results.len(), data.len());
+/// assert!(ewma.signal_points(&data).is_empty());
+/// ```
+///
 /// # Reference
 ///
 /// Roberts, S.W. (1959). "Control Chart Tests Based on Geometric Moving Averages",
@@ -145,6 +158,19 @@ impl Ewma {
     /// The EWMA statistic is initialized to the target mean (Z_0 = mu_0).
     /// Non-finite values in the data are skipped (the previous EWMA value
     /// is carried forward).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::detection::Ewma;
+    ///
+    /// let ewma = Ewma::new(50.0, 2.0).unwrap();
+    /// // Data with shift
+    /// let mut data: Vec<f64> = vec![50.0; 10];
+    /// data.extend(vec![55.0; 10]); // large shift
+    /// let signals = ewma.signal_points(&data);
+    /// assert!(!signals.is_empty()); // shift detected
+    /// ```
     ///
     /// # Complexity
     ///

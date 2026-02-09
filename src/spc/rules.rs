@@ -40,6 +40,21 @@ pub struct WesternElectricRules;
 /// The full set of eight tests for special causes as defined by
 /// Nelson (1984). Rules 1, 2, 5, and 6 correspond to the Western
 /// Electric rules.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::spc::{NelsonRules, RunRule, ChartPoint, ControlLimits};
+///
+/// let limits = ControlLimits { ucl: 28.0, cl: 25.0, lcl: 22.0 };
+/// let points: Vec<ChartPoint> = vec![
+///     ChartPoint { value: 25.0, index: 0, violations: vec![] },
+///     ChartPoint { value: 29.0, index: 1, violations: vec![] },
+/// ];
+///
+/// let violations = NelsonRules.check(&points, &limits);
+/// assert!(!violations.is_empty()); // Rule 1: point beyond UCL
+/// ```
 pub struct NelsonRules;
 
 // ---------------------------------------------------------------------------

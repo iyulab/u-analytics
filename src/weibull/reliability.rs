@@ -17,6 +17,18 @@ use u_optim::special::gamma;
 /// - Hazard rate: lambda(t) = (beta/eta) * (t/eta)^(beta-1)
 /// - MTBF: eta * Gamma(1 + 1/beta)
 ///
+/// # Examples
+///
+/// ```
+/// use u_analytics::weibull::ReliabilityAnalysis;
+/// let ra = ReliabilityAnalysis::new(2.0, 100.0).unwrap();
+/// assert!((ra.reliability(0.0) - 1.0).abs() < 1e-10);
+/// assert!(ra.hazard_rate(50.0) > 0.0);
+/// assert!(ra.mtbf() > 0.0);
+/// let b10 = ra.b_life(0.10).unwrap();
+/// assert!(b10 > 0.0 && b10 < 100.0);
+/// ```
+///
 /// # Reference
 /// Meeker & Escobar (1998), *Statistical Methods for Reliability Data*, Wiley.
 #[derive(Debug, Clone)]
@@ -36,6 +48,18 @@ impl ReliabilityAnalysis {
     ///
     /// # Returns
     /// `None` if either parameter is non-positive or non-finite.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::weibull::ReliabilityAnalysis;
+    /// let ra = ReliabilityAnalysis::new(2.0, 100.0);
+    /// assert!(ra.is_some());
+    ///
+    /// // Invalid parameters return None
+    /// assert!(ReliabilityAnalysis::new(-1.0, 100.0).is_none());
+    /// assert!(ReliabilityAnalysis::new(2.0, 0.0).is_none());
+    /// ```
     pub fn new(shape: f64, scale: f64) -> Option<Self> {
         if !shape.is_finite() || !scale.is_finite() || shape <= 0.0 || scale <= 0.0 {
             return None;
@@ -83,6 +107,20 @@ impl ReliabilityAnalysis {
     ///
     /// For t < 0, returns 1.0 (no failure before time 0).
     ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::weibull::ReliabilityAnalysis;
+    /// let ra = ReliabilityAnalysis::new(2.0, 100.0).unwrap();
+    ///
+    /// // R(0) = 1.0 (full reliability at time zero)
+    /// assert!((ra.reliability(0.0) - 1.0).abs() < 1e-10);
+    ///
+    /// // R(eta) = exp(-1) ≈ 0.368 for any shape parameter
+    /// let expected = (-1.0_f64).exp();
+    /// assert!((ra.reliability(100.0) - expected).abs() < 1e-10);
+    /// ```
+    ///
     /// # Reference
     /// Weibull (1951), *Journal of Applied Mechanics* 18(3), pp. 293-297.
     pub fn reliability(&self, t: f64) -> f64 {
@@ -105,6 +143,19 @@ impl ReliabilityAnalysis {
     ///
     /// For t <= 0, returns 0.0.
     ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::weibull::ReliabilityAnalysis;
+    /// let ra = ReliabilityAnalysis::new(2.0, 100.0).unwrap();
+    ///
+    /// // Hazard rate is positive for t > 0
+    /// assert!(ra.hazard_rate(50.0) > 0.0);
+    ///
+    /// // With beta > 1, hazard rate increases over time (wear-out)
+    /// assert!(ra.hazard_rate(50.0) < ra.hazard_rate(80.0));
+    /// ```
+    ///
     /// # Reference
     /// Meeker & Escobar (1998), *Statistical Methods for Reliability Data*, Ch. 4.
     pub fn hazard_rate(&self, t: f64) -> f64 {
@@ -119,6 +170,19 @@ impl ReliabilityAnalysis {
     ///
     /// ```text
     /// MTBF = eta * Gamma(1 + 1/beta)
+    /// ```
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::weibull::ReliabilityAnalysis;
+    /// let ra = ReliabilityAnalysis::new(2.0, 100.0).unwrap();
+    /// let mtbf = ra.mtbf();
+    /// assert!(mtbf > 0.0);
+    ///
+    /// // For beta=1 (exponential), MTBF = eta
+    /// let exp_ra = ReliabilityAnalysis::new(1.0, 50.0).unwrap();
+    /// assert!((exp_ra.mtbf() - 50.0).abs() < 1e-8);
     /// ```
     ///
     /// # Reference
@@ -161,6 +225,22 @@ impl ReliabilityAnalysis {
     ///
     /// # Returns
     /// `None` if `fraction_failed` is outside (0, 1).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::weibull::ReliabilityAnalysis;
+    /// let ra = ReliabilityAnalysis::new(2.0, 100.0).unwrap();
+    ///
+    /// // B10: time when 10% of the population has failed
+    /// let b10 = ra.b_life(0.10).unwrap();
+    /// assert!(b10 > 0.0 && b10 < 100.0);
+    ///
+    /// // B-lives increase with failure fraction: B5 < B10 < B50
+    /// let b5 = ra.b_life(0.05).unwrap();
+    /// let b50 = ra.b_life(0.50).unwrap();
+    /// assert!(b5 < b10 && b10 < b50);
+    /// ```
     ///
     /// # Reference
     /// Abernethy (2006), *The New Weibull Handbook*, 5th ed., Chapter 2.

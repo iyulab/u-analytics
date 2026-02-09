@@ -94,6 +94,21 @@ const D4_MR: f64 = 3.267;
 /// 3. X-bar chart limits: CL = X-double-bar, UCL/LCL = CL +/- A2 * R-bar.
 /// 4. R chart limits: CL = R-bar, UCL = D4 * R-bar, LCL = D3 * R-bar.
 ///
+/// # Examples
+///
+/// ```
+/// use u_analytics::spc::{XBarRChart, ControlChart};
+///
+/// let mut chart = XBarRChart::new(5);
+/// chart.add_sample(&[25.0, 26.0, 24.5, 25.5, 25.0]);
+/// chart.add_sample(&[25.2, 24.8, 25.1, 24.9, 25.3]);
+/// chart.add_sample(&[25.1, 25.0, 24.7, 25.3, 24.9]);
+///
+/// let limits = chart.control_limits().expect("should have limits after 3 samples");
+/// assert!(limits.ucl > limits.cl);
+/// assert!(limits.cl > limits.lcl);
+/// ```
+///
 /// # Reference
 ///
 /// Montgomery, D.C. (2019). *Introduction to Statistical Quality Control*, 8th ed.,
@@ -464,6 +479,21 @@ impl ControlChart for XBarSChart {
 ///    moving range (MR-bar).
 /// 3. I chart limits: CL = X-bar, UCL/LCL = X-bar +/- E2 * MR-bar.
 /// 4. MR chart limits: CL = MR-bar, UCL = D4 * MR-bar, LCL = 0.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::spc::{IndividualMRChart, ControlChart};
+///
+/// let mut chart = IndividualMRChart::new();
+/// for &x in &[25.0, 25.2, 24.8, 25.1, 24.9, 25.3, 25.0, 24.7] {
+///     chart.add_sample(&[x]);
+/// }
+///
+/// let limits = chart.control_limits().expect("should have limits after 2+ observations");
+/// assert!(limits.ucl > limits.cl);
+/// assert!(limits.cl > limits.lcl);
+/// ```
 ///
 /// # Reference
 ///

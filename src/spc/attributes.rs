@@ -54,6 +54,21 @@ pub struct AttributeChartPoint {
 /// - UCL_i = p-bar + 3 * sqrt(p-bar * (1 - p-bar) / n_i)
 /// - LCL_i = max(0, p-bar - 3 * sqrt(p-bar * (1 - p-bar) / n_i))
 ///
+/// # Examples
+///
+/// ```
+/// use u_analytics::spc::PChart;
+///
+/// let mut chart = PChart::new();
+/// chart.add_sample(3, 100);  // 3 defectives out of 100
+/// chart.add_sample(5, 100);
+/// chart.add_sample(2, 100);
+/// chart.add_sample(4, 100);
+///
+/// let p_bar = chart.p_bar().expect("should have p_bar after adding samples");
+/// assert!(p_bar > 0.0);
+/// ```
+///
 /// # Reference
 ///
 /// Montgomery, D.C. (2019). *Introduction to Statistical Quality Control*, 8th ed.,

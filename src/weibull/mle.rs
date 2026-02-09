@@ -52,6 +52,17 @@ const TOL: f64 = 1e-10;
 /// `None` if data is insufficient (< 2 values), any value is non-positive,
 /// or the algorithm does not converge.
 ///
+/// # Examples
+///
+/// ```
+/// use u_analytics::weibull::weibull_mle;
+/// let data = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0];
+/// let result = weibull_mle(&data).unwrap();
+/// assert!(result.shape > 0.0);
+/// assert!(result.scale > 0.0);
+/// assert!(result.log_likelihood.is_finite());
+/// ```
+///
 /// # Reference
 /// Lawless (2003), *Statistical Models and Methods for Lifetime Data*, 2nd ed.
 pub fn weibull_mle(failure_times: &[f64]) -> Option<WeibullMleResult> {

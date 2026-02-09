@@ -45,6 +45,17 @@ pub struct WeibullMrrResult {
 /// `None` if data is insufficient (< 2 values), any value is non-positive,
 /// or the regression is degenerate.
 ///
+/// # Examples
+///
+/// ```
+/// use u_analytics::weibull::weibull_mrr;
+/// let data = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0];
+/// let result = weibull_mrr(&data).unwrap();
+/// assert!(result.shape > 0.0);
+/// assert!(result.scale > 0.0);
+/// assert!(result.r_squared > 0.9);
+/// ```
+///
 /// # Reference
 /// Abernethy (2006), *The New Weibull Handbook*, 5th ed.
 pub fn weibull_mrr(failure_times: &[f64]) -> Option<WeibullMrrResult> {

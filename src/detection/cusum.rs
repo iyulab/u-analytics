@@ -32,6 +32,19 @@
 /// Implements the tabular (two-sided) CUSUM procedure for detecting
 /// both upward and downward shifts in a process mean.
 ///
+/// # Examples
+///
+/// ```
+/// use u_analytics::detection::Cusum;
+///
+/// let cusum = Cusum::new(10.0, 1.0).unwrap();
+/// // In-control data
+/// let data = [10.1, 9.8, 10.2, 9.9, 10.0, 10.1, 9.7, 10.3];
+/// let results = cusum.analyze(&data);
+/// assert_eq!(results.len(), data.len());
+/// assert!(cusum.signal_points(&data).is_empty());
+/// ```
+///
 /// # Reference
 ///
 /// Page, E.S. (1954). "Continuous inspection schemes", *Biometrika* 41(1-2).
@@ -114,6 +127,19 @@ impl Cusum {
     /// The upper CUSUM detects upward shifts; the lower CUSUM detects downward shifts.
     /// Both are initialized to zero. Non-finite values in the data are skipped
     /// (their index is still consumed).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::detection::Cusum;
+    ///
+    /// let cusum = Cusum::new(10.0, 1.0).unwrap();
+    /// // Data with upward shift
+    /// let mut data: Vec<f64> = vec![10.0; 10];
+    /// data.extend(vec![12.0; 10]); // shift of 2 sigma
+    /// let signals = cusum.signal_points(&data);
+    /// assert!(!signals.is_empty()); // shift detected
+    /// ```
     ///
     /// # Complexity
     ///
