@@ -1,5 +1,10 @@
 # u-analytics
 
+[![Crates.io](https://img.shields.io/crates/v/u-analytics.svg)](https://crates.io/crates/u-analytics)
+[![docs.rs](https://docs.rs/u-analytics/badge.svg)](https://docs.rs/u-analytics)
+[![CI](https://github.com/iyulab/u-analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/iyulab/u-analytics/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Statistical process control, process capability analysis, Weibull reliability,
 and change-point detection for industrial quality engineering.
 
