@@ -1,0 +1,17 @@
+[package]
+name = "u-analytics"
+version = "0.1.0"
+edition = "2021"
+authors = ["iyulab"]
+license = "MIT"
+description = "Statistical process control, process capability analysis, Weibull reliability, and change-point detection."
+repository = "https://github.com/iyulab/u-analytics"
+keywords = ["spc", "statistics", "quality", "weibull", "reliability"]
+categories = ["science", "mathematics"]
+readme = "README.md"
+
+[dependencies]
+u-optim = { version = "0.1", path = "../../foundation/u-optim" }
+
+[dev-dependencies]
+proptest = "1.4"
