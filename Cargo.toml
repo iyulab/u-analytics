@@ -11,7 +11,7 @@ categories = ["science", "mathematics"]
 readme = "README.md"
 
 [dependencies]
-u-optim = { version = "0.1", path = "../../foundation/u-optim" }
+u-numerics = { version = "0.1", path = "../../foundation/u-numerics" }
 
 [dev-dependencies]
 proptest = "1.4"

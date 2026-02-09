@@ -18,7 +18,7 @@
 //! ## Design Philosophy
 //!
 //! - **Domain-agnostic**: No manufacturing or process-specific types
-//! - **Numerical stability**: Leverages `u-optim` for stable statistics
+//! - **Numerical stability**: Leverages `u-numerics` for stable statistics
 //! - **Research-backed**: All algorithms reference academic literature
 
 pub mod capability;
