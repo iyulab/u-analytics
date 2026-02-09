@@ -23,7 +23,7 @@
 //! - Motorola University, "The Six Sigma Process" (defining the 1.5-sigma
 //!   shift convention).
 
-use u_optim::special::{inverse_normal_cdf, standard_normal_cdf};
+use u_numerics::special::{inverse_normal_cdf, standard_normal_cdf};
 
 /// Converts a sigma quality level to parts-per-million (PPM) defect rate.
 ///
