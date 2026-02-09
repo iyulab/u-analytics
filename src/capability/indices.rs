@@ -273,11 +273,9 @@ impl ProcessCapability {
 
         // Taguchi Cpm index
         let cpm = cp.and_then(|cp_val| {
-            let target = self.target.or_else(|| {
-                match (self.usl, self.lsl) {
-                    (Some(u), Some(l)) => Some((u + l) / 2.0),
-                    _ => None,
-                }
+            let target = self.target.or_else(|| match (self.usl, self.lsl) {
+                (Some(u), Some(l)) => Some((u + l) / 2.0),
+                _ => None,
             })?;
             let deviation_ratio = (x_bar - target) / sigma_within;
             Some(cp_val / (1.0 + deviation_ratio * deviation_ratio).sqrt())
@@ -355,9 +353,8 @@ mod tests {
         let spec = ProcessCapability::new(Some(220.0), Some(200.0)).unwrap();
 
         let data = [
-            208.0, 209.0, 210.0, 211.0, 212.0, 208.5, 209.5, 210.5, 211.5,
-            210.0, 209.0, 211.0, 210.0, 209.5, 210.5, 210.0, 210.0, 210.0,
-            209.0, 211.0,
+            208.0, 209.0, 210.0, 211.0, 212.0, 208.5, 209.5, 210.5, 211.5, 210.0, 209.0, 211.0,
+            210.0, 209.5, 210.5, 210.0, 210.0, 210.0, 209.0, 211.0,
         ];
 
         let sigma_within = 2.0;
@@ -389,9 +386,8 @@ mod tests {
         let spec = ProcessCapability::new(Some(220.0), Some(200.0)).unwrap();
 
         let data = [
-            213.0, 214.0, 215.0, 216.0, 217.0, 213.5, 214.5, 215.5, 216.5,
-            215.0, 214.0, 216.0, 215.0, 214.5, 215.5, 215.0, 215.0, 215.0,
-            214.0, 216.0,
+            213.0, 214.0, 215.0, 216.0, 217.0, 213.5, 214.5, 215.5, 216.5, 215.0, 214.0, 216.0,
+            215.0, 214.5, 215.5, 215.0, 215.0, 215.0, 214.0, 216.0,
         ];
 
         let sigma_within = 2.0;
@@ -410,16 +406,10 @@ mod tests {
         );
 
         let cpl = indices.cpl.unwrap();
-        assert!(
-            (cpl - 2.5).abs() < 0.05,
-            "expected Cpl ~ 2.5, got {cpl}"
-        );
+        assert!((cpl - 2.5).abs() < 0.05, "expected Cpl ~ 2.5, got {cpl}");
 
         let cpk = indices.cpk.unwrap();
-        assert!(
-            (cpk - cpu).abs() < 1e-15,
-            "Cpk should equal min(Cpu, Cpl)"
-        );
+        assert!((cpk - cpu).abs() < 1e-15, "Cpk should equal min(Cpu, Cpl)");
     }
 
     // -----------------------------------------------------------------------
@@ -466,8 +456,7 @@ mod tests {
     fn compute_overall_matches_pp_equals_cp() {
         let spec = ProcessCapability::new(Some(220.0), Some(200.0)).unwrap();
         let data = [
-            208.0, 209.0, 210.0, 211.0, 212.0, 208.5, 209.5, 210.5, 211.5,
-            210.0,
+            208.0, 209.0, 210.0, 211.0, 212.0, 208.5, 209.5, 210.5, 211.5, 210.0,
         ];
         let indices = spec.compute_overall(&data).unwrap();
 
@@ -497,8 +486,7 @@ mod tests {
             .with_target(212.0);
 
         let data = [
-            208.0, 209.0, 210.0, 211.0, 212.0, 208.5, 209.5, 210.5, 211.5,
-            210.0,
+            208.0, 209.0, 210.0, 211.0, 212.0, 208.5, 209.5, 210.5, 211.5, 210.0,
         ];
 
         let sigma_within = 2.0;
@@ -576,8 +564,8 @@ mod tests {
         let spec = ProcessCapability::new(Some(220.0), Some(200.0)).unwrap();
 
         let data = [
-            205.0, 207.0, 210.0, 213.0, 215.0, 206.0, 208.0, 212.0, 214.0,
-            210.0, 204.0, 216.0, 209.0, 211.0, 210.0,
+            205.0, 207.0, 210.0, 213.0, 215.0, 206.0, 208.0, 212.0, 214.0, 210.0, 204.0, 216.0,
+            209.0, 211.0, 210.0,
         ];
 
         let sigma_within = 1.5;

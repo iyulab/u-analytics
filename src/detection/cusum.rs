@@ -212,7 +212,11 @@ mod tests {
 
         assert_eq!(results.len(), 50);
         for r in &results {
-            assert!(!r.signal, "no signals expected for in-control data at index {}", r.index);
+            assert!(
+                !r.signal,
+                "no signals expected for in-control data at index {}",
+                r.index
+            );
             assert!(
                 r.s_upper.abs() < 1e-10,
                 "s_upper should be 0 when data == target"
@@ -295,7 +299,11 @@ mod tests {
         }
 
         let results = cusum.analyze(&data);
-        let signals: Vec<usize> = results.iter().filter(|r| r.signal).map(|r| r.index).collect();
+        let signals: Vec<usize> = results
+            .iter()
+            .filter(|r| r.signal)
+            .map(|r| r.index)
+            .collect();
         assert!(
             !signals.is_empty(),
             "CUSUM should detect a -2sigma downward shift"
@@ -356,7 +364,10 @@ mod tests {
     fn test_cusum_empty_data() {
         let cusum = Cusum::new(0.0, 1.0).expect("valid params");
         let results = cusum.analyze(&[]);
-        assert!(results.is_empty(), "empty data should produce empty results");
+        assert!(
+            results.is_empty(),
+            "empty data should produce empty results"
+        );
 
         let signals = cusum.signal_points(&[]);
         assert!(signals.is_empty(), "empty data should produce no signals");
@@ -368,7 +379,10 @@ mod tests {
 
         let results = cusum.analyze(&[0.0]);
         assert_eq!(results.len(), 1);
-        assert!(!results[0].signal, "single in-control point should not signal");
+        assert!(
+            !results[0].signal,
+            "single in-control point should not signal"
+        );
 
         let results = cusum.analyze(&[100.0]);
         assert_eq!(results.len(), 1);
@@ -411,11 +425,21 @@ mod tests {
     fn test_cusum_s_upper_s_lower_non_negative() {
         // CUSUM statistics should always be >= 0 by construction.
         let cusum = Cusum::new(50.0, 5.0).expect("valid params");
-        let data: Vec<f64> = (0..100).map(|i| 50.0 + (i as f64 * 0.1).sin() * 3.0).collect();
+        let data: Vec<f64> = (0..100)
+            .map(|i| 50.0 + (i as f64 * 0.1).sin() * 3.0)
+            .collect();
         let results = cusum.analyze(&data);
         for r in &results {
-            assert!(r.s_upper >= 0.0, "s_upper must be non-negative at index {}", r.index);
-            assert!(r.s_lower >= 0.0, "s_lower must be non-negative at index {}", r.index);
+            assert!(
+                r.s_upper >= 0.0,
+                "s_upper must be non-negative at index {}",
+                r.index
+            );
+            assert!(
+                r.s_lower >= 0.0,
+                "s_lower must be non-negative at index {}",
+                r.index
+            );
         }
     }
 }

@@ -65,18 +65,13 @@ pub fn weibull_mrr(failure_times: &[f64]) -> Option<WeibullMrrResult> {
     }
 
     // Validate: all values must be positive and finite
-    if !failure_times
-        .iter()
-        .all(|&t| t.is_finite() && t > 0.0)
-    {
+    if !failure_times.iter().all(|&t| t.is_finite() && t > 0.0) {
         return None;
     }
 
     // Sort failure times ascending
     let mut sorted = failure_times.to_vec();
-    sorted.sort_unstable_by(|a, b| {
-        a.partial_cmp(b).expect("NaN values already filtered above")
-    });
+    sorted.sort_unstable_by(|a, b| a.partial_cmp(b).expect("NaN values already filtered above"));
 
     let n_f = n as f64;
 
@@ -132,7 +127,10 @@ pub fn weibull_mrr(failure_times: &[f64]) -> Option<WeibullMrrResult> {
     // R-squared = 1 - SS_res / SS_tot
     let mean_y = sum_y / n_f;
     let ss_tot = sum_y2 - n_f * mean_y * mean_y;
-    let ss_res = sum_y2 - 2.0 * a * sum_y - 2.0 * b * sum_xy + n_f * a * a + 2.0 * a * b * sum_x + b * b * sum_x2;
+    let ss_res = sum_y2 - 2.0 * a * sum_y - 2.0 * b * sum_xy
+        + n_f * a * a
+        + 2.0 * a * b * sum_x
+        + b * b * sum_x2;
 
     let r_squared = if ss_tot.abs() < 1e-30 {
         1.0 // Perfect fit (all y values identical)

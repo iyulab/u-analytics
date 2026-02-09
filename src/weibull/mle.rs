@@ -72,10 +72,7 @@ pub fn weibull_mle(failure_times: &[f64]) -> Option<WeibullMleResult> {
     }
 
     // Validate: all values must be positive and finite
-    if !failure_times
-        .iter()
-        .all(|&t| t.is_finite() && t > 0.0)
-    {
+    if !failure_times.iter().all(|&t| t.is_finite() && t > 0.0) {
         return None;
     }
 
@@ -147,8 +144,7 @@ pub fn weibull_mle(failure_times: &[f64]) -> Option<WeibullMleResult> {
     }
 
     // Compute log-likelihood at the fitted parameters
-    let log_likelihood = n_f * beta.ln() - n_f * beta * eta.ln()
-        + (beta - 1.0) * sum_ln_t
+    let log_likelihood = n_f * beta.ln() - n_f * beta * eta.ln() + (beta - 1.0) * sum_ln_t
         - failure_times
             .iter()
             .map(|&t| (t / eta).powf(beta))

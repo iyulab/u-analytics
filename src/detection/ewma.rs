@@ -252,7 +252,11 @@ mod tests {
                 r.ewma,
                 r.index
             );
-            assert!(!r.signal, "no signals expected for in-control data at index {}", r.index);
+            assert!(
+                !r.signal,
+                "no signals expected for in-control data at index {}",
+                r.index
+            );
         }
     }
 
@@ -400,7 +404,10 @@ mod tests {
     fn test_ewma_empty_data() {
         let ewma = Ewma::new(0.0, 1.0).expect("valid params");
         let results = ewma.analyze(&[]);
-        assert!(results.is_empty(), "empty data should produce empty results");
+        assert!(
+            results.is_empty(),
+            "empty data should produce empty results"
+        );
 
         let signals = ewma.signal_points(&[]);
         assert!(signals.is_empty(), "empty data should produce no signals");
@@ -412,7 +419,10 @@ mod tests {
 
         let results = ewma.analyze(&[0.0]);
         assert_eq!(results.len(), 1);
-        assert!(!results[0].signal, "single in-control point should not signal");
+        assert!(
+            !results[0].signal,
+            "single in-control point should not signal"
+        );
 
         // Extreme single point
         let results = ewma.analyze(&[100.0]);
@@ -469,7 +479,10 @@ mod tests {
         }
 
         let signals = ewma.signal_points(&data);
-        assert!(!signals.is_empty(), "EWMA should detect a 2-sigma step shift");
+        assert!(
+            !signals.is_empty(),
+            "EWMA should detect a 2-sigma step shift"
+        );
 
         let first_signal = signals[0];
         assert!(

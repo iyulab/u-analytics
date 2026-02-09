@@ -208,9 +208,7 @@ impl HoltWinters {
             let b = self.beta * (l - level[t - 1]) + (1.0 - self.beta) * trend[t - 1];
 
             let s = match self.seasonality {
-                Seasonality::Additive => {
-                    self.gamma * (data[t] - l) + (1.0 - self.gamma) * s_prev
-                }
+                Seasonality::Additive => self.gamma * (data[t] - l) + (1.0 - self.gamma) * s_prev,
                 Seasonality::Multiplicative => {
                     self.gamma * (data[t] / l) + (1.0 - self.gamma) * s_prev
                 }

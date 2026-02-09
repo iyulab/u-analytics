@@ -127,10 +127,7 @@ mod tests {
 
         // Forecast should be close to 20 for h=1
         let f1 = result.forecast(1);
-        assert!(
-            (f1 - 20.0).abs() < 2.0,
-            "forecast(1) = {f1}, expected ~20"
-        );
+        assert!((f1 - 20.0).abs() < 2.0, "forecast(1) = {f1}, expected ~20");
     }
 
     #[test]

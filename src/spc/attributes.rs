@@ -726,9 +726,9 @@ mod tests {
     #[test]
     fn test_u_chart_variable_units() {
         let mut chart = UChart::new();
-        chart.add_sample(10, 5.0);  // u = 2.0
+        chart.add_sample(10, 5.0); // u = 2.0
         chart.add_sample(20, 10.0); // u = 2.0
-        chart.add_sample(5, 2.5);   // u = 2.0
+        chart.add_sample(5, 2.5); // u = 2.0
 
         let u_bar = chart.u_bar().expect("u_bar");
         // u-bar = 35/17.5 = 2.0
@@ -744,13 +744,13 @@ mod tests {
     #[test]
     fn test_u_chart_rejects_invalid() {
         let mut chart = UChart::new();
-        chart.add_sample(5, 0.0);         // Zero units
+        chart.add_sample(5, 0.0); // Zero units
         assert!(chart.u_bar().is_none());
 
-        chart.add_sample(5, -1.0);        // Negative units
+        chart.add_sample(5, -1.0); // Negative units
         assert!(chart.u_bar().is_none());
 
-        chart.add_sample(5, f64::NAN);    // NaN units
+        chart.add_sample(5, f64::NAN); // NaN units
         assert!(chart.u_bar().is_none());
 
         chart.add_sample(5, f64::INFINITY); // Infinite units

@@ -510,7 +510,9 @@ mod tests {
             lcl: 20.0,
         };
         // Create alternating pattern: 24, 26, 24, 26, ...
-        let values: Vec<f64> = (0..14).map(|i| if i % 2 == 0 { 24.0 } else { 26.0 }).collect();
+        let values: Vec<f64> = (0..14)
+            .map(|i| if i % 2 == 0 { 24.0 } else { 26.0 })
+            .collect();
         let points = make_points(&values);
         let violations = check_rule4(&points, &limits);
         assert_eq!(violations.len(), 1);
@@ -524,7 +526,9 @@ mod tests {
             cl: 25.0,
             lcl: 20.0,
         };
-        let values: Vec<f64> = (0..13).map(|i| if i % 2 == 0 { 24.0 } else { 26.0 }).collect();
+        let values: Vec<f64> = (0..13)
+            .map(|i| if i % 2 == 0 { 24.0 } else { 26.0 })
+            .collect();
         let points = make_points(&values);
         let violations = check_rule4(&points, &limits);
         assert!(violations.is_empty());

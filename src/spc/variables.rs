@@ -28,7 +28,9 @@ use super::rules::{NelsonRules, RunRule};
 /// A2 factors for X-bar-R chart UCL/LCL computation.
 ///
 /// UCL = X-double-bar + A2 * R-bar, LCL = X-double-bar - A2 * R-bar.
-const A2: [f64; 9] = [1.880, 1.023, 0.729, 0.577, 0.483, 0.419, 0.373, 0.337, 0.308];
+const A2: [f64; 9] = [
+    1.880, 1.023, 0.729, 0.577, 0.483, 0.419, 0.373, 0.337, 0.308,
+];
 
 /// D3 factors for R chart lower control limit.
 ///
@@ -38,18 +40,24 @@ const D3: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.076, 0.136, 0.184, 0.223];
 /// D4 factors for R chart upper control limit.
 ///
 /// UCL_R = D4 * R-bar.
-const D4: [f64; 9] = [3.267, 2.575, 2.282, 2.114, 2.004, 1.924, 1.864, 1.816, 1.777];
+const D4: [f64; 9] = [
+    3.267, 2.575, 2.282, 2.114, 2.004, 1.924, 1.864, 1.816, 1.777,
+];
 
 /// d2 factors (mean of the range distribution) for estimating sigma from R-bar.
 ///
 /// sigma-hat = R-bar / d2.
 #[allow(dead_code)]
-const D2: [f64; 9] = [1.128, 1.693, 2.059, 2.326, 2.534, 2.704, 2.847, 2.970, 3.078];
+const D2: [f64; 9] = [
+    1.128, 1.693, 2.059, 2.326, 2.534, 2.704, 2.847, 2.970, 3.078,
+];
 
 /// A3 factors for X-bar-S chart UCL/LCL computation.
 ///
 /// UCL = X-double-bar + A3 * S-bar, LCL = X-double-bar - A3 * S-bar.
-const A3: [f64; 9] = [2.659, 1.954, 1.628, 1.427, 1.287, 1.182, 1.099, 1.032, 0.975];
+const A3: [f64; 9] = [
+    2.659, 1.954, 1.628, 1.427, 1.287, 1.182, 1.099, 1.032, 0.975,
+];
 
 /// B3 factors for S chart lower control limit.
 ///
@@ -59,7 +67,9 @@ const B3: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.030, 0.118, 0.185, 0.239, 0.284];
 /// B4 factors for S chart upper control limit.
 ///
 /// UCL_S = B4 * S-bar.
-const B4: [f64; 9] = [3.267, 2.568, 2.266, 2.089, 1.970, 1.882, 1.815, 1.761, 1.716];
+const B4: [f64; 9] = [
+    3.267, 2.568, 2.266, 2.089, 1.970, 1.882, 1.815, 1.761, 1.716,
+];
 
 /// c4 factors for unbiased estimation of sigma from S-bar.
 ///

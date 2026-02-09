@@ -337,8 +337,18 @@ mod tests {
         let h1 = ra.hazard_rate(10.0);
         let h2 = ra.hazard_rate(20.0);
         let h3 = ra.hazard_rate(30.0);
-        assert!(h1 < h2, "hazard should increase: h(10)={} >= h(20)={}", h1, h2);
-        assert!(h2 < h3, "hazard should increase: h(20)={} >= h(30)={}", h2, h3);
+        assert!(
+            h1 < h2,
+            "hazard should increase: h(10)={} >= h(20)={}",
+            h1,
+            h2
+        );
+        assert!(
+            h2 < h3,
+            "hazard should increase: h(20)={} >= h(30)={}",
+            h2,
+            h3
+        );
     }
 
     #[test]
@@ -376,9 +386,7 @@ mod tests {
     fn test_time_to_reliability_median() {
         // Median life: R(t) = 0.5 => t = eta * (ln(2))^(1/beta)
         let ra = ReliabilityAnalysis::new(2.0, 50.0).expect("valid parameters");
-        let t_median = ra
-            .time_to_reliability(0.5)
-            .expect("p=0.5 is valid");
+        let t_median = ra.time_to_reliability(0.5).expect("p=0.5 is valid");
         let expected = 50.0 * (2.0_f64.ln()).powf(0.5);
         assert!(
             (t_median - expected).abs() < 1e-10,
@@ -476,7 +484,8 @@ mod tests {
         let ra = ReliabilityAnalysis::new(2.5, 50.0).expect("valid parameters");
         for t in [5.0, 20.0, 50.0, 80.0] {
             let z = t / ra.scale();
-            let pdf = (ra.shape() / ra.scale()) * z.powf(ra.shape() - 1.0) * (-z.powf(ra.shape())).exp();
+            let pdf =
+                (ra.shape() / ra.scale()) * z.powf(ra.shape() - 1.0) * (-z.powf(ra.shape())).exp();
             let h = ra.hazard_rate(t);
             let r = ra.reliability(t);
             assert!(
