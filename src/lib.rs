@@ -13,6 +13,7 @@
 //! - [`capability`] — Process capability indices (Cp, Cpk, Pp, Ppk, Cpm)
 //! - [`weibull`] — Weibull parameter estimation (MLE, MRR) and reliability analysis
 //! - [`detection`] — Change-point detection (CUSUM, EWMA)
+//! - [`smoothing`] — Time series smoothing (SES, Holt, Holt-Winters)
 //!
 //! ## Design Philosophy
 //!
@@ -22,5 +23,6 @@
 
 pub mod capability;
 pub mod detection;
+pub mod smoothing;
 pub mod spc;
 pub mod weibull;
