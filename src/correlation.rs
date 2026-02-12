@@ -529,7 +529,7 @@ pub struct AcfResult {
     /// `acf[0]` is always 1.0.
     pub acf: Vec<f64>,
     /// 95% confidence threshold = 1.96 / √n.
-    /// Values with |acf[k]| > threshold (for k > 0) are significant.
+    /// Values with |acf\[k\]| > threshold (for k > 0) are significant.
     pub confidence_threshold: f64,
 }
 
