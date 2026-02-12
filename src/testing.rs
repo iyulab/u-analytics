@@ -327,10 +327,7 @@ pub fn one_way_anova(groups: &[&[f64]]) -> Option<AnovaResult> {
 /// let r = chi_squared_goodness_of_fit(&observed, &expected).unwrap();
 /// assert!(r.statistic > 0.0);
 /// ```
-pub fn chi_squared_goodness_of_fit(
-    observed: &[f64],
-    expected: &[f64],
-) -> Option<TestResult> {
+pub fn chi_squared_goodness_of_fit(observed: &[f64], expected: &[f64]) -> Option<TestResult> {
     let k = observed.len();
     if k < 2 || k != expected.len() {
         return None;
@@ -391,11 +388,7 @@ pub fn chi_squared_goodness_of_fit(
 /// let r = chi_squared_independence(&table, 2, 2).unwrap();
 /// assert!(r.p_value < 0.01);
 /// ```
-pub fn chi_squared_independence(
-    table: &[f64],
-    n_rows: usize,
-    n_cols: usize,
-) -> Option<TestResult> {
+pub fn chi_squared_independence(table: &[f64], n_rows: usize, n_cols: usize) -> Option<TestResult> {
     if n_rows < 2 || n_cols < 2 || table.len() != n_rows * n_cols {
         return None;
     }
@@ -724,10 +717,7 @@ fn shapiro_wilk_n3(x: &[f64]) -> Option<ShapiroWilkResult> {
     let p = 1.0 - (6.0 / std::f64::consts::PI) * w.sqrt().acos();
     let p = p.clamp(0.0, 1.0);
 
-    Some(ShapiroWilkResult {
-        w,
-        p_value: p,
-    })
+    Some(ShapiroWilkResult { w, p_value: p })
 }
 
 // Royston polynomial coefficients (AS R94)
@@ -942,8 +932,7 @@ pub fn mann_whitney_u_test(a: &[f64], b: &[f64]) -> Option<TestResult> {
 
     // Normal approximation
     let mu = n1f * n2f / 2.0;
-    let sigma_sq = n1f * n2f / 12.0
-        * (nf + 1.0 - tie_correction / (nf * (nf - 1.0)));
+    let sigma_sq = n1f * n2f / 12.0 * (nf + 1.0 - tie_correction / (nf * (nf - 1.0)));
 
     if sigma_sq <= 0.0 {
         return None;
@@ -1039,8 +1028,7 @@ pub fn wilcoxon_signed_rank_test(x: &[f64], y: &[f64]) -> Option<TestResult> {
 
     // Normal approximation
     let mu = nf * (nf + 1.0) / 4.0;
-    let sigma_sq = nf * (nf + 1.0) * (2.0 * nf + 1.0) / 24.0
-        - tie_correction_val / 48.0;
+    let sigma_sq = nf * (nf + 1.0) * (2.0 * nf + 1.0) / 24.0 - tie_correction_val / 48.0;
 
     if sigma_sq <= 0.0 {
         return None;
@@ -1479,10 +1467,7 @@ pub fn fisher_exact_test(a: u64, b: u64, c: u64, d: u64) -> Option<TestResult> {
         let b_i = row1 - a_i;
         let c_i = col1 - a_i;
         let d_i = row2 - c_i;
-        ln_factorial(row1)
-            + ln_factorial(row2)
-            + ln_factorial(col1)
-            + ln_factorial(col2)
+        ln_factorial(row1) + ln_factorial(row2) + ln_factorial(col1) + ln_factorial(col2)
             - ln_factorial(a_i)
             - ln_factorial(b_i)
             - ln_factorial(c_i)
@@ -1773,12 +1758,7 @@ pub fn adf_test(data: &[f64], model: AdfModel, max_lags: Option<usize>) -> Optio
 }
 
 /// Selects optimal lag for ADF by minimizing AIC.
-fn select_adf_lag(
-    data: &[f64],
-    dy: &[f64],
-    model: AdfModel,
-    p_max: usize,
-) -> usize {
+fn select_adf_lag(data: &[f64], dy: &[f64], model: AdfModel, p_max: usize) -> usize {
     let mut best_aic = f64::INFINITY;
     let mut best_p = 0;
 
@@ -2001,12 +1981,7 @@ fn adf_ols_core(
 }
 
 /// Runs ADF OLS and returns AIC + number of observations.
-fn adf_ols_aic(
-    data: &[f64],
-    dy: &[f64],
-    model: AdfModel,
-    p: usize,
-) -> Option<(f64, usize)> {
+fn adf_ols_aic(data: &[f64], dy: &[f64], model: AdfModel, p: usize) -> Option<(f64, usize)> {
     let (x_data, y_dep, m, ncols, gamma_col) = adf_build_matrix(data, dy, model, p)?;
     let (_t_stat, rss, k) = adf_ols_core(&x_data, &y_dep, m, ncols, gamma_col)?;
     let aic = 2.0 * k as f64 + m as f64 * (rss / m as f64).ln();
@@ -2014,12 +1989,7 @@ fn adf_ols_aic(
 }
 
 /// Runs the actual ADF OLS and returns the test result.
-fn adf_ols(
-    data: &[f64],
-    dy: &[f64],
-    model: AdfModel,
-    p: usize,
-) -> Option<AdfResult> {
+fn adf_ols(data: &[f64], dy: &[f64], model: AdfModel, p: usize) -> Option<AdfResult> {
     let (x_data, y_dep, m, ncols, gamma_col) = adf_build_matrix(data, dy, model, p)?;
     let (gamma_t, _rss, _k) = adf_ols_core(&x_data, &y_dep, m, ncols, gamma_col)?;
 
@@ -2156,7 +2126,7 @@ mod tests {
     fn paired_significant_difference() {
         // Differences have non-zero variance
         let before = [5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0];
-        let after  = [6.2, 7.1, 8.3, 9.0, 10.4, 11.1, 12.2, 13.3];
+        let after = [6.2, 7.1, 8.3, 9.0, 10.4, 11.1, 12.2, 13.3];
         let r = paired_t_test(&before, &after).expect("should compute");
         assert!(r.p_value < 0.001, "p = {}", r.p_value);
         assert!(r.statistic < 0.0); // after > before
@@ -2199,10 +2169,7 @@ mod tests {
         let r = one_way_anova(&[&g1, &g2]).expect("should compute");
         // SS_total = SS_between + SS_within
         let all_data: Vec<f64> = g1.iter().chain(g2.iter()).copied().collect();
-        let ss_total: f64 = all_data
-            .iter()
-            .map(|&x| (x - r.grand_mean).powi(2))
-            .sum();
+        let ss_total: f64 = all_data.iter().map(|&x| (x - r.grand_mean).powi(2)).sum();
         assert!(
             (ss_total - (r.ss_between + r.ss_within)).abs() < 1e-10,
             "SS decomposition: {ss_total} vs {} + {}",
@@ -2269,11 +2236,7 @@ mod tests {
 
     #[test]
     fn chi2_independence_3x3() {
-        let table = [
-            10.0, 20.0, 30.0,
-            40.0, 30.0, 20.0,
-            20.0, 25.0, 25.0,
-        ];
+        let table = [10.0, 20.0, 30.0, 40.0, 30.0, 20.0, 20.0, 25.0, 25.0];
         let r = chi_squared_independence(&table, 3, 3).expect("should compute");
         assert!((r.df - 4.0).abs() < 1e-10);
         assert!(r.p_value < 0.05);
@@ -2329,7 +2292,11 @@ mod tests {
         // Exponential-like data — not normal
         let data = [0.1, 0.2, 0.3, 0.5, 0.8, 1.3, 2.1, 3.4, 5.5, 8.9, 14.4, 23.3];
         let r = anderson_darling_test(&data).expect("should compute");
-        assert!(r.p_value < 0.05, "p = {} (should reject normality)", r.p_value);
+        assert!(
+            r.p_value < 0.05,
+            "p = {} (should reject normality)",
+            r.p_value
+        );
     }
 
     #[test]
@@ -2338,7 +2305,11 @@ mod tests {
         let mut data = vec![0.0, 0.1, 0.2, 0.3, 0.4, 0.5];
         data.extend_from_slice(&[9.5, 9.6, 9.7, 9.8, 9.9, 10.0]);
         let r = anderson_darling_test(&data).expect("should compute");
-        assert!(r.p_value < 0.01, "p = {} (bimodal should reject normality)", r.p_value);
+        assert!(
+            r.p_value < 0.01,
+            "p = {} (bimodal should reject normality)",
+            r.p_value
+        );
     }
 
     #[test]
@@ -2396,7 +2367,11 @@ mod tests {
         let mut data = vec![0.0, 0.1, 0.2, 0.3, 0.4, 0.5];
         data.extend_from_slice(&[9.5, 9.6, 9.7, 9.8, 9.9, 10.0]);
         let r = shapiro_wilk_test(&data).expect("should compute");
-        assert!(r.p_value < 0.01, "p = {} (bimodal should reject normality)", r.p_value);
+        assert!(
+            r.p_value < 0.01,
+            "p = {} (bimodal should reject normality)",
+            r.p_value
+        );
     }
 
     #[test]
@@ -2428,7 +2403,11 @@ mod tests {
         // Exponential-like data — not normal
         let data = [0.1, 0.2, 0.3, 0.5, 0.8, 1.3, 2.1, 3.4, 5.5, 8.9, 14.4, 23.3];
         let r = shapiro_wilk_test(&data).expect("should compute");
-        assert!(r.p_value < 0.05, "p = {} (skewed data should reject normality)", r.p_value);
+        assert!(
+            r.p_value < 0.05,
+            "p = {} (skewed data should reject normality)",
+            r.p_value
+        );
     }
 
     #[test]
@@ -2499,7 +2478,11 @@ mod tests {
         let a = [1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0];
         let b = [2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
         let r = mann_whitney_u_test(&a, &b).expect("should compute");
-        assert!(r.p_value > 0.3, "p = {} (interleaved, same dist)", r.p_value);
+        assert!(
+            r.p_value > 0.3,
+            "p = {} (interleaved, same dist)",
+            r.p_value
+        );
     }
 
     #[test]
@@ -2568,7 +2551,7 @@ mod tests {
     fn wilcoxon_edge_cases() {
         assert!(wilcoxon_signed_rank_test(&[1.0, 2.0], &[3.0]).is_none()); // mismatch
         assert!(wilcoxon_signed_rank_test(&[1.0], &[2.0]).is_none()); // n < 2
-        // All zero differences → fewer than 2 non-zero diffs
+                                                                      // All zero differences → fewer than 2 non-zero diffs
         assert!(wilcoxon_signed_rank_test(&[5.0, 5.0], &[5.0, 5.0]).is_none());
     }
 
@@ -2707,7 +2690,11 @@ mod tests {
         let g1 = [2.0, 3.0, 4.0, 5.0, 6.0];
         let g2 = [12.0, 13.0, 14.0, 15.0, 16.0];
         let r = bartlett_test(&[&g1, &g2]).expect("should compute");
-        assert!(r.p_value > 0.9, "equal variance → p high, got {}", r.p_value);
+        assert!(
+            r.p_value > 0.9,
+            "equal variance → p high, got {}",
+            r.p_value
+        );
     }
 
     #[test]
@@ -2715,7 +2702,11 @@ mod tests {
         let g1 = [2.0, 3.0, 4.0, 5.0, 6.0]; // var ≈ 2.5
         let g2 = [10.0, 20.0, 30.0, 40.0, 50.0]; // var ≈ 250
         let r = bartlett_test(&[&g1, &g2]).expect("should compute");
-        assert!(r.p_value < 0.01, "very different variances → p < 0.01, got {}", r.p_value);
+        assert!(
+            r.p_value < 0.01,
+            "very different variances → p < 0.01, got {}",
+            r.p_value
+        );
         assert!((r.df - 1.0).abs() < 1e-10); // k-1 = 1
     }
 
@@ -2750,7 +2741,11 @@ mod tests {
         // Classic Fisher tea-tasting: [[3,1],[1,3]]
         let r = fisher_exact_test(3, 1, 1, 3).expect("should compute");
         // Known two-tailed p ≈ 0.4857
-        assert!((r.p_value - 0.4857).abs() < 0.01, "p ≈ 0.4857, got {}", r.p_value);
+        assert!(
+            (r.p_value - 0.4857).abs() < 0.01,
+            "p ≈ 0.4857, got {}",
+            r.p_value
+        );
     }
 
     #[test]
@@ -2764,7 +2759,11 @@ mod tests {
     fn fisher_no_association() {
         // Proportional table: [[5, 5], [5, 5]]
         let r = fisher_exact_test(5, 5, 5, 5).expect("should compute");
-        assert!(r.p_value > 0.9, "no association → p ≈ 1.0, got {}", r.p_value);
+        assert!(
+            r.p_value > 0.9,
+            "no association → p ≈ 1.0, got {}",
+            r.p_value
+        );
     }
 
     #[test]
@@ -2793,7 +2792,11 @@ mod tests {
     fn fisher_odds_ratio() {
         let r = fisher_exact_test(3, 1, 1, 3).expect("should compute");
         // OR = (3*3)/(1*1) = 9
-        assert!((r.statistic - 9.0).abs() < 1e-10, "OR = 9, got {}", r.statistic);
+        assert!(
+            (r.statistic - 9.0).abs() < 1e-10,
+            "OR = 9, got {}",
+            r.statistic
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -2895,18 +2898,16 @@ mod tests {
         // Strongly mean-reverting AR(1) process: y_t = 0.3*y_{t-1} + noise
         // This is clearly stationary (|ρ| < 1)
         let data = [
-            0.5, 0.45, -0.2, 0.14, 0.54, -0.04, 0.39, -0.18, 0.35, 0.01, -0.3, 0.21, 0.47,
-            -0.06, 0.38, -0.25, 0.12, 0.44, -0.13, 0.36, -0.09, 0.27, 0.51, -0.15, 0.33,
-            -0.22, 0.18, 0.42, -0.08, 0.31, -0.19, 0.25, 0.48, -0.11, 0.37, -0.24, 0.15,
-            0.43, -0.07, 0.34,
+            0.5, 0.45, -0.2, 0.14, 0.54, -0.04, 0.39, -0.18, 0.35, 0.01, -0.3, 0.21, 0.47, -0.06,
+            0.38, -0.25, 0.12, 0.44, -0.13, 0.36, -0.09, 0.27, 0.51, -0.15, 0.33, -0.22, 0.18,
+            0.42, -0.08, 0.31, -0.19, 0.25, 0.48, -0.11, 0.37, -0.24, 0.15, 0.43, -0.07, 0.34,
         ];
         let r = adf_test(&data, AdfModel::Constant, None).expect("should compute");
         // Should reject H₀ (series is stationary)
         assert!(
             r.rejected[2],
             "should reject at 10%: stat={}, cv={}",
-            r.statistic,
-            r.critical_values[2]
+            r.statistic, r.critical_values[2]
         );
     }
 
@@ -2914,9 +2915,9 @@ mod tests {
     fn adf_nonstationary_random_walk() {
         // Cumulative sum simulates random walk (non-stationary)
         let increments = [
-            0.1, -0.2, 0.15, -0.05, 0.3, -0.1, 0.2, -0.15, 0.25, -0.08, 0.12, -0.18, 0.22,
-            -0.07, 0.16, -0.11, 0.19, -0.14, 0.21, -0.09, 0.13, -0.17, 0.24, -0.06, 0.18,
-            -0.12, 0.2, -0.13, 0.15, -0.1,
+            0.1, -0.2, 0.15, -0.05, 0.3, -0.1, 0.2, -0.15, 0.25, -0.08, 0.12, -0.18, 0.22, -0.07,
+            0.16, -0.11, 0.19, -0.14, 0.21, -0.09, 0.13, -0.17, 0.24, -0.06, 0.18, -0.12, 0.2,
+            -0.13, 0.15, -0.1,
         ];
         let mut walk = Vec::with_capacity(increments.len());
         let mut cum = 0.0;
@@ -2929,15 +2930,16 @@ mod tests {
         assert!(
             !r.rejected[0],
             "should NOT reject at 1%: stat={}, cv={}",
-            r.statistic,
-            r.critical_values[0]
+            r.statistic, r.critical_values[0]
         );
     }
 
     #[test]
     fn adf_with_fixed_lags() {
         // Use wider oscillation to avoid near-singular design matrix
-        let data: Vec<f64> = (0..50).map(|i| (i as f64 * 0.5).sin() + 0.02 * i as f64).collect();
+        let data: Vec<f64> = (0..50)
+            .map(|i| (i as f64 * 0.5).sin() + 0.02 * i as f64)
+            .collect();
         let r = adf_test(&data, AdfModel::Constant, Some(2)).expect("should compute");
         assert_eq!(r.n_lags, 2);
         assert!(r.statistic.is_finite());

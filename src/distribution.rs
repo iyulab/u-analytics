@@ -470,11 +470,7 @@ pub fn kde_bandwidth(data: &[f64], method: BandwidthMethod) -> Option<f64> {
             let q1 = stats::quantile(data, 0.25)?;
             let q3 = stats::quantile(data, 0.75)?;
             let iqr = q3 - q1;
-            let spread = if iqr > 1e-300 {
-                sd.min(iqr / 1.34)
-            } else {
-                sd
-            };
+            let spread = if iqr > 1e-300 { sd.min(iqr / 1.34) } else { sd };
             Some(0.9 * spread * (n as f64).powf(-0.2))
         }
         BandwidthMethod::Scott => {
@@ -563,10 +559,7 @@ pub fn fit_normal(data: &[f64]) -> Option<FitResult> {
 
     Some(FitResult {
         distribution: "Normal".to_string(),
-        parameters: vec![
-            ("mu".to_string(), mu),
-            ("sigma".to_string(), sigma),
-        ],
+        parameters: vec![("mu".to_string(), mu), ("sigma".to_string(), sigma)],
         log_likelihood: log_lik,
         aic,
         bic,
@@ -650,9 +643,9 @@ fn digamma(x: f64) -> f64 {
     // ψ(x) ≈ ln(x) - 1/(2x) - 1/(12x²) + 1/(120x⁴) - 1/(252x⁶) + ...
     let inv_x = 1.0 / x;
     let inv_x2 = inv_x * inv_x;
-    val += x.ln() - 0.5 * inv_x
-        - inv_x2
-            * (1.0 / 12.0 - inv_x2 * (1.0 / 120.0 - inv_x2 * (1.0 / 252.0)));
+    val += x.ln()
+        - 0.5 * inv_x
+        - inv_x2 * (1.0 / 12.0 - inv_x2 * (1.0 / 120.0 - inv_x2 * (1.0 / 252.0)));
 
     val
 }
@@ -679,9 +672,7 @@ fn trigamma(x: f64) -> f64 {
     let inv_x2 = inv_x * inv_x;
     val += inv_x
         + 0.5 * inv_x2
-        + inv_x2
-            * inv_x
-            * (1.0 / 6.0 - inv_x2 * (1.0 / 30.0 - inv_x2 * (1.0 / 42.0)));
+        + inv_x2 * inv_x * (1.0 / 6.0 - inv_x2 * (1.0 / 30.0 - inv_x2 * (1.0 / 42.0)));
 
     val
 }
@@ -775,8 +766,7 @@ pub fn fit_gamma(data: &[f64]) -> Option<FitResult> {
 
     // Log-likelihood: n·α·ln(β) - n·ln(Γ(α)) + (α-1)·Σln(xᵢ) - β·Σxᵢ
     let sum_x: f64 = data.iter().sum();
-    let log_lik = nf * alpha * beta.ln() - nf * special::ln_gamma(alpha)
-        + (alpha - 1.0) * sum_log
+    let log_lik = nf * alpha * beta.ln() - nf * special::ln_gamma(alpha) + (alpha - 1.0) * sum_log
         - beta * sum_x;
 
     let k = 2;
@@ -785,10 +775,7 @@ pub fn fit_gamma(data: &[f64]) -> Option<FitResult> {
 
     Some(FitResult {
         distribution: "Gamma".to_string(),
-        parameters: vec![
-            ("alpha".to_string(), alpha),
-            ("beta".to_string(), beta),
-        ],
+        parameters: vec![("alpha".to_string(), alpha), ("beta".to_string(), beta)],
         log_likelihood: log_lik,
         aic,
         bic,
@@ -895,10 +882,7 @@ pub fn fit_poisson(data: &[f64]) -> Option<FitResult> {
 
     // Log-likelihood: Σ(xᵢ·ln(λ) - λ - ln(xᵢ!))
     // = n·x̄·ln(λ) - n·λ - Σln(xᵢ!)
-    let sum_log_fact: f64 = data
-        .iter()
-        .map(|&x| special::ln_gamma(x + 1.0))
-        .sum();
+    let sum_log_fact: f64 = data.iter().map(|&x| special::ln_gamma(x + 1.0)).sum();
     let log_lik = nf * lambda * lambda.ln() - nf * lambda - sum_log_fact;
 
     let k = 1;
@@ -1034,10 +1018,7 @@ pub fn fit_beta(data: &[f64]) -> Option<FitResult> {
 
     Some(FitResult {
         distribution: "Beta".to_string(),
-        parameters: vec![
-            ("alpha".to_string(), alpha),
-            ("beta".to_string(), beta),
-        ],
+        parameters: vec![("alpha".to_string(), alpha), ("beta".to_string(), beta)],
         log_likelihood: log_lik,
         aic,
         bic,
@@ -1170,7 +1151,8 @@ mod tests {
     #[test]
     fn hist_edge_cases() {
         assert!(histogram_bins(&[1.0], BinMethod::Sturges).is_none()); // < 2
-        assert!(histogram_bins(&[5.0, 5.0, 5.0], BinMethod::Sturges).is_none()); // zero range
+        assert!(histogram_bins(&[5.0, 5.0, 5.0], BinMethod::Sturges).is_none());
+        // zero range
     }
 
     // -----------------------------------------------------------------------
@@ -1420,8 +1402,8 @@ mod tests {
     fn fit_gamma_basic() {
         // Generate Gamma-like data (known α ≈ 4, β ≈ 2, mean = α/β = 2)
         let data = [
-            1.5, 2.1, 1.8, 2.5, 1.9, 2.3, 2.0, 1.7, 2.4, 2.2, 1.6, 2.6,
-            1.4, 2.8, 2.1, 1.9, 2.3, 2.0, 1.8, 2.5,
+            1.5, 2.1, 1.8, 2.5, 1.9, 2.3, 2.0, 1.7, 2.4, 2.2, 1.6, 2.6, 1.4, 2.8, 2.1, 1.9, 2.3,
+            2.0, 1.8, 2.5,
         ];
         let r = fit_gamma(&data).expect("should compute");
         assert_eq!(r.distribution, "Gamma");
@@ -1496,13 +1478,9 @@ mod tests {
     #[test]
     fn trigamma_known_values() {
         // ψ'(1) = π²/6 ≈ 1.6449340668
-        assert!(
-            (trigamma(1.0) - std::f64::consts::PI.powi(2) / 6.0).abs() < 1e-7
-        );
+        assert!((trigamma(1.0) - std::f64::consts::PI.powi(2) / 6.0).abs() < 1e-7);
         // ψ'(2) = π²/6 - 1 ≈ 0.6449340668
-        assert!(
-            (trigamma(2.0) - (std::f64::consts::PI.powi(2) / 6.0 - 1.0)).abs() < 1e-7
-        );
+        assert!((trigamma(2.0) - (std::f64::consts::PI.powi(2) / 6.0 - 1.0)).abs() < 1e-7);
     }
 
     // -----------------------------------------------------------------------

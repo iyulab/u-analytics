@@ -268,11 +268,7 @@ pub fn kendall_tau_b(x: &[f64], y: &[f64]) -> Option<CorrelationResult> {
         1.0
     };
 
-    Some(CorrelationResult {
-        r: tau,
-        p_value,
-        n,
-    })
+    Some(CorrelationResult { r: tau, p_value, n })
 }
 
 // ---------------------------------------------------------------------------
@@ -1040,7 +1036,9 @@ mod tests {
     #[test]
     fn acf_alternating() {
         // Alternating series → negative lag-1 autocorrelation
-        let data: Vec<f64> = (0..30).map(|i| if i % 2 == 0 { 1.0 } else { -1.0 }).collect();
+        let data: Vec<f64> = (0..30)
+            .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
         let r = acf(&data, 5).expect("should compute");
         assert!(r.acf[1] < -0.8, "alternating → negative lag-1 ACF");
         assert!(r.acf[2] > 0.8, "alternating → positive lag-2 ACF");

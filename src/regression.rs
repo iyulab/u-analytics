@@ -145,7 +145,11 @@ pub fn simple_linear_regression(x: &[f64], y: &[f64]) -> Option<SimpleRegression
 
     // Fitted values and residuals
     let fitted: Vec<f64> = x.iter().map(|&xi| intercept + slope * xi).collect();
-    let residuals: Vec<f64> = y.iter().zip(fitted.iter()).map(|(&yi, &fi)| yi - fi).collect();
+    let residuals: Vec<f64> = y
+        .iter()
+        .zip(fitted.iter())
+        .map(|(&yi, &fi)| yi - fi)
+        .collect();
 
     // Sum of squares
     let ss_res: f64 = residuals.iter().map(|r| r * r).sum();
@@ -154,7 +158,11 @@ pub fn simple_linear_regression(x: &[f64], y: &[f64]) -> Option<SimpleRegression
     let nf = n as f64;
     let df_res = nf - 2.0;
 
-    let r_squared = if ss_tot > 1e-300 { 1.0 - ss_res / ss_tot } else { 1.0 };
+    let r_squared = if ss_tot > 1e-300 {
+        1.0 - ss_res / ss_tot
+    } else {
+        1.0
+    };
     let adjusted_r_squared = 1.0 - (1.0 - r_squared) * (nf - 1.0) / df_res;
 
     // Residual standard error
@@ -167,7 +175,11 @@ pub fn simple_linear_regression(x: &[f64], y: &[f64]) -> Option<SimpleRegression
     let intercept_se = (mse * (1.0 / nf + x_mean * x_mean / ss_x)).sqrt();
 
     // t-statistics
-    let slope_t = if slope_se > 1e-300 { slope / slope_se } else { f64::INFINITY };
+    let slope_t = if slope_se > 1e-300 {
+        slope / slope_se
+    } else {
+        f64::INFINITY
+    };
     let intercept_t = if intercept_se > 1e-300 {
         intercept / intercept_se
     } else {
@@ -293,7 +305,11 @@ pub fn multiple_linear_regression(
 
     // Fitted values and residuals
     let fitted = x_mat.mul_vec(&coefficients).ok()?;
-    let residuals: Vec<f64> = y.iter().zip(fitted.iter()).map(|(&yi, &fi)| yi - fi).collect();
+    let residuals: Vec<f64> = y
+        .iter()
+        .zip(fitted.iter())
+        .map(|(&yi, &fi)| yi - fi)
+        .collect();
 
     // R² and adjusted R²
     let y_mean = stats::mean(y)?;
@@ -304,7 +320,11 @@ pub fn multiple_linear_regression(
     let pf = p as f64;
     let df_res = nf - pf - 1.0;
 
-    let r_squared = if ss_tot > 1e-300 { 1.0 - ss_res / ss_tot } else { 1.0 };
+    let r_squared = if ss_tot > 1e-300 {
+        1.0 - ss_res / ss_tot
+    } else {
+        1.0
+    };
     let adjusted_r_squared = 1.0 - (1.0 - r_squared) * (nf - 1.0) / df_res;
 
     // Residual standard error
@@ -525,9 +545,7 @@ mod tests {
         assert!(simple_linear_regression(&[1.0, 2.0], &[3.0, 4.0]).is_none()); // n < 3
         assert!(simple_linear_regression(&[1.0, 2.0, 3.0], &[4.0, 5.0]).is_none()); // mismatch
         assert!(simple_linear_regression(&[5.0, 5.0, 5.0], &[1.0, 2.0, 3.0]).is_none()); // zero var
-        assert!(
-            simple_linear_regression(&[1.0, f64::NAN, 3.0], &[4.0, 5.0, 6.0]).is_none()
-        );
+        assert!(simple_linear_regression(&[1.0, f64::NAN, 3.0], &[4.0, 5.0, 6.0]).is_none());
     }
 
     #[test]
@@ -556,9 +574,21 @@ mod tests {
             .collect();
         let r = multiple_linear_regression(&[&x1, &x2], &y).expect("should compute");
 
-        assert!((r.coefficients[0] - 1.0).abs() < 1e-8, "β₀ = {}", r.coefficients[0]);
-        assert!((r.coefficients[1] - 2.0).abs() < 1e-8, "β₁ = {}", r.coefficients[1]);
-        assert!((r.coefficients[2] - 3.0).abs() < 1e-8, "β₂ = {}", r.coefficients[2]);
+        assert!(
+            (r.coefficients[0] - 1.0).abs() < 1e-8,
+            "β₀ = {}",
+            r.coefficients[0]
+        );
+        assert!(
+            (r.coefficients[1] - 2.0).abs() < 1e-8,
+            "β₁ = {}",
+            r.coefficients[1]
+        );
+        assert!(
+            (r.coefficients[2] - 3.0).abs() < 1e-8,
+            "β₂ = {}",
+            r.coefficients[2]
+        );
         assert!((r.r_squared - 1.0).abs() < 1e-8);
     }
 
@@ -588,7 +618,10 @@ mod tests {
     #[test]
     fn multiple_single_predictor_matches_simple() {
         let x = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
-        let y: Vec<f64> = x.iter().map(|&xi| 3.0 + 2.5 * xi + 0.1 * (xi - 5.0)).collect();
+        let y: Vec<f64> = x
+            .iter()
+            .map(|&xi| 3.0 + 2.5 * xi + 0.1 * (xi - 5.0))
+            .collect();
 
         let simple = simple_linear_regression(&x, &y).expect("simple");
         let multi = multiple_linear_regression(&[&x], &y).expect("multiple");
@@ -643,9 +676,15 @@ mod tests {
         // Highly but not perfectly correlated predictors → higher VIF
         let x1: Vec<f64> = (0..20).map(|i| i as f64).collect();
         // Add small perturbation to break perfect collinearity
-        let noise = [0.1, -0.2, 0.3, -0.1, 0.2, -0.3, 0.1, -0.1, 0.2, -0.2,
-                     0.3, -0.1, 0.1, -0.2, 0.3, -0.3, 0.1, -0.1, 0.2, -0.2];
-        let x2: Vec<f64> = x1.iter().zip(noise.iter()).map(|(&v, &n)| v * 0.9 + 1.0 + n).collect();
+        let noise = [
+            0.1, -0.2, 0.3, -0.1, 0.2, -0.3, 0.1, -0.1, 0.2, -0.2, 0.3, -0.1, 0.1, -0.2, 0.3, -0.3,
+            0.1, -0.1, 0.2, -0.2,
+        ];
+        let x2: Vec<f64> = x1
+            .iter()
+            .zip(noise.iter())
+            .map(|(&v, &n)| v * 0.9 + 1.0 + n)
+            .collect();
         let y: Vec<f64> = x1
             .iter()
             .zip(x2.iter())
@@ -689,7 +728,12 @@ mod tests {
         let new_x2 = [6.0];
         let pred = predict_multiple(&model, &[&new_x1, &new_x2]).expect("should predict");
         let expected = 1.0 + 2.0 * 11.0 + 3.0 * 6.0;
-        assert!((pred[0] - expected).abs() < 1e-6, "pred = {}, expected = {}", pred[0], expected);
+        assert!(
+            (pred[0] - expected).abs() < 1e-6,
+            "pred = {}, expected = {}",
+            pred[0],
+            expected
+        );
     }
 
     #[test]
