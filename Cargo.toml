@@ -11,7 +11,7 @@ categories = ["science", "mathematics"]
 readme = "README.md"
 
 [dependencies]
-u-numflow = { version = "0.1", path = "../../foundation/u-numflow" }
+u-numflow = { version = "0.2", path = "../../foundation/u-numflow" }
 
 [dev-dependencies]
 proptest = "1.4"
