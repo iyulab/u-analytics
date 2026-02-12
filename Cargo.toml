@@ -1,10 +1,10 @@
 [package]
 name = "u-analytics"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["iyulab"]
 license = "MIT"
-description = "Statistical process control, process capability analysis, Weibull reliability, and change-point detection."
+description = "Statistical process control, process capability, Weibull reliability, change-point detection, correlation, regression, distribution analysis, and hypothesis testing."
 repository = "https://github.com/iyulab/u-analytics"
 keywords = ["spc", "statistics", "quality", "weibull", "reliability"]
 categories = ["science", "mathematics"]

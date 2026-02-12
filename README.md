@@ -6,7 +6,22 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Statistical process control, process capability analysis, Weibull reliability,
-and change-point detection for industrial quality engineering.
+change-point detection, correlation, regression, distribution analysis, and
+hypothesis testing for industrial quality engineering.
+
+## Modules
+
+| Module | Description |
+|--------|-------------|
+| `spc` | Control charts (X̄-R, X̄-S, I-MR, P, NP, C, U) with Nelson/WE run rules |
+| `capability` | Process capability indices (Cp, Cpk, Pp, Ppk, Cpm) and sigma level |
+| `weibull` | Weibull parameter estimation (MLE, MRR) and reliability analysis (R(t), MTBF, B-life) |
+| `detection` | Change-point detection (CUSUM, EWMA) |
+| `smoothing` | Time series smoothing (SES, Holt linear trend, Holt-Winters seasonal) |
+| `correlation` | Correlation analysis (Pearson, Spearman, Kendall, partial, correlation matrices) |
+| `regression` | Regression analysis (simple OLS, multiple OLS, VIF multicollinearity) |
+| `distribution` | Distribution analysis (ECDF, histogram bins — Sturges/Scott/FD, QQ-plot, KS test) |
+| `testing` | Hypothesis testing (t-tests, ANOVA, chi-squared, normality — SW/AD/JB) |
 
 ## Features
 
@@ -86,6 +101,13 @@ let data = [10.1, 9.9, 10.0, 10.2, 12.0, 12.1, 11.9, 12.3];
 let signals = cusum.signal_points(&data);
 ```
 
+## Test Status
+
+```
+417 lib tests + 66 doc-tests = 483 total
+0 clippy warnings
+```
+
 ## Dependencies
 
 - [`u-numflow`](https://crates.io/crates/u-numflow) -- statistics, special functions, probability distributions
@@ -100,7 +122,8 @@ let signals = cusum.signal_points(&data);
 
 ## Related
 
-- [u-numflow](https://crates.io/crates/u-numflow) -- Mathematical optimization primitives
+- [u-numflow](https://crates.io/crates/u-numflow) -- Mathematical primitives
+- [u-insight](https://github.com/iyulab/u-insight) -- Statistical analysis engine with C FFI
 - [u-metaheur](https://crates.io/crates/u-metaheur) -- Metaheuristic algorithms
 - [u-geometry](https://crates.io/crates/u-geometry) -- Computational geometry
 - [u-schedule](https://crates.io/crates/u-schedule) -- Scheduling framework
