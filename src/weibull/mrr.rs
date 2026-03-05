@@ -88,7 +88,7 @@ pub fn weibull_mrr(failure_times: &[f64]) -> Option<WeibullMrrResult> {
 
     for (i, &t) in sorted.iter().enumerate() {
         let rank = (i + 1) as f64;
-        // Bernard's approximation for median ranks
+        // Benard's approximation for median ranks
         let f_i = (rank - 0.3) / (n_f + 0.4);
 
         let x = t.ln();
