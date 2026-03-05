@@ -23,34 +23,53 @@ const MAX_ITER: usize = 100;
 /// Convergence tolerance for Newton-Raphson.
 const TOL: f64 = 1e-10;
 
-/// Fit a Weibull distribution to failure time data using MLE.
+/// Fits Weibull distribution parameters (shape β, scale η) via Maximum Likelihood Estimation.
 ///
-/// Given failure times t_1, ..., t_n (all positive), this function finds
-/// the shape (beta) and scale (eta) parameters that maximize the Weibull
-/// log-likelihood:
-///
-/// ```text
-/// L(beta, eta) = n*ln(beta) - n*beta*ln(eta)
-///              + (beta-1)*sum(ln(t_i)) - sum((t_i/eta)^beta)
-/// ```
-///
-/// The MLE for eta given beta is: `eta_hat = (sum(t_i^beta) / n)^(1/beta)`
-///
-/// Substituting into the profile log-likelihood, the equation for beta is:
+/// Given failure times t₁, …, tₙ (all positive), finds the shape (β) and scale (η)
+/// parameters that maximise the Weibull log-likelihood:
 ///
 /// ```text
-/// f(beta) = n/beta + sum(ln(t_i))
-///         - n * sum(t_i^beta * ln(t_i)) / sum(t_i^beta) = 0
+/// L(β, η) = n·ln(β) - n·β·ln(η) + (β-1)·Σln(tᵢ) - Σ(tᵢ/η)^β
 /// ```
 ///
-/// Newton-Raphson is used to solve f(beta) = 0 starting from beta_0 = 1.2.
+/// The MLE for η given β is derived analytically:
+///
+/// ```text
+/// η_hat = (Σ tᵢ^β / n)^(1/β)
+/// ```
+///
+/// Substituting into the profile log-likelihood yields the score equation for β:
+///
+/// ```text
+/// f(β) = n/β + Σln(tᵢ) - n · Σ(tᵢ^β · ln(tᵢ)) / Σtᵢ^β = 0
+/// ```
+///
+/// Newton-Raphson solves f(β) = 0. The derivative is:
+///
+/// ```text
+/// f′(β) = -n/β² - n · [S₂·S₀ - S₁²] / S₀²
+/// ```
+///
+/// where S₀ = Σtᵢ^β, S₁ = Σtᵢ^β·ln(tᵢ), S₂ = Σtᵢ^β·(ln(tᵢ))².
+///
+/// Iteration starts from β₀ = 1.2 (slightly above the exponential case β = 1).
+///
+/// # Reference
+/// Lawless, J.F. (2003). *Statistical Models and Methods for Lifetime Data*, 2nd ed., §4.2.
+/// Wiley-Interscience. ISBN 0-471-37215-3.
+///
+/// # Complexity
+/// O(n·k) where n = sample size, k = Newton-Raphson iterations (typically < 20)
 ///
 /// # Arguments
 /// * `failure_times` - Positive failure times (must have at least 2 values)
 ///
 /// # Returns
 /// `None` if data is insufficient (< 2 values), any value is non-positive,
-/// or the algorithm does not converge.
+/// or the algorithm does not converge within [`MAX_ITER`] iterations.
+///
+/// # Panics
+/// Does not panic. All error conditions return `None`.
 ///
 /// # Examples
 ///
@@ -62,9 +81,6 @@ const TOL: f64 = 1e-10;
 /// assert!(result.scale > 0.0);
 /// assert!(result.log_likelihood.is_finite());
 /// ```
-///
-/// # Reference
-/// Lawless (2003), *Statistical Models and Methods for Lifetime Data*, 2nd ed.
 pub fn weibull_mle(failure_times: &[f64]) -> Option<WeibullMleResult> {
     let n = failure_times.len();
     if n < 2 {
@@ -267,5 +283,34 @@ mod tests {
             assert!(result.shape.is_finite() && result.shape > 0.0);
             assert!(result.scale.is_finite() && result.scale > 0.0);
         }
+    }
+
+    #[test]
+    fn test_mle_lawless_ball_bearing() {
+        // Lawless (2003), §4.2 — ball bearing failure times (million revolutions).
+        // Reference MLE estimates: shape β ≈ 2.102, scale η ≈ 81.88.
+        // Cross-checked with R: library(MASS); fitdistr(data, "weibull")
+        let data = vec![
+            17.88, 28.92, 33.0, 41.52, 42.12, 45.6, 48.48, 51.84, 51.96, 54.12,
+            55.56, 67.8, 68.64, 68.64, 68.88, 84.12, 93.12, 98.64, 105.12, 105.84,
+            127.92, 128.04, 173.4_f64,
+        ];
+        let result = weibull_mle(&data).expect("MLE should converge on Lawless §4.2 data");
+        assert!(
+            (result.shape - 2.102).abs() < 0.01,
+            "shape β = {:.6}, expected 2.102 ± 0.01",
+            result.shape
+        );
+        assert!(
+            (result.scale - 81.88).abs() < 0.5,
+            "scale η = {:.6}, expected 81.88 ± 0.5",
+            result.scale
+        );
+        assert!(result.log_likelihood.is_finite());
+        assert!(
+            result.iterations <= 20,
+            "expected convergence in ≤ 20 iterations, got {}",
+            result.iterations
+        );
     }
 }
