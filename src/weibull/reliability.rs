@@ -29,8 +29,10 @@ use u_numflow::special::gamma;
 /// assert!(b10 > 0.0 && b10 < 100.0);
 /// ```
 ///
-/// # Reference
-/// Meeker & Escobar (1998), *Statistical Methods for Reliability Data*, Wiley.
+/// # References
+/// - Meeker & Escobar (1998), *Statistical Methods for Reliability Data*, Wiley.
+/// - Nelson, W. (1982). *Applied Life Data Analysis*, Wiley. §2.
+/// - Lawless, J.F. (2003). *Statistical Models and Methods for Lifetime Data*, 2nd ed.
 #[derive(Debug, Clone)]
 pub struct ReliabilityAnalysis {
     /// Shape parameter (beta).
@@ -503,5 +505,107 @@ mod tests {
         let ra = ReliabilityAnalysis::new(2.5, 100.0).expect("valid parameters");
         assert!((ra.shape() - 2.5).abs() < 1e-15);
         assert!((ra.scale() - 100.0).abs() < 1e-15);
+    }
+
+    /// Reference value tests: beta=2, eta=100.
+    ///
+    /// Expected values derived analytically:
+    /// - Nelson (1982) §2; Lawless (2003) Ch. 2.
+    #[test]
+    fn test_reference_reliability_beta2_eta100() {
+        let ra = ReliabilityAnalysis::new(2.0, 100.0).expect("valid parameters");
+
+        // R(0) = 1.0 exactly
+        assert!(
+            (ra.reliability(0.0) - 1.0).abs() < 1e-15,
+            "R(0) = {}, expected 1.0",
+            ra.reliability(0.0)
+        );
+
+        // R(100) = exp(-1) ≈ 0.367879
+        let r100 = ra.reliability(100.0);
+        let expected_r100 = (-1.0_f64).exp(); // 0.36787944117144233
+        assert!(
+            (r100 - expected_r100).abs() < 1e-5,
+            "R(100) = {:.6}, expected {:.6}",
+            r100,
+            expected_r100
+        );
+
+        // R(50) = exp(-0.25) ≈ 0.778801
+        let r50 = ra.reliability(50.0);
+        let expected_r50 = (-0.25_f64).exp(); // 0.7788007830714049
+        assert!(
+            (r50 - expected_r50).abs() < 1e-5,
+            "R(50) = {:.6}, expected {:.6}",
+            r50,
+            expected_r50
+        );
+    }
+
+    #[test]
+    fn test_reference_cdf_beta2_eta100() {
+        let ra = ReliabilityAnalysis::new(2.0, 100.0).expect("valid parameters");
+
+        // F(100) = 1 - R(100) = 1 - exp(-1) ≈ 0.632121
+        let f100 = 1.0 - ra.reliability(100.0);
+        let expected_f100 = 1.0 - (-1.0_f64).exp(); // 0.6321205588285578
+        assert!(
+            (f100 - expected_f100).abs() < 1e-5,
+            "F(100) = {:.6}, expected {:.6}",
+            f100,
+            expected_f100
+        );
+    }
+
+    #[test]
+    fn test_reference_hazard_rate_beta2_eta100() {
+        let ra = ReliabilityAnalysis::new(2.0, 100.0).expect("valid parameters");
+
+        // h(100) = (2/100)*(100/100)^1 = 0.02
+        let h100 = ra.hazard_rate(100.0);
+        assert!(
+            (h100 - 0.02).abs() < 1e-6,
+            "h(100) = {:.8}, expected 0.02",
+            h100
+        );
+
+        // h(50) = (2/100)*(50/100)^1 = 0.01
+        let h50 = ra.hazard_rate(50.0);
+        assert!(
+            (h50 - 0.01).abs() < 1e-6,
+            "h(50) = {:.8}, expected 0.01",
+            h50
+        );
+    }
+
+    #[test]
+    fn test_reference_mttf_beta2_eta100() {
+        let ra = ReliabilityAnalysis::new(2.0, 100.0).expect("valid parameters");
+
+        // MTTF = 100 * Gamma(1.5) = 100 * sqrt(pi)/2 ≈ 88.6227
+        let mttf = ra.mtbf();
+        let expected_mttf = 100.0 * std::f64::consts::PI.sqrt() / 2.0; // 88.62269254527580...
+        assert!(
+            (mttf - expected_mttf).abs() < 0.001,
+            "MTTF = {:.6}, expected {:.6}",
+            mttf,
+            expected_mttf
+        );
+    }
+
+    #[test]
+    fn test_reference_b10_beta2_eta100() {
+        let ra = ReliabilityAnalysis::new(2.0, 100.0).expect("valid parameters");
+
+        // B10: F(t)=0.10 => t = 100*(-ln(0.9))^0.5 ≈ 32.458
+        let b10 = ra.b_life(0.10).expect("valid fraction");
+        let expected_b10 = 100.0 * (-0.9_f64.ln()).powf(0.5); // 100 * sqrt(0.10536) ≈ 32.4576
+        assert!(
+            (b10 - expected_b10).abs() < 0.01,
+            "B10 = {:.5}, expected {:.5}",
+            b10,
+            expected_b10
+        );
     }
 }
