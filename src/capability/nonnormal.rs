@@ -47,7 +47,10 @@ impl fmt::Display for NonNormalCapabilityError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             NonNormalCapabilityError::NonPositiveData => {
-                write!(f, "Box-Cox requires all data values to be strictly positive")
+                write!(
+                    f,
+                    "Box-Cox requires all data values to be strictly positive"
+                )
             }
             NonNormalCapabilityError::InsufficientData => {
                 write!(
@@ -193,12 +196,8 @@ pub fn boxcox_capability(
     // Compute overall std of transformed data (for Pp/Ppk)
     let n = y_t.len();
     let mean_t = y_t.iter().sum::<f64>() / n as f64;
-    let overall_std_t = (y_t
-        .iter()
-        .map(|&v| (v - mean_t).powi(2))
-        .sum::<f64>()
-        / (n - 1) as f64)
-        .sqrt();
+    let overall_std_t =
+        (y_t.iter().map(|&v| (v - mean_t).powi(2)).sum::<f64>() / (n - 1) as f64).sqrt();
 
     // Build ProcessCapability on transformed scale
     // ProcessCapability::new validates usl > lsl when both present
@@ -290,9 +289,7 @@ mod tests {
 
     #[test]
     fn boxcox_capability_result_has_valid_lambda() {
-        let data: Vec<f64> = (1..=15)
-            .map(|i| (i as f64).powi(2))
-            .collect();
+        let data: Vec<f64> = (1..=15).map(|i| (i as f64).powi(2)).collect();
         let result = boxcox_capability(&data, Some(250.0), Some(0.5)).unwrap();
         assert!(result.lambda.is_finite());
         assert!(result.lambda >= -2.0 && result.lambda <= 2.0);

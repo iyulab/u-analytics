@@ -194,7 +194,11 @@ pub fn xbar_r_chart(data_json: JsValue) -> Result<JsValue, JsValue> {
         .map(|p| ChartPointDto {
             index: p.index,
             value: p.value,
-            violations: p.violations.iter().map(|&v| violation_name(v).to_owned()).collect(),
+            violations: p
+                .violations
+                .iter()
+                .map(|&v| violation_name(v).to_owned())
+                .collect(),
         })
         .collect();
     let r_points = chart
@@ -203,7 +207,11 @@ pub fn xbar_r_chart(data_json: JsValue) -> Result<JsValue, JsValue> {
         .map(|p| ChartPointDto {
             index: p.index,
             value: p.value,
-            violations: p.violations.iter().map(|&v| violation_name(v).to_owned()).collect(),
+            violations: p
+                .violations
+                .iter()
+                .map(|&v| violation_name(v).to_owned())
+                .collect(),
         })
         .collect();
 
@@ -235,8 +243,11 @@ pub fn xbar_r_chart(data_json: JsValue) -> Result<JsValue, JsValue> {
 pub fn p_chart(samples_json: JsValue) -> Result<JsValue, JsValue> {
     use crate::spc::PChart;
 
-    let raw: Vec<[u64; 2]> = serde_wasm_bindgen::from_value(samples_json)
-        .map_err(|e| js_err(format!("invalid input — expected [[defectives, size], ...]: {e}")))?;
+    let raw: Vec<[u64; 2]> = serde_wasm_bindgen::from_value(samples_json).map_err(|e| {
+        js_err(format!(
+            "invalid input — expected [[defectives, size], ...]: {e}"
+        ))
+    })?;
 
     let mut chart = PChart::new();
     for pair in &raw {
@@ -325,8 +336,9 @@ pub fn process_capability(data: &[f64], usl: f64, lsl: f64) -> Result<JsValue, J
 /// Object with fields: `statistic` (A²), `statistic_modified` (A²*), `p_value`.
 #[wasm_bindgen]
 pub fn anderson_darling_normality(data: &[f64]) -> Result<JsValue, JsValue> {
-    let result = crate::testing::anderson_darling_normality(data)
-        .ok_or_else(|| js_err("insufficient or invalid data (need >= 3 finite non-constant values)"))?;
+    let result = crate::testing::anderson_darling_normality(data).ok_or_else(|| {
+        js_err("insufficient or invalid data (need >= 3 finite non-constant values)")
+    })?;
 
     let dto = AdNormalityDto {
         statistic: result.statistic,
@@ -350,8 +362,11 @@ pub fn anderson_darling_normality(data: &[f64]) -> Result<JsValue, JsValue> {
 /// Object with fields: `p_bar`, `phi`, `points` (array).
 #[wasm_bindgen]
 pub fn laney_p_chart(samples_json: JsValue) -> Result<JsValue, JsValue> {
-    let raw: Vec<[u64; 2]> = serde_wasm_bindgen::from_value(samples_json)
-        .map_err(|e| js_err(format!("invalid input — expected [[defectives, size], ...]: {e}")))?;
+    let raw: Vec<[u64; 2]> = serde_wasm_bindgen::from_value(samples_json).map_err(|e| {
+        js_err(format!(
+            "invalid input — expected [[defectives, size], ...]: {e}"
+        ))
+    })?;
 
     let samples: Vec<(u64, u64)> = raw.into_iter().map(|p| (p[0], p[1])).collect();
 

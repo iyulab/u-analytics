@@ -595,7 +595,11 @@ pub fn laney_p_chart(samples: &[(u64, u64)]) -> Option<LaneyPChart> {
                 }
             })
             .collect();
-        return Some(LaneyPChart { p_bar, phi: 0.0, points });
+        return Some(LaneyPChart {
+            p_bar,
+            phi: 0.0,
+            points,
+        });
     }
 
     // Step 2: standardized proportions.
@@ -610,10 +614,7 @@ pub fn laney_p_chart(samples: &[(u64, u64)]) -> Option<LaneyPChart> {
 
     // Step 3: moving ranges of z-scores.
     let mr_bar = {
-        let mrs: Vec<f64> = z_scores
-            .windows(2)
-            .map(|w| (w[1] - w[0]).abs())
-            .collect();
+        let mrs: Vec<f64> = z_scores.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
         mrs.iter().sum::<f64>() / mrs.len() as f64
     };
 
@@ -703,7 +704,11 @@ pub fn laney_u_chart(samples: &[(u64, f64)]) -> Option<LaneyUChart> {
                 }
             })
             .collect();
-        return Some(LaneyUChart { u_bar: 0.0, phi: 0.0, points });
+        return Some(LaneyUChart {
+            u_bar: 0.0,
+            phi: 0.0,
+            points,
+        });
     }
 
     // Step 2: standardized defect rates.
@@ -718,10 +723,7 @@ pub fn laney_u_chart(samples: &[(u64, f64)]) -> Option<LaneyUChart> {
 
     // Step 3: moving ranges.
     let mr_bar = {
-        let mrs: Vec<f64> = z_scores
-            .windows(2)
-            .map(|w| (w[1] - w[0]).abs())
-            .collect();
+        let mrs: Vec<f64> = z_scores.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
         mrs.iter().sum::<f64>() / mrs.len() as f64
     };
 
@@ -847,7 +849,10 @@ pub fn g_chart(inter_event_counts: &[f64]) -> Option<GChart> {
     if inter_event_counts.len() < 3 {
         return None;
     }
-    if inter_event_counts.iter().any(|&v| !v.is_finite() || v < 0.0) {
+    if inter_event_counts
+        .iter()
+        .any(|&v| !v.is_finite() || v < 0.0)
+    {
         return None;
     }
 
@@ -897,7 +902,10 @@ pub fn t_chart(inter_event_times: &[f64]) -> Option<TChart> {
     if inter_event_times.len() < 3 {
         return None;
     }
-    if inter_event_times.iter().any(|&v| !v.is_finite() || v <= 0.0) {
+    if inter_event_times
+        .iter()
+        .any(|&v| !v.is_finite() || v <= 0.0)
+    {
         return None;
     }
 
