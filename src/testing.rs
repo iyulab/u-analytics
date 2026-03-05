@@ -607,6 +607,108 @@ pub fn anderson_darling_test(data: &[f64]) -> Option<AndersonDarlingResult> {
     })
 }
 
+/// Result of the Anderson-Darling normality test (Stephens 1974 variant).
+///
+/// This variant uses the `statistic_modified` field name and accepts n ≥ 3,
+/// making it suitable for small-sample normality checking before control
+/// charts and Box-Cox capability analysis.
+#[derive(Debug, Clone, Copy)]
+pub struct AdNormalityResult {
+    /// The A² test statistic (raw).
+    pub statistic: f64,
+    /// The modified statistic A²* = A² · (1 + 0.75/n + 2.25/n²).
+    pub statistic_modified: f64,
+    /// Approximate p-value from Stephens (1974) piecewise approximation.
+    pub p_value: f64,
+}
+
+/// Anderson-Darling normality test (Stephens 1974): H₀: data is normally distributed.
+///
+/// Suitable for small samples (n ≥ 3). Provides the A²* modified statistic and
+/// approximate p-values using Stephens (1974) piecewise exponential formulae.
+/// Prefer this function when you need a lightweight normality pre-check before
+/// applying control charts or Box-Cox capability analysis.
+///
+/// # Algorithm
+///
+/// 1. Sort ascending, compute mean and std_dev.
+/// 2. Standardize: zᵢ = (x_(i) − mean) / std.
+/// 3. A² = −n − (1/n) · Σᵢ₌₀ⁿ⁻¹ (2i+1) · [ln Φ(zᵢ) + ln(1 − Φ(z_{n−1−i}))].
+/// 4. A²* = A² · (1 + 0.75/n + 2.25/n²).
+/// 5. p-value from Stephens (1974) piecewise approximation.
+///
+/// # Returns
+///
+/// `None` if n < 3, any non-finite value, or std_dev < 1e-15 (degenerate data).
+///
+/// # References
+///
+/// - Stephens, M. A. (1974). "EDF statistics for goodness of fit and some
+///   comparisons". *Journal of the American Statistical Association*, 69(347), 730–737.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::testing::anderson_darling_normality;
+///
+/// let data = [2.1, 1.9, 2.0, 2.05, 1.95, 2.02, 1.98, 2.01, 2.03, 1.97];
+/// let r = anderson_darling_normality(&data).unwrap();
+/// assert!(r.p_value > 0.05); // cannot reject normality
+/// ```
+pub fn anderson_darling_normality(data: &[f64]) -> Option<AdNormalityResult> {
+    let n = data.len();
+    if n < 3 {
+        return None;
+    }
+    if data.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+
+    let mean = stats::mean(data)?;
+    let sd = stats::std_dev(data)?;
+
+    if sd < 1e-15 {
+        return None;
+    }
+
+    let mut x: Vec<f64> = data.to_vec();
+    x.sort_by(|a, b| a.partial_cmp(b).expect("values are finite"));
+
+    let nf = n as f64;
+
+    let mut s = 0.0;
+    for i in 0..n {
+        let z_i = (x[i] - mean) / sd;
+        let z_rev = (x[n - 1 - i] - mean) / sd;
+
+        let phi_i = special::standard_normal_cdf(z_i).clamp(1e-15, 1.0 - 1e-15);
+        let phi_rev = special::standard_normal_cdf(z_rev).clamp(1e-15, 1.0 - 1e-15);
+
+        let coeff = (2 * i + 1) as f64;
+        s += coeff * (phi_i.ln() + (1.0 - phi_rev).ln());
+    }
+
+    let a2 = -nf - s / nf;
+    let a2_star = a2 * (1.0 + 0.75 / nf + 2.25 / (nf * nf));
+
+    // Stephens (1974) piecewise p-value approximation
+    let p = if a2_star < 0.200 {
+        1.0 - (-13.436 + 101.14 * a2_star - 223.73 * a2_star * a2_star).exp()
+    } else if a2_star < 0.340 {
+        1.0 - (-8.318 + 42.796 * a2_star - 59.938 * a2_star * a2_star).exp()
+    } else if a2_star < 0.600 {
+        (0.9177 - 4.279 * a2_star - 1.38 * a2_star * a2_star).exp()
+    } else {
+        (1.2937 - 5.709 * a2_star + 0.0186 * a2_star * a2_star).exp()
+    };
+
+    Some(AdNormalityResult {
+        statistic: a2,
+        statistic_modified: a2_star,
+        p_value: p.clamp(0.0, 1.0),
+    })
+}
+
 /// Result of the Shapiro-Wilk normality test.
 #[derive(Debug, Clone, Copy)]
 pub struct ShapiroWilkResult {
@@ -2346,6 +2448,60 @@ mod tests {
         let heavy_tail = [0.1, 0.2, 0.3, 0.5, 0.8, 1.3, 2.1, 3.4, 5.5, 8.9, 14.4, 23.3];
         let r = anderson_darling_test(&heavy_tail).expect("should compute");
         assert!(r.p_value >= 0.0 && r.p_value <= 1.0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Anderson-Darling normality (anderson_darling_normality)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ad_normal_data_large_p() {
+        // Clearly normal data → cannot reject normality (p > 0.05)
+        let data = [2.1, 1.9, 2.0, 2.05, 1.95, 2.02, 1.98, 2.01, 2.03, 1.97];
+        let r = anderson_darling_normality(&data).unwrap();
+        assert!(r.p_value > 0.05, "p={}", r.p_value);
+    }
+
+    #[test]
+    fn ad_exponential_data_small_p() {
+        // Clearly non-normal (exponential) → reject normality (p < 0.05)
+        let data: Vec<f64> = (1..=30).map(|i| (i as f64 * 0.3).exp()).collect();
+        let r = anderson_darling_normality(&data).unwrap();
+        assert!(r.p_value < 0.05, "p={}", r.p_value);
+    }
+
+    #[test]
+    fn ad_statistic_non_negative() {
+        let data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+        let r = anderson_darling_normality(&data).unwrap();
+        assert!(r.statistic >= 0.0);
+        assert!(r.statistic_modified >= r.statistic);
+    }
+
+    #[test]
+    fn ad_p_value_in_range() {
+        let data = [5.0, 5.1, 4.9, 5.05, 4.95, 5.02, 4.98, 5.0];
+        let r = anderson_darling_normality(&data).unwrap();
+        assert!(r.p_value >= 0.0 && r.p_value <= 1.0);
+    }
+
+    #[test]
+    fn ad_insufficient_data() {
+        assert!(anderson_darling_normality(&[1.0, 2.0]).is_none()); // n < 3
+    }
+
+    #[test]
+    fn ad_degenerate_data() {
+        // All same value → std = 0 → None
+        assert!(anderson_darling_normality(&[5.0, 5.0, 5.0, 5.0]).is_none());
+    }
+
+    #[test]
+    fn ad_modified_statistic_formula() {
+        // A²* > A² for any finite n
+        let data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+        let r = anderson_darling_normality(&data).unwrap();
+        assert!(r.statistic_modified > r.statistic - 1e-10);
     }
 
     // -----------------------------------------------------------------------

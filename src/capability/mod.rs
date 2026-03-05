@@ -20,7 +20,9 @@
 //! - Montgomery (2019), *Introduction to Statistical Quality Control*, 8th ed.
 
 mod indices;
+mod nonnormal;
 mod sigma_level;
 
 pub use indices::{CapabilityIndices, ProcessCapability};
+pub use nonnormal::{boxcox_capability, NonNormalCapabilityError, NonNormalCapabilityResult};
 pub use sigma_level::{ppm_to_sigma, sigma_to_ppm};

@@ -32,7 +32,11 @@ mod chart;
 mod rules;
 mod variables;
 
-pub use attributes::{CChart, NPChart, PChart, UChart};
+pub use attributes::{
+    CChart, NPChart, PChart, UChart,
+    LaneyAttributePoint, LaneyPChart, LaneyUChart, laney_p_chart, laney_u_chart,
+    GChart, GChartPoint, TChart, TChartPoint, g_chart, t_chart,
+};
 pub use chart::{ChartPoint, ControlChart, ControlLimits, Violation, ViolationType};
 pub use rules::{NelsonRules, RunRule, WesternElectricRules};
 pub use variables::{IndividualMRChart, XBarRChart, XBarSChart};

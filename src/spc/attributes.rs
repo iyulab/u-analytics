@@ -481,6 +481,454 @@ impl Default for UChart {
 }
 
 // ---------------------------------------------------------------------------
+// Laney P' Chart
+// ---------------------------------------------------------------------------
+
+/// A single data point for a Laney P' or U' chart.
+///
+/// Laney charts correct for overdispersion or underdispersion by estimating
+/// a process sigma-inflation factor φ from the moving range of standardized
+/// subgroup statistics.
+///
+/// # References
+///
+/// - Laney, D.B. (2002). "Improved control charts for attributes",
+///   *Quality Engineering* 14(4), pp. 531-537.
+#[derive(Debug, Clone)]
+pub struct LaneyAttributePoint {
+    /// Zero-based index of this subgroup.
+    pub index: usize,
+    /// The observed statistic (proportion or defect rate) for this subgroup.
+    pub value: f64,
+    /// Upper control limit (overdispersion-adjusted).
+    pub ucl: f64,
+    /// Center line (overall mean proportion or rate).
+    pub cl: f64,
+    /// Lower control limit (overdispersion-adjusted, clamped to 0).
+    pub lcl: f64,
+    /// Whether this point lies beyond its control limits.
+    pub out_of_control: bool,
+}
+
+/// Laney P' chart result.
+///
+/// Contains the overall proportion defective, the overdispersion factor φ,
+/// and the per-subgroup chart points with adjusted limits.
+#[derive(Debug, Clone)]
+pub struct LaneyPChart {
+    /// Overall proportion defective (p̄ = Σdᵢ / Σnᵢ).
+    pub p_bar: f64,
+    /// Overdispersion/underdispersion correction factor φ = MR̄ / d₂.
+    /// φ = 1.0 means no correction needed (ordinary P chart).
+    pub phi: f64,
+    /// Per-subgroup chart points.
+    pub points: Vec<LaneyAttributePoint>,
+}
+
+/// Laney U' chart result.
+///
+/// Contains the overall defect rate, the overdispersion factor φ,
+/// and the per-subgroup chart points with adjusted limits.
+#[derive(Debug, Clone)]
+pub struct LaneyUChart {
+    /// Overall defect rate (ū = Σdefectsᵢ / Σunitsᵢ).
+    pub u_bar: f64,
+    /// Overdispersion/underdispersion correction factor φ = MR̄ / d₂.
+    /// φ = 1.0 means no correction needed (ordinary U chart).
+    pub phi: f64,
+    /// Per-subgroup chart points.
+    pub points: Vec<LaneyAttributePoint>,
+}
+
+/// Compute the Laney P' chart from `(defective_count, sample_size)` pairs.
+///
+/// The Laney P' chart adjusts control limits for overdispersion or underdispersion
+/// by estimating a sigma-inflation factor φ from the moving range of standardized
+/// proportions. When φ = 1.0 the limits reduce to those of a standard P chart.
+///
+/// # Algorithm
+///
+/// 1. p̄ = Σdᵢ / Σnᵢ
+/// 2. zᵢ = (pᵢ − p̄) / √(p̄·(1−p̄)/nᵢ)
+/// 3. MR̄ = mean(|zᵢ − z_{i-1}|) for i = 1..n-1
+/// 4. φ = MR̄ / d₂,  d₂ = 1.128 (for moving range of 2 observations)
+/// 5. UCLᵢ = p̄ + 3·φ·√(p̄·(1−p̄)/nᵢ)
+/// 6. LCLᵢ = max(0, p̄ − 3·φ·√(p̄·(1−p̄)/nᵢ))
+///
+/// # Returns
+///
+/// `None` if fewer than 3 subgroups are provided, if all sample sizes are zero,
+/// or if p̄ is 0 or 1 (degenerate cases where σ = 0).
+///
+/// # Reference
+///
+/// Laney, D.B. (2002). "Improved control charts for attributes",
+/// *Quality Engineering* 14(4), pp. 531-537.
+pub fn laney_p_chart(samples: &[(u64, u64)]) -> Option<LaneyPChart> {
+    if samples.len() < 3 {
+        return None;
+    }
+
+    let total_defectives: u64 = samples.iter().map(|&(d, _)| d).sum();
+    let total_inspected: u64 = samples.iter().map(|&(_, n)| n).sum();
+    if total_inspected == 0 {
+        return None;
+    }
+
+    let p_bar = total_defectives as f64 / total_inspected as f64;
+    // Degenerate: σ = 0 means all proportions are exactly p̄ — φ computation is undefined.
+    let base_var = p_bar * (1.0 - p_bar);
+    if base_var <= 0.0 {
+        // φ = 0 (no variability), build chart with zero-width limits.
+        let points = samples
+            .iter()
+            .enumerate()
+            .map(|(i, &(d, n))| {
+                let value = if n > 0 { d as f64 / n as f64 } else { p_bar };
+                LaneyAttributePoint {
+                    index: i,
+                    value,
+                    ucl: p_bar,
+                    cl: p_bar,
+                    lcl: p_bar,
+                    out_of_control: false,
+                }
+            })
+            .collect();
+        return Some(LaneyPChart { p_bar, phi: 0.0, points });
+    }
+
+    // Step 2: standardized proportions.
+    let z_scores: Vec<f64> = samples
+        .iter()
+        .map(|&(d, n)| {
+            let p_i = d as f64 / n as f64;
+            let sigma_i = (base_var / n as f64).sqrt();
+            (p_i - p_bar) / sigma_i
+        })
+        .collect();
+
+    // Step 3: moving ranges of z-scores.
+    let mr_bar = {
+        let mrs: Vec<f64> = z_scores
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .collect();
+        mrs.iter().sum::<f64>() / mrs.len() as f64
+    };
+
+    // Step 4: φ = MR̄ / d₂ (d₂ = 1.128 for subgroup of 2).
+    const D2: f64 = 1.128;
+    let phi = mr_bar / D2;
+
+    // Steps 5-6: build chart points.
+    let points = samples
+        .iter()
+        .enumerate()
+        .map(|(i, &(d, n))| {
+            let p_i = d as f64 / n as f64;
+            let sigma_i = (base_var / n as f64).sqrt();
+            let ucl = p_bar + 3.0 * phi * sigma_i;
+            let lcl = (p_bar - 3.0 * phi * sigma_i).max(0.0);
+            LaneyAttributePoint {
+                index: i,
+                value: p_i,
+                ucl,
+                cl: p_bar,
+                lcl,
+                out_of_control: p_i > ucl || p_i < lcl,
+            }
+        })
+        .collect();
+
+    Some(LaneyPChart { p_bar, phi, points })
+}
+
+/// Compute the Laney U' chart from `(defect_count, inspection_units)` pairs.
+///
+/// The Laney U' chart adjusts control limits for overdispersion or underdispersion
+/// by estimating a sigma-inflation factor φ from the moving range of standardized
+/// defect rates. When φ = 1.0 the limits reduce to those of a standard U chart.
+///
+/// # Algorithm
+///
+/// 1. ū = Σdefectsᵢ / Σunitsᵢ
+/// 2. zᵢ = (uᵢ − ū) / √(ū / unitsᵢ)
+/// 3. MR̄ = mean(|zᵢ − z_{i-1}|)
+/// 4. φ = MR̄ / d₂,  d₂ = 1.128
+/// 5. UCLᵢ = ū + 3·φ·√(ū / unitsᵢ)
+/// 6. LCLᵢ = max(0, ū − 3·φ·√(ū / unitsᵢ))
+///
+/// # Returns
+///
+/// `None` if fewer than 3 subgroups, if total units are zero, or if any
+/// `units` entry is non-positive.
+///
+/// # Reference
+///
+/// Laney, D.B. (2002). "Improved control charts for attributes",
+/// *Quality Engineering* 14(4), pp. 531-537.
+pub fn laney_u_chart(samples: &[(u64, f64)]) -> Option<LaneyUChart> {
+    if samples.len() < 3 {
+        return None;
+    }
+
+    // Validate: all units must be positive and finite.
+    if samples.iter().any(|&(_, n)| !n.is_finite() || n <= 0.0) {
+        return None;
+    }
+
+    let total_defects: u64 = samples.iter().map(|&(d, _)| d).sum();
+    let total_units: f64 = samples.iter().map(|&(_, n)| n).sum();
+    if total_units <= 0.0 {
+        return None;
+    }
+
+    let u_bar = total_defects as f64 / total_units;
+
+    // Degenerate: ū = 0 means no defects observed — φ computation is undefined.
+    if u_bar <= 0.0 {
+        let points = samples
+            .iter()
+            .enumerate()
+            .map(|(i, &(d, n))| {
+                let value = d as f64 / n;
+                LaneyAttributePoint {
+                    index: i,
+                    value,
+                    ucl: 0.0,
+                    cl: 0.0,
+                    lcl: 0.0,
+                    out_of_control: false,
+                }
+            })
+            .collect();
+        return Some(LaneyUChart { u_bar: 0.0, phi: 0.0, points });
+    }
+
+    // Step 2: standardized defect rates.
+    let z_scores: Vec<f64> = samples
+        .iter()
+        .map(|&(d, n)| {
+            let u_i = d as f64 / n;
+            let sigma_i = (u_bar / n).sqrt();
+            (u_i - u_bar) / sigma_i
+        })
+        .collect();
+
+    // Step 3: moving ranges.
+    let mr_bar = {
+        let mrs: Vec<f64> = z_scores
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .collect();
+        mrs.iter().sum::<f64>() / mrs.len() as f64
+    };
+
+    // Step 4: φ = MR̄ / d₂.
+    const D2: f64 = 1.128;
+    let phi = mr_bar / D2;
+
+    // Steps 5-6: build chart points.
+    let points = samples
+        .iter()
+        .enumerate()
+        .map(|(i, &(d, n))| {
+            let u_i = d as f64 / n;
+            let sigma_i = (u_bar / n).sqrt();
+            let ucl = u_bar + 3.0 * phi * sigma_i;
+            let lcl = (u_bar - 3.0 * phi * sigma_i).max(0.0);
+            LaneyAttributePoint {
+                index: i,
+                value: u_i,
+                ucl,
+                cl: u_bar,
+                lcl,
+                out_of_control: u_i > ucl || u_i < lcl,
+            }
+        })
+        .collect();
+
+    Some(LaneyUChart { u_bar, phi, points })
+}
+
+// ---------------------------------------------------------------------------
+// G Chart (Geometric — inter-defect conforming count)
+// ---------------------------------------------------------------------------
+
+/// A single data point on a G or T chart.
+#[derive(Debug, Clone)]
+pub struct GChartPoint {
+    /// Zero-based index of this inter-event observation.
+    pub index: usize,
+    /// The observed inter-event count (for G) or time (for T).
+    pub value: f64,
+    /// Upper control limit.
+    pub ucl: f64,
+    /// Center line (mean of the series).
+    pub cl: f64,
+    /// Lower control limit (clamped to 0).
+    pub lcl: f64,
+    /// Whether this point lies beyond its control limits.
+    pub out_of_control: bool,
+}
+
+/// G chart (geometric distribution) result for rare-event monitoring.
+///
+/// Monitors the number of conforming units between consecutive defect events.
+/// Appropriate when the defect rate is very low (< 1%) and standard P/NP
+/// charts produce degenerate limits.
+///
+/// # Reference
+///
+/// Kaminsky, F.C. et al. (1992). "Statistical control charts based on a
+/// geometric distribution", *Journal of Quality Technology* 24(2), pp. 63-69.
+#[derive(Debug, Clone)]
+pub struct GChart {
+    /// Mean inter-event conforming count (ḡ).
+    pub g_bar: f64,
+    /// Per-observation chart points.
+    pub points: Vec<GChartPoint>,
+}
+
+/// T chart (exponential distribution) result for rare-event monitoring.
+///
+/// Monitors the time between consecutive defect events.
+/// Control limits are derived from the exponential distribution percentiles
+/// corresponding to ±3σ probability mass (α/2 = 0.00135).
+///
+/// # Reference
+///
+/// Borror, C.M., Keats, J.B. & Montgomery, D.C. (2003). "Robustness of the
+/// time between events CUSUM", *International Journal of Production Research*
+/// 41(15), pp. 3435-3444.
+#[derive(Debug, Clone)]
+pub struct TChart {
+    /// Mean inter-event time (t̄).
+    pub t_bar: f64,
+    /// Per-observation chart points.
+    pub points: Vec<TChartPoint>,
+}
+
+/// A single data point on a T chart.
+#[derive(Debug, Clone)]
+pub struct TChartPoint {
+    /// Zero-based index of this inter-event observation.
+    pub index: usize,
+    /// The observed inter-event time.
+    pub value: f64,
+    /// Upper control limit.
+    pub ucl: f64,
+    /// Center line (mean inter-event time).
+    pub cl: f64,
+    /// Lower control limit (clamped to 0).
+    pub lcl: f64,
+    /// Whether this point lies beyond its control limits.
+    pub out_of_control: bool,
+}
+
+/// Compute the G chart from inter-event conforming counts.
+///
+/// # Formulas
+///
+/// - ḡ = mean(gᵢ)
+/// - UCL = ḡ + 3·√(ḡ·(ḡ+1))
+/// - LCL = max(0, ḡ − 3·√(ḡ·(ḡ+1)))
+///
+/// # Returns
+///
+/// `None` if fewer than 3 observations or any count is negative.
+///
+/// # Reference
+///
+/// Kaminsky, F.C. et al. (1992). "Statistical control charts based on a
+/// geometric distribution", *Journal of Quality Technology* 24(2), pp. 63-69.
+pub fn g_chart(inter_event_counts: &[f64]) -> Option<GChart> {
+    if inter_event_counts.len() < 3 {
+        return None;
+    }
+    if inter_event_counts.iter().any(|&v| !v.is_finite() || v < 0.0) {
+        return None;
+    }
+
+    let g_bar = inter_event_counts.iter().sum::<f64>() / inter_event_counts.len() as f64;
+    let spread = (g_bar * (g_bar + 1.0)).sqrt();
+    let ucl = g_bar + 3.0 * spread;
+    let lcl = (g_bar - 3.0 * spread).max(0.0);
+
+    let points = inter_event_counts
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| GChartPoint {
+            index: i,
+            value: v,
+            ucl,
+            cl: g_bar,
+            lcl,
+            out_of_control: v > ucl || v < lcl,
+        })
+        .collect();
+
+    Some(GChart { g_bar, points })
+}
+
+/// Compute the T chart from inter-event times.
+///
+/// # Formulas (exponential distribution percentiles)
+///
+/// - t̄ = mean(tᵢ)
+/// - UCL = t̄ · (−ln(0.00135))  ≈ t̄ · 6.6077
+/// - LCL = max(0, t̄ · (−ln(0.99865)))  ≈ t̄ · 0.00135
+///
+/// The constants are derived from the 0.00135 and 0.99865 quantiles of the
+/// standard exponential distribution, matching the ±3σ tail probability used
+/// in Shewhart charts (α/2 = 0.00135).
+///
+/// # Returns
+///
+/// `None` if fewer than 3 observations or any time is non-positive.
+///
+/// # Reference
+///
+/// Borror, C.M., Keats, J.B. & Montgomery, D.C. (2003). "Robustness of the
+/// time between events CUSUM", *International Journal of Production Research*
+/// 41(15), pp. 3435-3444.
+pub fn t_chart(inter_event_times: &[f64]) -> Option<TChart> {
+    if inter_event_times.len() < 3 {
+        return None;
+    }
+    if inter_event_times.iter().any(|&v| !v.is_finite() || v <= 0.0) {
+        return None;
+    }
+
+    let t_bar = inter_event_times.iter().sum::<f64>() / inter_event_times.len() as f64;
+
+    // Exponential quantile: Q(p) = -t̄ · ln(1 - p) = t̄ · (-ln(p)) for the survival function.
+    // UCL corresponds to the 0.99865 quantile of Exp(1/t̄): −ln(1 − 0.99865) = −ln(0.00135).
+    // LCL corresponds to the 0.00135 quantile of Exp(1/t̄): −ln(1 − 0.00135) = −ln(0.99865).
+    let ucl_factor = -(0.00135_f64.ln()); // ≈ 6.6077
+    let lcl_factor = -(0.99865_f64.ln()); // ≈ 0.001351
+
+    let ucl = t_bar * ucl_factor;
+    let lcl = (t_bar * lcl_factor).max(0.0);
+
+    let points = inter_event_times
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| TChartPoint {
+            index: i,
+            value: v,
+            ucl,
+            cl: t_bar,
+            lcl,
+            out_of_control: v > ucl || v < lcl,
+        })
+        .collect();
+
+    Some(TChart { t_bar, points })
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -846,5 +1294,101 @@ mod tests {
         let u_pt = &u_chart.points()[0];
         assert!((u_pt.ucl - c_ucl).abs() < 1e-10);
         assert!((u_pt.lcl - c_lcl).abs() < 1e-10);
+    }
+
+    // --- Laney P' Chart ---
+
+    #[test]
+    fn laney_p_basic() {
+        let samples: Vec<(u64, u64)> = (0..10).map(|i| (i % 5 + 2, 200)).collect();
+        let chart = laney_p_chart(&samples).expect("chart should be Some");
+        assert!(chart.phi > 0.0);
+        assert!(chart.p_bar > 0.0 && chart.p_bar < 1.0);
+        assert_eq!(chart.points.len(), 10);
+    }
+
+    #[test]
+    fn laney_p_constant_proportion_phi_near_zero() {
+        // All samples identical → all z-scores = 0 → MR = 0 → phi = 0
+        let samples: Vec<(u64, u64)> = vec![(10, 1000); 20];
+        let chart = laney_p_chart(&samples).expect("chart should be Some");
+        assert!((chart.p_bar - 0.01).abs() < 1e-10);
+        assert!(chart.phi >= 0.0);
+    }
+
+    #[test]
+    fn laney_p_ucl_above_lcl() {
+        let samples: Vec<(u64, u64)> = vec![(5, 100), (8, 100), (3, 100), (6, 100), (4, 100)];
+        let chart = laney_p_chart(&samples).expect("chart should be Some");
+        for p in &chart.points {
+            assert!(p.ucl >= p.lcl);
+            assert!((p.cl - chart.p_bar).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn laney_p_insufficient_data() {
+        let samples: Vec<(u64, u64)> = vec![(2, 100), (3, 100)];
+        assert!(laney_p_chart(&samples).is_none());
+    }
+
+    #[test]
+    fn laney_u_basic() {
+        let samples: Vec<(u64, f64)> = vec![(5, 10.0); 10];
+        let chart = laney_u_chart(&samples).expect("chart should be Some");
+        assert!((chart.u_bar - 0.5).abs() < 1e-10);
+        assert!(chart.phi >= 0.0);
+    }
+
+    #[test]
+    fn laney_u_ucl_above_cl() {
+        let samples: Vec<(u64, f64)> = (0..8).map(|i| ((i % 4 + 2) as u64, 10.0)).collect();
+        let chart = laney_u_chart(&samples).expect("chart should be Some");
+        for p in &chart.points {
+            assert!(p.ucl > p.cl || (p.ucl - p.cl).abs() < 1e-10);
+        }
+    }
+
+    // --- G Chart ---
+
+    #[test]
+    fn g_chart_ucl_above_cl() {
+        let gaps = vec![100.0, 120.0, 95.0, 110.0, 105.0];
+        let chart = g_chart(&gaps).expect("chart should be Some");
+        assert!(chart.points[0].ucl > chart.points[0].cl);
+        assert!(chart.points[0].lcl >= 0.0);
+    }
+
+    #[test]
+    fn g_chart_insufficient() {
+        assert!(g_chart(&[100.0, 120.0]).is_none());
+    }
+
+    #[test]
+    fn g_chart_all_same() {
+        let chart = g_chart(&[50.0; 8]).expect("chart should be Some");
+        assert!((chart.g_bar - 50.0).abs() < 1e-10);
+        assert!(chart.points[0].ucl > chart.points[0].cl);
+    }
+
+    // --- T Chart ---
+
+    #[test]
+    fn t_chart_ucl_factor() {
+        // UCL = t_bar * (-ln(0.00135)) ≈ t_bar * 6.6077
+        let times = vec![100.0; 10];
+        let chart = t_chart(&times).expect("chart should be Some");
+        let ratio = chart.points[0].ucl / chart.t_bar;
+        assert!((ratio - 6.6077).abs() < 0.01, "ratio={ratio}");
+    }
+
+    #[test]
+    fn t_chart_non_positive() {
+        assert!(t_chart(&[10.0, -5.0, 20.0, 15.0]).is_none());
+    }
+
+    #[test]
+    fn t_chart_insufficient() {
+        assert!(t_chart(&[10.0, 20.0]).is_none());
     }
 }
