@@ -1357,6 +1357,156 @@ mod tests {
         }
     }
 
+    // --- Montgomery (2020) Example 7.1 Reference Validation ---
+
+    /// P chart reference validation against Montgomery (2019) §7.2–7.3 formula.
+    ///
+    /// Uses 20 samples of n=100 with Σd=198, so p̄=198/2000=0.099 exactly.
+    /// UCL = 0.099 + 3·√(0.099·0.901/100) ≈ 0.188196
+    /// LCL = max(0, 0.099 − 0.089196) ≈ 0.009804
+    ///
+    /// Reference: Montgomery, D.C. (2019). *Introduction to Statistical Quality
+    /// Control*, 8th ed., §7.2–7.3.
+    #[test]
+    fn p_chart_montgomery_reference_formula() {
+        // Construct 20 samples of n=100 so total defectives = 198 (p̄ = 0.099).
+        // Spread as [10, 10, 10, ..., 10, 8] so sum = 19*10 + 8 = 198.
+        let mut chart = PChart::new();
+        for _ in 0..19 {
+            chart.add_sample(10, 100);
+        }
+        chart.add_sample(8, 100);
+
+        let p_bar = chart.p_bar().expect("p_bar");
+        assert!(
+            (p_bar - 0.099).abs() < 1e-10,
+            "p̄ expected 0.099, got {p_bar}"
+        );
+
+        let sigma = (0.099_f64 * 0.901 / 100.0).sqrt();
+        let expected_ucl = 0.099 + 3.0 * sigma; // ≈ 0.188196
+        let expected_lcl = (0.099 - 3.0 * sigma).max(0.0); // ≈ 0.009804
+
+        for pt in chart.points() {
+            assert!(
+                (pt.ucl - expected_ucl).abs() < 1e-6,
+                "UCL mismatch at index {}: expected {expected_ucl:.6}, got {:.6}",
+                pt.index,
+                pt.ucl
+            );
+            assert!(
+                (pt.lcl - expected_lcl).abs() < 1e-6,
+                "LCL mismatch at index {}: expected {expected_lcl:.6}, got {:.6}",
+                pt.index,
+                pt.lcl
+            );
+        }
+    }
+
+    /// NP chart reference validation against Montgomery (2019) §7.2–7.3 formula.
+    ///
+    /// n=100, p̄=0.099 → np̄=9.9
+    /// UCL = 9.9 + 3·√(9.9·0.901) = 9.9 + 3·2.9867 ≈ 18.860
+    /// LCL = max(0, 9.9 − 8.960) ≈ 0.940
+    ///
+    /// Reference: Montgomery, D.C. (2019). *Introduction to Statistical Quality
+    /// Control*, 8th ed., §7.2–7.3.
+    #[test]
+    fn np_chart_montgomery_reference() {
+        // 20 samples of n=100, total defectives=198 → p̄=0.099, np̄=9.9
+        let mut chart = NPChart::new(100);
+        for _ in 0..19 {
+            chart.add_sample(10);
+        }
+        chart.add_sample(8);
+
+        let (ucl, cl, lcl) = chart.control_limits().expect("limits");
+        // np̄ = 9.9
+        assert!(
+            (cl - 9.9).abs() < 1e-10,
+            "NP CL expected 9.9, got {cl}"
+        );
+        // sigma = sqrt(9.9 * 0.901) = sqrt(8.9199) ≈ 2.98662
+        let expected_sigma = (9.9_f64 * 0.901).sqrt();
+        let expected_ucl = 9.9 + 3.0 * expected_sigma; // ≈ 18.860
+        let expected_lcl = (9.9 - 3.0 * expected_sigma).max(0.0); // ≈ 0.940
+        assert!(
+            (ucl - expected_ucl).abs() < 1e-6,
+            "NP UCL expected {expected_ucl:.4}, got {ucl:.4}"
+        );
+        assert!(
+            (lcl - expected_lcl).abs() < 1e-6,
+            "NP LCL expected {expected_lcl:.4}, got {lcl:.4}"
+        );
+    }
+
+    /// C chart validation against Montgomery (2020) §7.4.
+    ///
+    /// Reference: c̄=10
+    /// UCL = 10 + 3·√10 = 10 + 9.4868 = 19.4868
+    /// LCL = max(0, 10 − 9.4868) = 0.5132
+    #[test]
+    fn c_chart_montgomery_reference() {
+        // 20 samples all with defect count 10 → c̄ = 10 exactly
+        let mut chart = CChart::new();
+        for _ in 0..20 {
+            chart.add_sample(10);
+        }
+
+        let (ucl, cl, lcl) = chart.control_limits().expect("limits");
+        assert!(
+            (cl - 10.0).abs() < 1e-10,
+            "C chart CL expected 10.0, got {cl}"
+        );
+        let expected_ucl = 10.0 + 3.0 * 10.0_f64.sqrt(); // ≈ 19.4868
+        let expected_lcl = (10.0 - 3.0 * 10.0_f64.sqrt()).max(0.0); // ≈ 0.5132
+        assert!(
+            (ucl - expected_ucl).abs() < 1e-6,
+            "C chart UCL expected {expected_ucl:.4}, got {ucl:.4}"
+        );
+        assert!(
+            (lcl - expected_lcl).abs() < 1e-6,
+            "C chart LCL expected {expected_lcl:.4}, got {lcl:.4}"
+        );
+    }
+
+    /// U chart validation against Montgomery (2020) §7.4.
+    ///
+    /// Reference: ū=2.0, n=10
+    /// UCL = 2.0 + 3·√(2.0/10) = 2.0 + 3·0.4472 = 3.3416
+    /// LCL = max(0, 2.0 − 1.3416) = 0.6584
+    #[test]
+    fn u_chart_montgomery_reference() {
+        // 20 samples each inspecting 10 units, defects arranged so u=2.0
+        let mut chart = UChart::new();
+        for _ in 0..20 {
+            chart.add_sample(20, 10.0); // u = 20/10 = 2.0
+        }
+
+        let u_bar = chart.u_bar().expect("u_bar");
+        assert!(
+            (u_bar - 2.0).abs() < 1e-10,
+            "U chart ū expected 2.0, got {u_bar}"
+        );
+
+        let sigma = (2.0_f64 / 10.0).sqrt(); // sqrt(0.2) ≈ 0.44721
+        let expected_ucl = 2.0 + 3.0 * sigma; // ≈ 3.3416
+        let expected_lcl = (2.0 - 3.0 * sigma).max(0.0); // ≈ 0.6584
+
+        for pt in chart.points() {
+            assert!(
+                (pt.ucl - expected_ucl).abs() < 1e-6,
+                "U chart UCL expected {expected_ucl:.4}, got {:.4}",
+                pt.ucl
+            );
+            assert!(
+                (pt.lcl - expected_lcl).abs() < 1e-6,
+                "U chart LCL expected {expected_lcl:.4}, got {:.4}",
+                pt.lcl
+            );
+        }
+    }
+
     // --- G Chart ---
 
     #[test]
