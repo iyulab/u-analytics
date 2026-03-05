@@ -34,3 +34,6 @@ pub mod smoothing;
 pub mod spc;
 pub mod testing;
 pub mod weibull;
+
+#[cfg(feature = "wasm")]
+pub mod wasm;

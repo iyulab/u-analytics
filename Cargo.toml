@@ -10,8 +10,17 @@ keywords = ["spc", "statistics", "quality", "weibull", "reliability"]
 categories = ["science", "mathematics"]
 readme = "README.md"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+wasm = ["dep:wasm-bindgen", "dep:serde-wasm-bindgen", "dep:serde"]
+
 [dependencies]
 u-numflow = { version = "0.2", path = "../../foundation/u-numflow" }
+serde = { version = "1", features = ["derive"], optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+serde-wasm-bindgen = { version = "0.6", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }
