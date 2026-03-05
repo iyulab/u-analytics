@@ -6,8 +6,8 @@
 //!
 //! # References
 //!
-//! - Montgomery (2019), *Introduction to Statistical Quality Control*, 8th ed.,
-//!   Chapter 8.
+//! - Montgomery, D.C. (2020). *Introduction to Statistical Quality Control*, 8th ed.,
+//!   §7.1–7.3, §8.
 //! - Kane (1986), "Process Capability Indices", *Journal of Quality Technology*
 //!   18(1), pp. 41--52.
 //! - Chan, Cheng & Spiring (1988), "A New Measure of Process Capability: Cpm",
@@ -52,7 +52,7 @@ pub struct ProcessCapability {
 /// | Cpk/Ppk | >= 1.33 | Process is capable and centered |
 /// | Cpm | >= 1.33 | Process meets Taguchi loss criterion |
 ///
-/// Reference: Montgomery (2019), Chapter 8, Table 8.5.
+/// Reference: Montgomery (2020), Chapter 8, Table 8.5.
 #[derive(Debug, Clone)]
 pub struct CapabilityIndices {
     /// Cp = (USL - LSL) / (6 * sigma_within). Requires both limits.
@@ -553,6 +553,67 @@ mod tests {
         let spec = ProcessCapability::new(Some(10.0), Some(0.0)).unwrap();
         assert!(spec.compute_overall(&[5.0]).is_none());
         assert!(spec.compute_overall(&[]).is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Montgomery (2020) §7.1 reference values
+    // -----------------------------------------------------------------------
+
+    /// Exact reference from Montgomery (2020), §7.1.
+    ///
+    /// μ = 74.001, σ_within = 0.0099, USL = 74.05, LSL = 73.95
+    ///
+    /// Cp  = (74.05 - 73.95) / (6 × 0.0099) = 0.1 / 0.0594 = 1.6835
+    /// Cpu = (74.05 - 74.001) / (3 × 0.0099) = 0.049 / 0.0297 = 1.6499
+    /// Cpl = (74.001 - 73.95) / (3 × 0.0099) = 0.051 / 0.0297 = 1.7172
+    /// Cpk = min(1.6499, 1.7172) = 1.6499
+    #[test]
+    fn cp_cpk_montgomery_2020_reference() {
+        let usl = 74.05_f64;
+        let lsl = 73.95_f64;
+        let mu = 74.001_f64;
+        let sigma_within = 0.0099_f64;
+
+        let spec = ProcessCapability::new(Some(usl), Some(lsl)).unwrap();
+
+        // Single-point data: mean == mu, sigma_overall irrelevant for Cp/Cpk.
+        // Use many identical points so sample mean == mu exactly.
+        let data = vec![mu; 100];
+        let indices = spec.compute(&data, sigma_within).unwrap();
+
+        let cp = indices.cp.unwrap();
+        let expected_cp = (usl - lsl) / (6.0 * sigma_within); // 1.6835...
+        assert!(
+            (cp - expected_cp).abs() < 0.001,
+            "Cp: expected {expected_cp:.4}, got {cp:.4}"
+        );
+
+        let cpu = indices.cpu.unwrap();
+        let expected_cpu = (usl - mu) / (3.0 * sigma_within); // 1.6499...
+        assert!(
+            (cpu - expected_cpu).abs() < 0.001,
+            "Cpu: expected {expected_cpu:.4}, got {cpu:.4}"
+        );
+
+        let cpl = indices.cpl.unwrap();
+        let expected_cpl = (mu - lsl) / (3.0 * sigma_within); // 1.7172...
+        assert!(
+            (cpl - expected_cpl).abs() < 0.001,
+            "Cpl: expected {expected_cpl:.4}, got {cpl:.4}"
+        );
+
+        let cpk = indices.cpk.unwrap();
+        let expected_cpk = expected_cpu.min(expected_cpl); // 1.6499...
+        assert!(
+            (cpk - expected_cpk).abs() < 0.001,
+            "Cpk: expected {expected_cpk:.4}, got {cpk:.4}"
+        );
+
+        // Verify direction: process is slightly above centre, so Cpu < Cpl
+        assert!(
+            cpu < cpl,
+            "mean above centre → Cpu ({cpu:.4}) should be < Cpl ({cpl:.4})"
+        );
     }
 
     // -----------------------------------------------------------------------

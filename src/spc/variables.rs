@@ -13,7 +13,7 @@
 //!
 //! # References
 //!
-//! - Montgomery, D.C. (2019). *Introduction to Statistical Quality Control*, 8th ed.
+//! - Montgomery, D.C. (2020). *Introduction to Statistical Quality Control*, 8th ed.
 //! - ASTM E2587 — Standard Practice for Use of Control Charts
 //! - Shewhart, W.A. (1931). *Economic Control of Quality of Manufactured Product*.
 
@@ -47,6 +47,13 @@ const D4: [f64; 9] = [
 /// d2 factors (mean of the range distribution) for estimating sigma from R-bar.
 ///
 /// sigma-hat = R-bar / d2.
+///
+/// Index 0 corresponds to subgroup size n = 2.
+///
+/// # Reference
+///
+/// Montgomery, D.C. (2020). *Introduction to Statistical Quality Control*, 8th ed.,
+/// Appendix Table VI.
 #[allow(dead_code)]
 const D2: [f64; 9] = [
     1.128, 1.693, 2.059, 2.326, 2.534, 2.704, 2.847, 2.970, 3.078,
@@ -74,6 +81,13 @@ const B4: [f64; 9] = [
 /// c4 factors for unbiased estimation of sigma from S-bar.
 ///
 /// sigma-hat = S-bar / c4.
+///
+/// Index 0 corresponds to subgroup size n = 2.
+///
+/// # Reference
+///
+/// Montgomery, D.C. (2020). *Introduction to Statistical Quality Control*, 8th ed.,
+/// Appendix Table VI.
 #[allow(dead_code)]
 const C4: [f64; 9] = [
     0.7979, 0.8862, 0.9213, 0.9400, 0.9515, 0.9594, 0.9650, 0.9693, 0.9727,
@@ -955,5 +969,64 @@ mod tests {
         assert!((limits.ucl - 126.6).abs() < 0.1);
         // LCL = 100 - 2.660 * 10 = 73.4
         assert!((limits.lcl - 73.4).abs() < 0.1);
+    }
+
+    // --- Montgomery Table VI: d2 constant verification ---
+
+    /// Verify d2 constants against Montgomery (2020), Appendix Table VI.
+    ///
+    /// d2 is the expected value of the sample range for a standard-normal
+    /// distribution with subgroup size n. Used as sigma-hat = R-bar / d2.
+    ///
+    /// Allowed tolerance: ±0.001 (matches 3-decimal precision in Table VI).
+    #[test]
+    fn test_d2_constants_montgomery_table_vi() {
+        // (n, expected_d2) pairs from Montgomery (2020) Table VI, n=2..10
+        let expected: [(usize, f64); 9] = [
+            (2, 1.128),
+            (3, 1.693),
+            (4, 2.059),
+            (5, 2.326),
+            (6, 2.534),
+            (7, 2.704),
+            (8, 2.847),
+            (9, 2.970),
+            (10, 3.078),
+        ];
+        for (n, d2_ref) in expected {
+            let d2 = D2[n - 2];
+            assert!(
+                (d2 - d2_ref).abs() < 0.001,
+                "d2(n={n}): expected {d2_ref}, got {d2}"
+            );
+        }
+    }
+
+    // --- Montgomery Table VI: c4 constant verification ---
+
+    /// Verify c4 constants against Montgomery (2020), Appendix Table VI.
+    ///
+    /// c4 is the bias-correction factor for estimating sigma from S-bar.
+    /// sigma-hat = S-bar / c4.
+    ///
+    /// Allowed tolerance: ±0.001 (matches 4-decimal precision in Table VI).
+    #[test]
+    fn test_c4_constants_montgomery_table_vi() {
+        // (n, expected_c4) pairs from Montgomery (2020) Table VI, n=2..6
+        let expected: [(usize, f64); 6] = [
+            (2, 0.7979),
+            (3, 0.8862),
+            (4, 0.9213),
+            (5, 0.9400),
+            (6, 0.9515),
+            (7, 0.9594),
+        ];
+        for (n, c4_ref) in expected {
+            let c4 = C4[n - 2];
+            assert!(
+                (c4 - c4_ref).abs() < 0.001,
+                "c4(n={n}): expected {c4_ref}, got {c4}"
+            );
+        }
     }
 }
