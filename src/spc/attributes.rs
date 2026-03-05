@@ -781,10 +781,16 @@ pub struct GChartPoint {
 /// Appropriate when the defect rate is very low (< 1%) and standard P/NP
 /// charts produce degenerate limits.
 ///
-/// # Reference
+/// # References
 ///
-/// Kaminsky, F.C. et al. (1992). "Statistical control charts based on a
-/// geometric distribution", *Journal of Quality Technology* 24(2), pp. 63-69.
+/// - Kaminsky, F.C. et al. (1992). "Statistical control charts based on a
+///   geometric distribution", *Journal of Quality Technology* 24(2), pp. 63-69.
+/// - Benneyan, J.C. (2001). "Number-Between g-Type Statistical Quality Control
+///   Charts for Healthcare Applications", *Health Care Management Science* 4(4),
+///   pp. 305-318.
+/// - Woodall, W.H. (2006). "The Use of Control Charts in Health-Care and
+///   Public-Health Surveillance", *Journal of Quality Technology* 38(2),
+///   pp. 89-104.
 #[derive(Debug, Clone)]
 pub struct GChart {
     /// Mean inter-event conforming count (ḡ).
@@ -837,14 +843,23 @@ pub struct TChartPoint {
 /// - UCL = ḡ + 3·√(ḡ·(ḡ+1))
 /// - LCL = max(0, ḡ − 3·√(ḡ·(ḡ+1)))
 ///
+/// The spread term √(ḡ·(ḡ+1)) follows directly from the variance of the
+/// geometric distribution: Var(G) = (1−p)/p² ≈ ḡ·(ḡ+1) when p is small.
+///
 /// # Returns
 ///
 /// `None` if fewer than 3 observations or any count is negative.
 ///
-/// # Reference
+/// # References
 ///
-/// Kaminsky, F.C. et al. (1992). "Statistical control charts based on a
-/// geometric distribution", *Journal of Quality Technology* 24(2), pp. 63-69.
+/// - Kaminsky, F.C. et al. (1992). "Statistical control charts based on a
+///   geometric distribution", *Journal of Quality Technology* 24(2), pp. 63-69.
+/// - Benneyan, J.C. (2001). "Number-Between g-Type Statistical Quality Control
+///   Charts for Healthcare Applications", *Health Care Management Science* 4(4),
+///   pp. 305-318.
+/// - Woodall, W.H. (2006). "The Use of Control Charts in Health-Care and
+///   Public-Health Surveillance", *Journal of Quality Technology* 38(2),
+///   pp. 89-104.
 pub fn g_chart(inter_event_counts: &[f64]) -> Option<GChart> {
     if inter_event_counts.len() < 3 {
         return None;
@@ -1548,5 +1563,344 @@ mod tests {
     #[test]
     fn t_chart_insufficient() {
         assert!(t_chart(&[10.0, 20.0]).is_none());
+    }
+
+    // --- Laney P' invariant: UCL = p̄ + 3·φ·σᵢ for every point ---
+    //
+    // The Laney P' UCL formula is exactly: UCL_i = p̄ + 3·φ·√(p̄·(1−p̄)/nᵢ).
+    // This invariant must hold for every subgroup regardless of φ.
+    //
+    // Reference: Laney (2002) §3, steps 5–6.
+    #[test]
+    fn laney_p_ucl_formula_invariant() {
+        let samples: Vec<(u64, u64)> = vec![
+            (3, 100), (7, 100), (2, 100), (8, 100), (4, 100),
+            (5, 150), (9, 150), (3, 150), (6, 150), (4, 150),
+        ];
+        let chart = laney_p_chart(&samples).expect("chart should be Some");
+
+        for (i, (&(d, n), pt)) in samples.iter().zip(&chart.points).enumerate() {
+            let p_i = d as f64 / n as f64;
+            let sigma_i = (chart.p_bar * (1.0 - chart.p_bar) / n as f64).sqrt();
+            let expected_ucl = chart.p_bar + 3.0 * chart.phi * sigma_i;
+            let expected_lcl = (chart.p_bar - 3.0 * chart.phi * sigma_i).max(0.0);
+
+            assert!(
+                (pt.value - p_i).abs() < 1e-10,
+                "point {i}: value expected {p_i:.6}, got {:.6}", pt.value
+            );
+            assert!(
+                (pt.ucl - expected_ucl).abs() < 1e-10,
+                "point {i}: UCL expected {expected_ucl:.6}, got {:.6}", pt.ucl
+            );
+            assert!(
+                (pt.lcl - expected_lcl).abs() < 1e-10,
+                "point {i}: LCL expected {expected_lcl:.6}, got {:.6}", pt.lcl
+            );
+        }
+    }
+
+    // --- Laney P' invariant: φ=1 means Laney limits = standard P chart limits ---
+    //
+    // When all z-scores are identical, MR=0 → φ=0, not φ=1.
+    // To get φ=1 we need to engineer data where MR̄=d₂=1.128.
+    // Strategy: use 4 samples with exactly two z-values (+δ, -δ, +δ, -δ)
+    // so that |Δz|=2δ for all 3 consecutive pairs.
+    // MR̄ = 2δ → φ = 2δ/1.128.  For φ=1: δ = 0.564.
+    //
+    // We need integer counts (d, n) such that z = (d/n - p̄)/σ = ±0.564 exactly.
+    // Choose p̄ = 0.5, n = 10000: σ = √(0.25/10000) = 0.005.
+    // p_high = 0.5 + 0.564·0.005 = 0.5028  → d_high = 5028
+    // p_low  = 0.5 − 0.564·0.005 = 0.4972  → d_low  = 4972
+    // Verify: z_high = (0.5028-0.5)/0.005 = 0.56 (but MR̄=2·0.56=1.12, φ=0.9929)
+    // The integer representation does not produce φ=1 exactly; we therefore
+    // verify only that φ is close to 1 and that the UCL/LCL formula is self-consistent.
+    //
+    // Reference: Laney (2002) §3.
+    #[test]
+    fn laney_p_phi_near_one_limits_close_to_standard() {
+        // δ = 0.564 → p_high/low with n=10000 and p̄=0.5 produce z = ±0.56
+        // (integer rounding: 5028/10000, 4972/10000)
+        // MR̄ = 2·0.56 = 1.12, φ = 1.12/1.128 ≈ 0.993 (very close to 1.0)
+        let n: u64 = 10_000;
+        let d_high: u64 = 5028; // z ≈ +0.56
+        let d_low: u64 = 4972;  // z ≈ -0.56
+        // 6 samples alternating: φ = MR̄/1.128 with MR̄ from 5 identical MRs of 1.12
+        let samples: Vec<(u64, u64)> = vec![
+            (d_high, n), (d_low, n), (d_high, n),
+            (d_low, n),  (d_high, n), (d_low, n),
+        ];
+
+        let laney = laney_p_chart(&samples).expect("chart should be Some");
+
+        // φ should be close to 1 (within 1%).
+        assert!(
+            (laney.phi - 1.0).abs() < 0.01,
+            "φ expected ≈1.0, got {}", laney.phi
+        );
+
+        // Standard P chart limits for same data at n=10000.
+        let p_bar = laney.p_bar;
+        let sigma_std = (p_bar * (1.0 - p_bar) / n as f64).sqrt();
+        let std_ucl = p_bar + 3.0 * sigma_std;
+        let std_lcl = (p_bar - 3.0 * sigma_std).max(0.0);
+
+        // Laney UCL must equal standard UCL scaled by φ; since φ≈1, the
+        // difference is bounded by 3·σ·|φ−1|.
+        let max_deviation = 3.0 * sigma_std * (laney.phi - 1.0).abs();
+        assert!(
+            (laney.points[0].ucl - std_ucl).abs() <= max_deviation + 1e-12,
+            "Laney UCL={:.6} vs std UCL={std_ucl:.6}, deviation bound={max_deviation:.2e}",
+            laney.points[0].ucl
+        );
+        assert!(
+            (laney.points[0].lcl - std_lcl).abs() <= max_deviation + 1e-12,
+            "Laney LCL={:.6} vs std LCL={std_lcl:.6}, deviation bound={max_deviation:.2e}",
+            laney.points[0].lcl
+        );
+    }
+
+    // --- Laney P' invariant: φ > 1 → wider limits than standard P chart ---
+    //
+    // Overdispersed data (variance greater than binomial prediction) forces
+    // φ > 1.  The Laney UCL must then exceed the standard P chart UCL.
+    //
+    // Reference: Laney (2002) §2–3.
+    #[test]
+    fn laney_p_phi_gt_one_wider_than_standard() {
+        // Strongly overdispersed: proportions swing far from p̄.
+        let samples: Vec<(u64, u64)> = vec![
+            (1, 100),
+            (20, 100),
+            (2, 100),
+            (18, 100),
+            (1, 100),
+            (22, 100),
+            (3, 100),
+            (19, 100),
+            (2, 100),
+            (20, 100),
+        ];
+
+        let laney = laney_p_chart(&samples).expect("chart should be Some");
+        assert!(laney.phi > 1.0, "φ expected > 1 for overdispersed data, got {}", laney.phi);
+
+        // Standard P chart UCL for the same data.
+        let total_d: u64 = samples.iter().map(|&(d, _)| d).sum();
+        let total_n: u64 = samples.iter().map(|&(_, n)| n).sum();
+        let p_bar = total_d as f64 / total_n as f64;
+        let std_ucl_first = p_bar + 3.0 * (p_bar * (1.0 - p_bar) / 100.0_f64).sqrt();
+
+        assert!(
+            laney.points[0].ucl > std_ucl_first,
+            "Laney UCL ({:.4}) must exceed standard P chart UCL ({std_ucl_first:.4}) when φ>1",
+            laney.points[0].ucl
+        );
+    }
+
+    // --- Laney P' numerical reference test ---
+    //
+    // Hand-computed example:
+    //   5 samples of n=50, defectives = [3, 7, 2, 8, 4]
+    //   p̄ = 24/250 = 0.096
+    //   p_i = [0.06, 0.14, 0.04, 0.16, 0.08]
+    //   σ_i = √(0.096·0.904/50) = √(0.001737...) ≈ 0.041681
+    //   z_i = (p_i − 0.096) / 0.041681
+    //        = [−0.8636, +1.0557, −1.3467, +1.5393, −0.3832]
+    //   MR = [|z1−z0|, |z2−z1|, |z3−z2|, |z4−z3|]
+    //       = [1.9193, 2.4024, 2.8860, 1.9225]
+    //   MR̄ = (1.9193+2.4024+2.8860+1.9225)/4 = 9.1302/4 = 2.28255
+    //   φ = 2.28255 / 1.128 = 2.0235
+    //   UCL_0 = 0.096 + 3·2.0235·0.041681 = 0.096 + 0.25296 = 0.34896
+    //   LCL_0 = max(0, 0.096 − 0.25296) = 0  (negative → 0)
+    //
+    // Reference: Laney (2002) §3 algorithm steps 1–6.
+    #[test]
+    fn laney_p_numerical_reference() {
+        let samples: Vec<(u64, u64)> = vec![(3, 50), (7, 50), (2, 50), (8, 50), (4, 50)];
+        let chart = laney_p_chart(&samples).expect("chart should be Some");
+
+        let p_bar = 24.0_f64 / 250.0;
+        assert!(
+            (chart.p_bar - p_bar).abs() < 1e-10,
+            "p̄ expected {p_bar:.6}, got {:.6}",
+            chart.p_bar
+        );
+
+        // Recompute φ from first principles to validate implementation.
+        let sigma_i = (p_bar * (1.0 - p_bar) / 50.0_f64).sqrt();
+        let p_vals = [0.06_f64, 0.14, 0.04, 0.16, 0.08];
+        let z: Vec<f64> = p_vals.iter().map(|&p| (p - p_bar) / sigma_i).collect();
+        let mr_bar = z.windows(2).map(|w| (w[1] - w[0]).abs()).sum::<f64>() / 4.0;
+        let phi_expected = mr_bar / 1.128;
+
+        assert!(
+            (chart.phi - phi_expected).abs() < 1e-10,
+            "φ expected {phi_expected:.6}, got {:.6}",
+            chart.phi
+        );
+
+        // UCL for point 0 (n=50).
+        let ucl_0 = p_bar + 3.0 * phi_expected * sigma_i;
+        let lcl_0 = (p_bar - 3.0 * phi_expected * sigma_i).max(0.0);
+        assert!(
+            (chart.points[0].ucl - ucl_0).abs() < 1e-10,
+            "UCL[0] expected {ucl_0:.6}, got {:.6}",
+            chart.points[0].ucl
+        );
+        assert!(
+            (chart.points[0].lcl - lcl_0).abs() < 1e-10,
+            "LCL[0] expected {lcl_0:.6}, got {:.6}",
+            chart.points[0].lcl
+        );
+    }
+
+    // --- Laney U' invariant: φ > 1 → wider limits than standard U chart ---
+    //
+    // Reference: Laney (2002) §4 (U' extension).
+    #[test]
+    fn laney_u_phi_gt_one_wider_than_standard() {
+        // Overdispersed U data: defect rates swing from low to high.
+        let samples: Vec<(u64, f64)> = vec![
+            (1, 10.0),
+            (15, 10.0),
+            (2, 10.0),
+            (14, 10.0),
+            (1, 10.0),
+            (16, 10.0),
+            (2, 10.0),
+            (13, 10.0),
+        ];
+
+        let laney = laney_u_chart(&samples).expect("chart should be Some");
+        assert!(laney.phi > 1.0, "φ expected > 1 for overdispersed data, got {}", laney.phi);
+
+        let total_d: u64 = samples.iter().map(|&(d, _)| d).sum();
+        let total_n: f64 = samples.iter().map(|&(_, n)| n).sum();
+        let u_bar = total_d as f64 / total_n;
+        let std_ucl = u_bar + 3.0 * (u_bar / 10.0_f64).sqrt();
+
+        assert!(
+            laney.points[0].ucl > std_ucl,
+            "Laney U' UCL ({:.4}) must exceed standard U chart UCL ({std_ucl:.4}) when φ>1",
+            laney.points[0].ucl
+        );
+    }
+
+    // --- G chart formula verification ---
+    //
+    // Kaminsky (1992) formula: UCL = ḡ + 3·√(ḡ·(ḡ+1)), LCL = max(0, ḡ − 3·√(ḡ·(ḡ+1)))
+    // The spread √(ḡ·(ḡ+1)) comes from the geometric distribution variance
+    // Var(G) = (1−p)/p² where p = 1/(ḡ+1), giving √((ḡ+1)·ḡ) = √(ḡ·(ḡ+1)).
+    //
+    // Numerical check with ḡ = 50.0:
+    //   spread = √(50·51) = √2550 ≈ 50.4975
+    //   UCL = 50 + 3·50.4975 ≈ 201.4925
+    //   LCL = max(0, 50 − 151.4925) = 0
+    //
+    // Reference: Kaminsky et al. (1992) §3; Benneyan (2001) §2.
+    #[test]
+    fn g_chart_formula_verification() {
+        // 8 identical observations so ḡ = 50.0 exactly.
+        let gaps = vec![50.0_f64; 8];
+        let chart = g_chart(&gaps).expect("chart should be Some");
+
+        let g_bar = 50.0_f64;
+        assert!(
+            (chart.g_bar - g_bar).abs() < 1e-10,
+            "ḡ expected 50.0, got {}",
+            chart.g_bar
+        );
+
+        let spread = (g_bar * (g_bar + 1.0)).sqrt(); // √(50·51) = √2550
+        let expected_ucl = g_bar + 3.0 * spread;
+        let expected_lcl = (g_bar - 3.0 * spread).max(0.0);
+
+        assert!(
+            (chart.points[0].ucl - expected_ucl).abs() < 1e-10,
+            "UCL expected {expected_ucl:.6}, got {:.6}",
+            chart.points[0].ucl
+        );
+        assert!(
+            (chart.points[0].lcl - expected_lcl).abs() < 1e-10,
+            "LCL expected {expected_lcl:.6}, got {:.6}",
+            chart.points[0].lcl
+        );
+        // LCL is 0 because ḡ - 3·spread < 0 for ḡ = 50.
+        assert!(
+            chart.points[0].lcl >= 0.0,
+            "LCL must be clamped to 0, got {}",
+            chart.points[0].lcl
+        );
+    }
+
+    // --- G chart spread > ḡ for any positive ḡ ---
+    //
+    // Invariant: √(ḡ·(ḡ+1)) > ḡ  ⟺  ḡ+1 > ḡ  ⟺  true.
+    // Therefore LCL is always 0 for any ḡ > 0 (the lower 3σ band is negative).
+    #[test]
+    fn g_chart_lcl_always_zero() {
+        for &g in &[1.0_f64, 5.0, 20.0, 100.0, 500.0] {
+            let gaps = vec![g; 5];
+            let chart = g_chart(&gaps).expect("chart should be Some");
+            assert!(
+                (chart.points[0].lcl - 0.0).abs() < 1e-10,
+                "LCL must be 0 for ḡ={g}, got {}",
+                chart.points[0].lcl
+            );
+        }
+    }
+
+    // --- T chart LCL factor verification ---
+    //
+    // The T chart LCL factor is −ln(0.99865) ≈ 0.001351 (not exactly 0.00135).
+    // This test pins the exact numeric value.
+    //
+    // Exponential quantile: Q(p; θ) = θ·(−ln(1−p)) where θ = t̄.
+    //   LCL factor = −ln(1 − 0.00135) = −ln(0.99865) ≈ 0.0013509
+    //   UCL factor = −ln(1 − 0.99865) = −ln(0.00135) ≈ 6.6077
+    //
+    // Reference: Borror, Keats & Montgomery (2003) §2.
+    #[test]
+    fn t_chart_lcl_factor_verification() {
+        let times = vec![100.0_f64; 10];
+        let chart = t_chart(&times).expect("chart should be Some");
+
+        let ucl_factor = chart.points[0].ucl / chart.t_bar;
+        let lcl_factor = chart.points[0].lcl / chart.t_bar;
+
+        let expected_ucl_factor = -(0.00135_f64.ln()); // ≈ 6.6077
+        let expected_lcl_factor = -(0.99865_f64.ln()); // ≈ 0.001351
+
+        assert!(
+            (ucl_factor - expected_ucl_factor).abs() < 1e-10,
+            "UCL factor expected {expected_ucl_factor:.6}, got {ucl_factor:.6}"
+        );
+        assert!(
+            (lcl_factor - expected_lcl_factor).abs() < 1e-10,
+            "LCL factor expected {expected_lcl_factor:.6}, got {lcl_factor:.6}"
+        );
+    }
+
+    // --- T chart invariant: UCL / LCL ratio is constant ---
+    //
+    // UCL = t̄ · k_U,  LCL = t̄ · k_L  →  UCL/LCL = k_U/k_L = constant.
+    // k_U/k_L = −ln(0.00135) / −ln(0.99865) ≈ 4893.
+    // This is a scale-invariant property of the exponential distribution.
+    #[test]
+    fn t_chart_ucl_lcl_ratio_scale_invariant() {
+        let k_u = -(0.00135_f64.ln());
+        let k_l = -(0.99865_f64.ln());
+        let expected_ratio = k_u / k_l;
+
+        for &t_bar in &[10.0_f64, 100.0, 1000.0] {
+            let times = vec![t_bar; 10];
+            let chart = t_chart(&times).expect("chart should be Some");
+            let ratio = chart.points[0].ucl / chart.points[0].lcl;
+            assert!(
+                (ratio - expected_ratio).abs() < 0.01,
+                "UCL/LCL ratio expected {expected_ratio:.2}, got {ratio:.2} at t̄={t_bar}"
+            );
+        }
     }
 }
