@@ -25,11 +25,14 @@ pub struct WeibullMrrResult {
 /// Plotting y = ln(-ln(1 - F_i)) vs x = ln(t_i) gives a line with
 /// slope beta and intercept -beta * ln(eta).
 ///
-/// Median ranks are computed using Bernard's approximation:
+/// Median ranks are computed using Benard's approximation:
 ///
 /// ```text
 /// F_i = (i - 0.3) / (n + 0.4)
 /// ```
+///
+/// Reference: Benard & Bos-Levenbach (1953), "Het uitzetten van waarnemingen
+/// op waarschijnlijkheidspaier", *Statistica Neerlandica*, 7(3), 163–173.
 ///
 /// # Algorithm
 /// 1. Sort failure times ascending
@@ -56,8 +59,12 @@ pub struct WeibullMrrResult {
 /// assert!(result.r_squared > 0.9);
 /// ```
 ///
-/// # Reference
-/// Abernethy (2006), *The New Weibull Handbook*, 5th ed.
+/// # References
+/// - Benard & Bos-Levenbach (1953), *Statistica Neerlandica*, 7(3), 163–173.
+/// - Abernethy, R.B. (2006). *The New Weibull Handbook*, 5th ed., §2.4.
+///
+/// # Complexity
+/// O(n log n) for sorting; O(n) for regression.
 pub fn weibull_mrr(failure_times: &[f64]) -> Option<WeibullMrrResult> {
     let n = failure_times.len();
     if n < 2 {
@@ -275,6 +282,34 @@ mod tests {
             "MRR scale = {}, MLE scale = {}",
             mrr_result.scale,
             mle_result.scale
+        );
+    }
+
+    /// Helper mirroring the Benard formula used inside `weibull_mrr`.
+    fn benard_rank(i: usize, n: usize) -> f64 {
+        (i as f64 - 0.3) / (n as f64 + 0.4)
+    }
+
+    /// Benard & Bos-Levenbach (1953): F_i = (i - 0.3) / (n + 0.4)
+    ///
+    /// Spot-check the three boundary-adjacent values for n = 10.
+    #[test]
+    fn test_benard_median_rank_values() {
+        let n = 10_usize;
+        assert!(
+            (benard_rank(1, n) - 0.067_308).abs() < 1e-5,
+            "rank 1: got {}, expected 0.067308",
+            benard_rank(1, n)
+        );
+        assert!(
+            (benard_rank(5, n) - 0.451_923).abs() < 1e-5,
+            "rank 5: got {}, expected 0.451923",
+            benard_rank(5, n)
+        );
+        assert!(
+            (benard_rank(10, n) - 0.932_692).abs() < 1e-5,
+            "rank 10: got {}, expected 0.932692",
+            benard_rank(10, n)
         );
     }
 

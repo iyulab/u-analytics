@@ -6,7 +6,7 @@
 //! # Modules
 //!
 //! - [`weibull_mle`] — Newton-Raphson MLE for shape and scale parameters
-//! - [`weibull_mrr`] — Median Rank Regression via Bernard's approximation
+//! - [`weibull_mrr`] — Median Rank Regression via Benard's approximation
 //! - [`ReliabilityAnalysis`] — R(t), hazard rate, MTBF, B-life from fitted parameters
 //!
 //! # References
