@@ -421,6 +421,49 @@ mod tests {
         assert!(!results[3].signal);
     }
 
+    /// Verifies the exact step-by-step numeric example from the spec.
+    ///
+    /// μ₀=0, σ=1, k=0.5, h=4.77, x=1.5 repeated:
+    /// C⁺₁ = max(0, 1.5-0.5+0)   = 1.0
+    /// C⁺₂ = max(0, 1.5-0.5+1.0) = 2.0
+    /// C⁺₃ = max(0, 1.5-0.5+2.0) = 3.0
+    /// C⁺₄ = max(0, 1.5-0.5+3.0) = 4.0
+    /// C⁺₅ = max(0, 1.5-0.5+4.0) = 5.0 > h=4.77 → signal
+    ///
+    /// Reference: Montgomery (2020), §9.1, k=0.5, h=4.77 → ARL₀ ≈ 370.
+    #[test]
+    fn test_cusum_numeric_reference_montgomery() {
+        let cusum = Cusum::with_params(0.0, 1.0, 0.5, 4.77)
+            .expect("valid params");
+        let data = [1.5f64; 5];
+        let results = cusum.analyze(&data);
+
+        // Step-by-step accumulation (sigma=1, so z_i = x_i - mu0 = 1.5)
+        assert!((results[0].s_upper - 1.0).abs() < 1e-10,
+            "C+_1 expected 1.0, got {}", results[0].s_upper);
+        assert!((results[1].s_upper - 2.0).abs() < 1e-10,
+            "C+_2 expected 2.0, got {}", results[1].s_upper);
+        assert!((results[2].s_upper - 3.0).abs() < 1e-10,
+            "C+_3 expected 3.0, got {}", results[2].s_upper);
+        assert!((results[3].s_upper - 4.0).abs() < 1e-10,
+            "C+_4 expected 4.0, got {}", results[3].s_upper);
+        assert!((results[4].s_upper - 5.0).abs() < 1e-10,
+            "C+_5 expected 5.0, got {}", results[4].s_upper);
+
+        // Only the 5th point exceeds h=4.77
+        assert!(!results[0].signal, "point 1 should not signal");
+        assert!(!results[1].signal, "point 2 should not signal");
+        assert!(!results[2].signal, "point 3 should not signal");
+        assert!(!results[3].signal, "point 4 should not signal");
+        assert!(results[4].signal, "point 5 should signal (5.0 > 4.77)");
+
+        // Lower CUSUM should remain 0 (no downward shift)
+        for r in &results {
+            assert!(r.s_lower.abs() < 1e-10,
+                "s_lower should be 0 with upward data, got {} at {}", r.s_lower, r.index);
+        }
+    }
+
     #[test]
     fn test_cusum_s_upper_s_lower_non_negative() {
         // CUSUM statistics should always be >= 0 by construction.

@@ -548,6 +548,37 @@ mod tests {
         assert!(simple_linear_regression(&[1.0, f64::NAN, 3.0], &[4.0, 5.0, 6.0]).is_none());
     }
 
+    /// Verifies exact OLS numeric reference from the spec.
+    ///
+    /// x = [1,2,3,4,5], y = [2,4,5,4,5]
+    /// x̄=3, ȳ=4
+    /// Σ(xᵢ-x̄)(yᵢ-ȳ) = 6, Σ(xᵢ-x̄)² = 10
+    /// β̂₁ = 6/10 = 0.6, β̂₀ = 4 - 0.6·3 = 2.2
+    /// SS_tot = 6, SS_res = 2.4, R² = 1 - 2.4/6 = 0.6
+    ///
+    /// Reference: Draper & Smith (1998), Applied Regression Analysis, 3rd ed.
+    #[test]
+    fn simple_numeric_reference_ols() {
+        let x = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let y = [2.0, 4.0, 5.0, 4.0, 5.0];
+        let r = simple_linear_regression(&x, &y).expect("should compute");
+
+        assert!((r.slope - 0.6).abs() < 1e-10,
+            "β̂₁ expected 0.6, got {}", r.slope);
+        assert!((r.intercept - 2.2).abs() < 1e-10,
+            "β̂₀ expected 2.2, got {}", r.intercept);
+        assert!((r.r_squared - 0.6).abs() < 1e-3,
+            "R² expected 0.6, got {}", r.r_squared);
+
+        // Verify fitted values
+        // ŷ₁=2.8, ŷ₂=3.4, ŷ₃=4.0, ŷ₄=4.6, ŷ₅=5.2
+        let expected_fitted = [2.8, 3.4, 4.0, 4.6, 5.2];
+        for (i, (&fi, &ef)) in r.fitted.iter().zip(expected_fitted.iter()).enumerate() {
+            assert!((fi - ef).abs() < 1e-10,
+                "ŷ_{} expected {}, got {}", i+1, ef, fi);
+        }
+    }
+
     #[test]
     fn simple_adjusted_r_squared() {
         let x = [1.0, 2.0, 3.0, 4.0, 5.0];

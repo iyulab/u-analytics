@@ -745,6 +745,27 @@ mod tests {
         assert!((result.r - 0.8816).abs() < 0.01, "r = {}", result.r);
     }
 
+    /// Verifies exact Pearson r numeric reference from the spec.
+    ///
+    /// x = [1,2,3,4,5], y = [2,4,5,4,5]
+    /// Σ(xᵢ-x̄)(yᵢ-ȳ) = 6
+    /// Σ(xᵢ-x̄)² = 10, Σ(yᵢ-ȳ)² = 6
+    /// r = 6 / √(10·6) = 6/√60 = 6/7.7460 ≈ 0.7746
+    ///
+    /// Reference: Pearson (1895), Proc. Royal Society London, 58, 240–242.
+    #[test]
+    fn pearson_numeric_reference() {
+        let x = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let y = [2.0, 4.0, 5.0, 4.0, 5.0];
+        let result = pearson(&x, &y).expect("should compute");
+
+        let expected_r = 6.0_f64 / (60.0_f64).sqrt(); // = 0.774596...
+        assert!((result.r - expected_r).abs() < 1e-3,
+            "r expected {:.6}, got {}", expected_r, result.r);
+        assert!((result.r - 0.7746).abs() < 1e-3,
+            "r expected ≈0.7746, got {}", result.r);
+    }
+
     #[test]
     fn pearson_insufficient_data() {
         assert!(pearson(&[1.0, 2.0], &[3.0, 4.0]).is_none());

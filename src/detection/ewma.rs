@@ -466,6 +466,44 @@ mod tests {
         assert!(!results[3].signal);
     }
 
+    /// Verifies exact numeric values from the spec.
+    ///
+    /// μ₀=0, σ=1, λ=0.2, Z₀=0, x=1.0 repeated:
+    /// Z₁ = 0.2·1.0 + 0.8·0.0 = 0.200
+    /// Z₂ = 0.2·1.0 + 0.8·0.2 = 0.360
+    /// Z₃ = 0.2·1.0 + 0.8·0.36 = 0.488
+    ///
+    /// Asymptotic UCL (λ=0.2, L=3, σ=1):
+    /// UCL_∞ = 3·√(0.2/1.8) = 3·√0.1111 ≈ 1.0000
+    ///
+    /// Reference: Roberts (1959), Technometrics 1(3).
+    #[test]
+    fn test_ewma_numeric_reference_roberts() {
+        let ewma = Ewma::with_params(0.0, 1.0, 0.2, 3.0).expect("valid params");
+        let data = [1.0f64; 3];
+        let results = ewma.analyze(&data);
+
+        // Z_i values
+        assert!((results[0].ewma - 0.2).abs() < 1e-10,
+            "Z_1 expected 0.2, got {}", results[0].ewma);
+        assert!((results[1].ewma - 0.36).abs() < 1e-10,
+            "Z_2 expected 0.36, got {}", results[1].ewma);
+        assert!((results[2].ewma - 0.488).abs() < 1e-10,
+            "Z_3 expected 0.488, got {}", results[2].ewma);
+
+        // Asymptotic UCL = 3·√(0.2/1.8) ≈ 1.0000
+        let asymptotic_ucl = 3.0 * (0.2f64 / 1.8).sqrt();
+        assert!((asymptotic_ucl - 1.0).abs() < 1e-3,
+            "UCL_inf expected ≈1.0, got {}", asymptotic_ucl);
+
+        // After 200 points at target, limit should converge to asymptotic
+        let long_data: Vec<f64> = vec![0.0; 200];
+        let long_results = ewma.analyze(&long_data);
+        let last_ucl = long_results[199].ucl;
+        assert!((last_ucl - asymptotic_ucl).abs() < 1e-6,
+            "UCL at i=200 should equal asymptotic {}, got {}", asymptotic_ucl, last_ucl);
+    }
+
     #[test]
     fn test_ewma_step_shift_detected() {
         // Step shift of +2sigma at index 20.
