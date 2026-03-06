@@ -2524,7 +2524,11 @@ mod tests {
         );
 
         // A² must be positive (it is a sum of log terms with negative coefficient)
-        assert!(r.statistic >= 0.0, "A² = {} must be non-negative", r.statistic);
+        assert!(
+            r.statistic >= 0.0,
+            "A² = {} must be non-negative",
+            r.statistic
+        );
     }
 
     /// Validates that the A² summation formula implements:

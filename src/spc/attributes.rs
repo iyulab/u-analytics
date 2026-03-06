@@ -1437,10 +1437,7 @@ mod tests {
 
         let (ucl, cl, lcl) = chart.control_limits().expect("limits");
         // np̄ = 9.9
-        assert!(
-            (cl - 9.9).abs() < 1e-10,
-            "NP CL expected 9.9, got {cl}"
-        );
+        assert!((cl - 9.9).abs() < 1e-10, "NP CL expected 9.9, got {cl}");
         // sigma = sqrt(9.9 * 0.901) = sqrt(8.9199) ≈ 2.98662
         let expected_sigma = (9.9_f64 * 0.901).sqrt();
         let expected_ucl = 9.9 + 3.0 * expected_sigma; // ≈ 18.860
@@ -1574,8 +1571,16 @@ mod tests {
     #[test]
     fn laney_p_ucl_formula_invariant() {
         let samples: Vec<(u64, u64)> = vec![
-            (3, 100), (7, 100), (2, 100), (8, 100), (4, 100),
-            (5, 150), (9, 150), (3, 150), (6, 150), (4, 150),
+            (3, 100),
+            (7, 100),
+            (2, 100),
+            (8, 100),
+            (4, 100),
+            (5, 150),
+            (9, 150),
+            (3, 150),
+            (6, 150),
+            (4, 150),
         ];
         let chart = laney_p_chart(&samples).expect("chart should be Some");
 
@@ -1587,15 +1592,18 @@ mod tests {
 
             assert!(
                 (pt.value - p_i).abs() < 1e-10,
-                "point {i}: value expected {p_i:.6}, got {:.6}", pt.value
+                "point {i}: value expected {p_i:.6}, got {:.6}",
+                pt.value
             );
             assert!(
                 (pt.ucl - expected_ucl).abs() < 1e-10,
-                "point {i}: UCL expected {expected_ucl:.6}, got {:.6}", pt.ucl
+                "point {i}: UCL expected {expected_ucl:.6}, got {:.6}",
+                pt.ucl
             );
             assert!(
                 (pt.lcl - expected_lcl).abs() < 1e-10,
-                "point {i}: LCL expected {expected_lcl:.6}, got {:.6}", pt.lcl
+                "point {i}: LCL expected {expected_lcl:.6}, got {:.6}",
+                pt.lcl
             );
         }
     }
@@ -1624,11 +1632,15 @@ mod tests {
         // MR̄ = 2·0.56 = 1.12, φ = 1.12/1.128 ≈ 0.993 (very close to 1.0)
         let n: u64 = 10_000;
         let d_high: u64 = 5028; // z ≈ +0.56
-        let d_low: u64 = 4972;  // z ≈ -0.56
-        // 6 samples alternating: φ = MR̄/1.128 with MR̄ from 5 identical MRs of 1.12
+        let d_low: u64 = 4972; // z ≈ -0.56
+                               // 6 samples alternating: φ = MR̄/1.128 with MR̄ from 5 identical MRs of 1.12
         let samples: Vec<(u64, u64)> = vec![
-            (d_high, n), (d_low, n), (d_high, n),
-            (d_low, n),  (d_high, n), (d_low, n),
+            (d_high, n),
+            (d_low, n),
+            (d_high, n),
+            (d_low, n),
+            (d_high, n),
+            (d_low, n),
         ];
 
         let laney = laney_p_chart(&samples).expect("chart should be Some");
@@ -1636,7 +1648,8 @@ mod tests {
         // φ should be close to 1 (within 1%).
         assert!(
             (laney.phi - 1.0).abs() < 0.01,
-            "φ expected ≈1.0, got {}", laney.phi
+            "φ expected ≈1.0, got {}",
+            laney.phi
         );
 
         // Standard P chart limits for same data at n=10000.
@@ -1683,7 +1696,11 @@ mod tests {
         ];
 
         let laney = laney_p_chart(&samples).expect("chart should be Some");
-        assert!(laney.phi > 1.0, "φ expected > 1 for overdispersed data, got {}", laney.phi);
+        assert!(
+            laney.phi > 1.0,
+            "φ expected > 1 for overdispersed data, got {}",
+            laney.phi
+        );
 
         // Standard P chart UCL for the same data.
         let total_d: u64 = samples.iter().map(|&(d, _)| d).sum();
@@ -1773,7 +1790,11 @@ mod tests {
         ];
 
         let laney = laney_u_chart(&samples).expect("chart should be Some");
-        assert!(laney.phi > 1.0, "φ expected > 1 for overdispersed data, got {}", laney.phi);
+        assert!(
+            laney.phi > 1.0,
+            "φ expected > 1 for overdispersed data, got {}",
+            laney.phi
+        );
 
         let total_d: u64 = samples.iter().map(|&(d, _)| d).sum();
         let total_n: f64 = samples.iter().map(|&(_, n)| n).sum();

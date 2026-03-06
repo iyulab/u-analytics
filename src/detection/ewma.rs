@@ -484,24 +484,40 @@ mod tests {
         let results = ewma.analyze(&data);
 
         // Z_i values
-        assert!((results[0].ewma - 0.2).abs() < 1e-10,
-            "Z_1 expected 0.2, got {}", results[0].ewma);
-        assert!((results[1].ewma - 0.36).abs() < 1e-10,
-            "Z_2 expected 0.36, got {}", results[1].ewma);
-        assert!((results[2].ewma - 0.488).abs() < 1e-10,
-            "Z_3 expected 0.488, got {}", results[2].ewma);
+        assert!(
+            (results[0].ewma - 0.2).abs() < 1e-10,
+            "Z_1 expected 0.2, got {}",
+            results[0].ewma
+        );
+        assert!(
+            (results[1].ewma - 0.36).abs() < 1e-10,
+            "Z_2 expected 0.36, got {}",
+            results[1].ewma
+        );
+        assert!(
+            (results[2].ewma - 0.488).abs() < 1e-10,
+            "Z_3 expected 0.488, got {}",
+            results[2].ewma
+        );
 
         // Asymptotic UCL = 3·√(0.2/1.8) ≈ 1.0000
         let asymptotic_ucl = 3.0 * (0.2f64 / 1.8).sqrt();
-        assert!((asymptotic_ucl - 1.0).abs() < 1e-3,
-            "UCL_inf expected ≈1.0, got {}", asymptotic_ucl);
+        assert!(
+            (asymptotic_ucl - 1.0).abs() < 1e-3,
+            "UCL_inf expected ≈1.0, got {}",
+            asymptotic_ucl
+        );
 
         // After 200 points at target, limit should converge to asymptotic
         let long_data: Vec<f64> = vec![0.0; 200];
         let long_results = ewma.analyze(&long_data);
         let last_ucl = long_results[199].ucl;
-        assert!((last_ucl - asymptotic_ucl).abs() < 1e-6,
-            "UCL at i=200 should equal asymptotic {}, got {}", asymptotic_ucl, last_ucl);
+        assert!(
+            (last_ucl - asymptotic_ucl).abs() < 1e-6,
+            "UCL at i=200 should equal asymptotic {}, got {}",
+            asymptotic_ucl,
+            last_ucl
+        );
     }
 
     #[test]

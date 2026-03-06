@@ -760,10 +760,17 @@ mod tests {
         let result = pearson(&x, &y).expect("should compute");
 
         let expected_r = 6.0_f64 / (60.0_f64).sqrt(); // = 0.774596...
-        assert!((result.r - expected_r).abs() < 1e-3,
-            "r expected {:.6}, got {}", expected_r, result.r);
-        assert!((result.r - 0.7746).abs() < 1e-3,
-            "r expected ≈0.7746, got {}", result.r);
+        assert!(
+            (result.r - expected_r).abs() < 1e-3,
+            "r expected {:.6}, got {}",
+            expected_r,
+            result.r
+        );
+        assert!(
+            (result.r - 0.7746).abs() < 1e-3,
+            "r expected ≈0.7746, got {}",
+            result.r
+        );
     }
 
     #[test]

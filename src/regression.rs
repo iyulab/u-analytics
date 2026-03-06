@@ -563,19 +563,33 @@ mod tests {
         let y = [2.0, 4.0, 5.0, 4.0, 5.0];
         let r = simple_linear_regression(&x, &y).expect("should compute");
 
-        assert!((r.slope - 0.6).abs() < 1e-10,
-            "β̂₁ expected 0.6, got {}", r.slope);
-        assert!((r.intercept - 2.2).abs() < 1e-10,
-            "β̂₀ expected 2.2, got {}", r.intercept);
-        assert!((r.r_squared - 0.6).abs() < 1e-3,
-            "R² expected 0.6, got {}", r.r_squared);
+        assert!(
+            (r.slope - 0.6).abs() < 1e-10,
+            "β̂₁ expected 0.6, got {}",
+            r.slope
+        );
+        assert!(
+            (r.intercept - 2.2).abs() < 1e-10,
+            "β̂₀ expected 2.2, got {}",
+            r.intercept
+        );
+        assert!(
+            (r.r_squared - 0.6).abs() < 1e-3,
+            "R² expected 0.6, got {}",
+            r.r_squared
+        );
 
         // Verify fitted values
         // ŷ₁=2.8, ŷ₂=3.4, ŷ₃=4.0, ŷ₄=4.6, ŷ₅=5.2
         let expected_fitted = [2.8, 3.4, 4.0, 4.6, 5.2];
         for (i, (&fi, &ef)) in r.fitted.iter().zip(expected_fitted.iter()).enumerate() {
-            assert!((fi - ef).abs() < 1e-10,
-                "ŷ_{} expected {}, got {}", i+1, ef, fi);
+            assert!(
+                (fi - ef).abs() < 1e-10,
+                "ŷ_{} expected {}, got {}",
+                i + 1,
+                ef,
+                fi
+            );
         }
     }
 

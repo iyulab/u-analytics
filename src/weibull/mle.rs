@@ -66,7 +66,7 @@ const TOL: f64 = 1e-10;
 ///
 /// # Returns
 /// `None` if data is insufficient (< 2 values), any value is non-positive,
-/// or the algorithm does not converge within [`MAX_ITER`] iterations.
+/// or the algorithm does not converge within 100 iterations.
 ///
 /// # Panics
 /// Does not panic. All error conditions return `None`.
@@ -291,9 +291,8 @@ mod tests {
         // Reference MLE estimates: shape β ≈ 2.102, scale η ≈ 81.88.
         // Cross-checked with R: library(MASS); fitdistr(data, "weibull")
         let data = vec![
-            17.88, 28.92, 33.0, 41.52, 42.12, 45.6, 48.48, 51.84, 51.96, 54.12,
-            55.56, 67.8, 68.64, 68.64, 68.88, 84.12, 93.12, 98.64, 105.12, 105.84,
-            127.92, 128.04, 173.4_f64,
+            17.88, 28.92, 33.0, 41.52, 42.12, 45.6, 48.48, 51.84, 51.96, 54.12, 55.56, 67.8, 68.64,
+            68.64, 68.88, 84.12, 93.12, 98.64, 105.12, 105.84, 127.92, 128.04, 173.4_f64,
         ];
         let result = weibull_mle(&data).expect("MLE should converge on Lawless §4.2 data");
         assert!(

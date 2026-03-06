@@ -433,22 +433,36 @@ mod tests {
     /// Reference: Montgomery (2020), §9.1, k=0.5, h=4.77 → ARL₀ ≈ 370.
     #[test]
     fn test_cusum_numeric_reference_montgomery() {
-        let cusum = Cusum::with_params(0.0, 1.0, 0.5, 4.77)
-            .expect("valid params");
+        let cusum = Cusum::with_params(0.0, 1.0, 0.5, 4.77).expect("valid params");
         let data = [1.5f64; 5];
         let results = cusum.analyze(&data);
 
         // Step-by-step accumulation (sigma=1, so z_i = x_i - mu0 = 1.5)
-        assert!((results[0].s_upper - 1.0).abs() < 1e-10,
-            "C+_1 expected 1.0, got {}", results[0].s_upper);
-        assert!((results[1].s_upper - 2.0).abs() < 1e-10,
-            "C+_2 expected 2.0, got {}", results[1].s_upper);
-        assert!((results[2].s_upper - 3.0).abs() < 1e-10,
-            "C+_3 expected 3.0, got {}", results[2].s_upper);
-        assert!((results[3].s_upper - 4.0).abs() < 1e-10,
-            "C+_4 expected 4.0, got {}", results[3].s_upper);
-        assert!((results[4].s_upper - 5.0).abs() < 1e-10,
-            "C+_5 expected 5.0, got {}", results[4].s_upper);
+        assert!(
+            (results[0].s_upper - 1.0).abs() < 1e-10,
+            "C+_1 expected 1.0, got {}",
+            results[0].s_upper
+        );
+        assert!(
+            (results[1].s_upper - 2.0).abs() < 1e-10,
+            "C+_2 expected 2.0, got {}",
+            results[1].s_upper
+        );
+        assert!(
+            (results[2].s_upper - 3.0).abs() < 1e-10,
+            "C+_3 expected 3.0, got {}",
+            results[2].s_upper
+        );
+        assert!(
+            (results[3].s_upper - 4.0).abs() < 1e-10,
+            "C+_4 expected 4.0, got {}",
+            results[3].s_upper
+        );
+        assert!(
+            (results[4].s_upper - 5.0).abs() < 1e-10,
+            "C+_5 expected 5.0, got {}",
+            results[4].s_upper
+        );
 
         // Only the 5th point exceeds h=4.77
         assert!(!results[0].signal, "point 1 should not signal");
@@ -459,8 +473,12 @@ mod tests {
 
         // Lower CUSUM should remain 0 (no downward shift)
         for r in &results {
-            assert!(r.s_lower.abs() < 1e-10,
-                "s_lower should be 0 with upward data, got {} at {}", r.s_lower, r.index);
+            assert!(
+                r.s_lower.abs() < 1e-10,
+                "s_lower should be 0 with upward data, got {} at {}",
+                r.s_lower,
+                r.index
+            );
         }
     }
 
