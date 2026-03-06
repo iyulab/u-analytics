@@ -2504,6 +2504,77 @@ mod tests {
         assert!(r.statistic_modified > r.statistic - 1e-10);
     }
 
+    /// Validates A²* = A² · (1 + 0.75/n + 2.25/n²) against manual computation.
+    ///
+    /// Reference: Stephens (1974), "EDF statistics for goodness of fit",
+    /// J. Amer. Statist. Assoc. 69(347), 730–737 (composite normal case).
+    #[test]
+    fn ad_correction_factor_formula() {
+        let data = [2.1, 1.9, 2.0, 2.05, 1.95, 2.02, 1.98, 2.01, 2.03, 1.97];
+        let n = data.len() as f64;
+        let r = anderson_darling_normality(&data).unwrap();
+
+        // Verify the Stephens correction formula A²* = A² · (1 + 0.75/n + 2.25/n²)
+        let expected_star = r.statistic * (1.0 + 0.75 / n + 2.25 / (n * n));
+        assert!(
+            (r.statistic_modified - expected_star).abs() < 1e-12,
+            "A²* = {}, expected = {}",
+            r.statistic_modified,
+            expected_star
+        );
+
+        // A² must be positive (it is a sum of log terms with negative coefficient)
+        assert!(r.statistic >= 0.0, "A² = {} must be non-negative", r.statistic);
+    }
+
+    /// Validates that the A² summation formula implements:
+    /// A² = -n - (1/n)·Σᵢ₌₀ⁿ⁻¹ (2i+1)·[ln Φ(zᵢ) + ln(1 − Φ(z_{n−1−i}))]
+    ///
+    /// This tests the formula structure by checking that a perfectly symmetric
+    /// dataset centered at 0 produces a smaller A² than a skewed dataset.
+    #[test]
+    fn ad_formula_structure_symmetric_vs_skewed() {
+        // Symmetric around mean → smaller A²
+        let symmetric = [-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 0.0];
+        // Right-skewed → larger A² (heavier right tail deviates from normality)
+        let skewed: Vec<f64> = (1..=10).map(|i| (i as f64 * 0.5).exp()).collect();
+
+        let r_sym = anderson_darling_normality(&symmetric).unwrap();
+        let r_skew = anderson_darling_normality(&skewed).unwrap();
+
+        assert!(
+            r_sym.statistic < r_skew.statistic,
+            "Symmetric A²={} should be less than skewed A²={}",
+            r_sym.statistic,
+            r_skew.statistic
+        );
+    }
+
+    /// Validates p-value invariants for the Anderson-Darling test.
+    ///
+    /// - Normal data: p > 0.05 (cannot reject normality)
+    /// - Exponential data: p < 0.05 (reject normality)
+    #[test]
+    fn ad_pvalue_invariants() {
+        // Near-normal data — tightly clustered, should not reject normality
+        let normal_data = [2.1, 1.9, 2.0, 2.05, 1.95, 2.02, 1.98, 2.01, 2.03, 1.97];
+        let r_normal = anderson_darling_normality(&normal_data).unwrap();
+        assert!(
+            r_normal.p_value > 0.05,
+            "Normal data: p = {} (expected > 0.05)",
+            r_normal.p_value
+        );
+
+        // Exponential data — heavy right tail, should reject normality
+        let exp_data: Vec<f64> = (1..=30).map(|i| (i as f64 * 0.3).exp()).collect();
+        let r_exp = anderson_darling_normality(&exp_data).unwrap();
+        assert!(
+            r_exp.p_value < 0.05,
+            "Exponential data: p = {} (expected < 0.05)",
+            r_exp.p_value
+        );
+    }
+
     // -----------------------------------------------------------------------
     // Shapiro-Wilk
     // -----------------------------------------------------------------------
