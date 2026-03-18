@@ -550,11 +550,10 @@ pub fn detect_changepoints(input_json: JsValue) -> Result<JsValue, JsValue> {
         PeltPenaltyDto::Value(v) => crate::detection::Penalty::Custom(v),
     };
 
-    let pelt =
-        crate::detection::Pelt::with_min_segment_len(cost, penalty, input.min_segment_len)
-            .ok_or_else(|| {
-                js_err("invalid parameters (penalty must be positive, min_segment_len >= 2)")
-            })?;
+    let pelt = crate::detection::Pelt::with_min_segment_len(cost, penalty, input.min_segment_len)
+        .ok_or_else(|| {
+        js_err("invalid parameters (penalty must be positive, min_segment_len >= 2)")
+    })?;
 
     let result = pelt.detect(&input.data);
 
@@ -622,9 +621,8 @@ pub fn detect_changepoints_multi(input_json: JsValue) -> Result<JsValue, JsValue
         PeltPenaltyDto::Value(v) => crate::detection::Penalty::Custom(v),
     };
 
-    let pelt =
-        crate::detection::Pelt::with_min_segment_len(cost, penalty, input.min_segment_len)
-            .ok_or_else(|| js_err("invalid parameters"))?;
+    let pelt = crate::detection::Pelt::with_min_segment_len(cost, penalty, input.min_segment_len)
+        .ok_or_else(|| js_err("invalid parameters"))?;
 
     let refs: Vec<&[f64]> = input.signals.iter().map(|s| s.as_slice()).collect();
     let result = pelt

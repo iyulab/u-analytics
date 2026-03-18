@@ -448,13 +448,7 @@ impl Pelt {
     /// # Panics
     ///
     /// Panics if `end <= start`.
-    fn segment_cost(
-        &self,
-        cum_sum: &[f64],
-        cum_sum_sq: &[f64],
-        start: usize,
-        end: usize,
-    ) -> f64 {
+    fn segment_cost(&self, cum_sum: &[f64], cum_sum_sq: &[f64], start: usize, end: usize) -> f64 {
         let seg_len = (end - start) as f64;
         let sum = cum_sum[end] - cum_sum[start];
         let sum_sq = cum_sum_sq[end] - cum_sum_sq[start];
@@ -843,11 +837,7 @@ mod tests {
         data.extend(vec![2.0; 50]); // Downward shift
 
         let result = pelt.detect(&data);
-        assert_eq!(
-            result.changepoints.len(),
-            1,
-            "should detect downward shift"
-        );
+        assert_eq!(result.changepoints.len(), 1, "should detect downward shift");
         assert!(
             (result.changepoints[0] as i64 - 50).unsigned_abs() <= 2,
             "changepoint should be near index 50, got {}",
