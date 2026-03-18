@@ -12,7 +12,7 @@
 //! - [`spc`] — Control charts (X̄-R, X̄-S, I-MR, P, NP, C, U) with run rules
 //! - [`capability`] — Process capability indices (Cp, Cpk, Pp, Ppk, Cpm)
 //! - [`weibull`] — Weibull parameter estimation (MLE, MRR) and reliability analysis
-//! - [`detection`] — Change-point detection (CUSUM, EWMA)
+//! - [`detection`] — Change-point detection (CUSUM, EWMA, PELT)
 //! - [`smoothing`] — Time series smoothing (SES, Holt, Holt-Winters)
 //! - [`correlation`] — Correlation analysis (Pearson, Spearman, Kendall, matrices)
 //! - [`regression`] — Regression analysis (simple, multiple OLS, VIF)
