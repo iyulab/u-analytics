@@ -130,6 +130,13 @@ pub struct PeltResult {
     pub changepoints: Vec<usize>,
 }
 
+/// Result of multivariate PELT changepoint detection.
+#[derive(Debug, Clone)]
+pub struct MultiPeltResult {
+    /// Detected changepoint indices (0-based), shared across all channels.
+    pub changepoints: Vec<usize>,
+}
+
 impl Pelt {
     /// Creates a new PELT detector with the given cost function and penalty.
     ///
@@ -291,6 +298,138 @@ impl Pelt {
         changepoints.sort_unstable();
 
         PeltResult { changepoints }
+    }
+
+    /// Detects changepoints in multivariate (multi-signal) data.
+    ///
+    /// Each inner slice represents one signal channel. All channels must
+    /// have the same length. The cost function is applied independently
+    /// to each channel and summed — a single set of changepoints is
+    /// returned that applies to all channels simultaneously.
+    ///
+    /// The penalty scales with the number of channels: `penalty * n_channels`.
+    ///
+    /// # Parameters
+    ///
+    /// - `signals`: slice of signal channels, each of length `n`
+    ///
+    /// # Returns
+    ///
+    /// `None` if channels have inconsistent lengths.
+    /// Otherwise returns `Some(MultiPeltResult)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::detection::{Pelt, CostFunction, Penalty};
+    ///
+    /// let signal_a: Vec<f64> = [vec![0.0; 50], vec![5.0; 50]].concat();
+    /// let signal_b: Vec<f64> = [vec![0.0; 50], vec![3.0; 50]].concat();
+    ///
+    /// let pelt = Pelt::new(CostFunction::L2, Penalty::Bic).unwrap();
+    /// let result = pelt.detect_multi(&[&signal_a, &signal_b]).unwrap();
+    /// assert!(!result.changepoints.is_empty());
+    /// ```
+    ///
+    /// # Reference
+    ///
+    /// Killick, R. & Eckley, I.A. (2014). "changepoint: An R Package for
+    /// Changepoint Analysis", *Journal of Statistical Software* 58(3).
+    ///
+    /// # Complexity
+    ///
+    /// Expected O(n * k), worst case O(n^2 * k) where k = number of channels.
+    pub fn detect_multi(&self, signals: &[&[f64]]) -> Option<MultiPeltResult> {
+        if signals.is_empty() {
+            return Some(MultiPeltResult {
+                changepoints: Vec::new(),
+            });
+        }
+
+        let n = signals[0].len();
+        if signals.iter().any(|s| s.len() != n) {
+            return None;
+        }
+
+        if n < 2 * self.min_segment_len {
+            return Some(MultiPeltResult {
+                changepoints: Vec::new(),
+            });
+        }
+
+        let n_channels = signals.len();
+        let penalty_value = self.resolve_penalty(n) * n_channels as f64;
+
+        // Precompute cumulative sums per channel for O(1) segment cost.
+        let mut cum_sums: Vec<Vec<f64>> = Vec::with_capacity(n_channels);
+        let mut cum_sum_sqs: Vec<Vec<f64>> = Vec::with_capacity(n_channels);
+
+        for signal in signals {
+            let mut cs = vec![0.0_f64; n + 1];
+            let mut css = vec![0.0_f64; n + 1];
+            for i in 0..n {
+                cs[i + 1] = cs[i] + signal[i];
+                css[i + 1] = css[i] + signal[i] * signal[i];
+            }
+            cum_sums.push(cs);
+            cum_sum_sqs.push(css);
+        }
+
+        let mut f = vec![0.0_f64; n + 1];
+        f[0] = -penalty_value;
+        let mut last_change = vec![0_usize; n + 1];
+        let mut candidates: Vec<usize> = vec![0];
+
+        for t in self.min_segment_len..=n {
+            let mut best_cost = f64::INFINITY;
+            let mut best_tau = 0;
+
+            for &tau in &candidates {
+                let seg_len = t - tau;
+                if seg_len < self.min_segment_len {
+                    continue;
+                }
+
+                let cost: f64 = (0..n_channels)
+                    .map(|ch| self.segment_cost(&cum_sums[ch], &cum_sum_sqs[ch], tau, t))
+                    .sum();
+                let total = f[tau] + cost + penalty_value;
+
+                if total < best_cost {
+                    best_cost = total;
+                    best_tau = tau;
+                }
+            }
+
+            f[t] = best_cost;
+            last_change[t] = best_tau;
+
+            candidates.retain(|&tau| {
+                let seg_len = t - tau;
+                if seg_len < self.min_segment_len {
+                    return true;
+                }
+                let cost: f64 = (0..n_channels)
+                    .map(|ch| self.segment_cost(&cum_sums[ch], &cum_sum_sqs[ch], tau, t))
+                    .sum();
+                f[tau] + cost < f[t] + penalty_value
+            });
+
+            candidates.push(t);
+        }
+
+        let mut changepoints = Vec::new();
+        let mut t = n;
+        while t > 0 {
+            let tau = last_change[t];
+            if tau > 0 {
+                changepoints.push(tau);
+            }
+            t = tau;
+        }
+        changepoints.sort_unstable();
+
+        Some(MultiPeltResult { changepoints })
     }
 
     /// Resolves the penalty value for a dataset of length `n`.
@@ -722,5 +861,78 @@ mod tests {
     fn test_cost_function_params() {
         assert_eq!(CostFunction::L2.params_per_segment(), 1);
         assert_eq!(CostFunction::Normal.params_per_segment(), 2);
+    }
+
+    // --- Multi-signal tests ---
+
+    #[test]
+    fn test_pelt_multi_single_channel_matches_univariate() {
+        let pelt = Pelt::new(CostFunction::L2, Penalty::Custom(5.0)).expect("valid");
+        let mut data = vec![0.0; 50];
+        data.extend(vec![5.0; 50]);
+
+        let uni = pelt.detect(&data);
+        let multi = pelt.detect_multi(&[&data]).expect("valid");
+        assert_eq!(uni.changepoints, multi.changepoints);
+    }
+
+    #[test]
+    fn test_pelt_multi_two_channels() {
+        let pelt = Pelt::new(CostFunction::L2, Penalty::Bic).expect("valid");
+        let a: Vec<f64> = [vec![0.0; 50], vec![5.0; 50]].concat();
+        let b: Vec<f64> = [vec![0.0; 50], vec![3.0; 50]].concat();
+
+        let result = pelt.detect_multi(&[&a, &b]).expect("valid");
+        assert_eq!(
+            result.changepoints.len(),
+            1,
+            "expected 1 changepoint, got {:?}",
+            result.changepoints
+        );
+        assert!(
+            (result.changepoints[0] as i64 - 50).unsigned_abs() <= 2,
+            "changepoint near 50, got {}",
+            result.changepoints[0]
+        );
+    }
+
+    #[test]
+    fn test_pelt_multi_inconsistent_lengths() {
+        let pelt = Pelt::new(CostFunction::L2, Penalty::Bic).expect("valid");
+        let a = vec![0.0; 50];
+        let b = vec![0.0; 30];
+        assert!(pelt.detect_multi(&[&a[..], &b[..]]).is_none());
+    }
+
+    #[test]
+    fn test_pelt_multi_empty_signals() {
+        let pelt = Pelt::new(CostFunction::L2, Penalty::Bic).expect("valid");
+        let result = pelt.detect_multi(&[]).expect("valid");
+        assert!(result.changepoints.is_empty());
+    }
+
+    #[test]
+    fn test_pelt_multi_three_channels_two_changepoints() {
+        let pelt = Pelt::new(CostFunction::L2, Penalty::Bic).expect("valid");
+        let a: Vec<f64> = [vec![0.0; 40], vec![5.0; 40], vec![0.0; 40]].concat();
+        let b: Vec<f64> = [vec![0.0; 40], vec![3.0; 40], vec![0.0; 40]].concat();
+        let c: Vec<f64> = [vec![0.0; 40], vec![4.0; 40], vec![0.0; 40]].concat();
+
+        let result = pelt.detect_multi(&[&a, &b, &c]).expect("valid");
+        assert_eq!(
+            result.changepoints.len(),
+            2,
+            "expected 2 changepoints, got {:?}",
+            result.changepoints
+        );
+    }
+
+    #[test]
+    fn test_pelt_multi_short_data() {
+        let pelt = Pelt::new(CostFunction::L2, Penalty::Bic).expect("valid");
+        let a = [1.0, 2.0];
+        let b = [3.0, 4.0];
+        let result = pelt.detect_multi(&[&a, &b]).expect("valid");
+        assert!(result.changepoints.is_empty());
     }
 }

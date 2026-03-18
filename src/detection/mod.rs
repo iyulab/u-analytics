@@ -29,4 +29,4 @@ mod pelt;
 
 pub use cusum::{Cusum, CusumResult};
 pub use ewma::{Ewma, EwmaResult};
-pub use pelt::{CostFunction, Pelt, PeltResult, Penalty};
+pub use pelt::{CostFunction, MultiPeltResult, Pelt, PeltResult, Penalty};
