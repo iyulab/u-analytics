@@ -564,3 +564,76 @@ pub fn detect_changepoints(input_json: JsValue) -> Result<JsValue, JsValue> {
     };
     to_js(&dto)
 }
+
+// ---------------------------------------------------------------------------
+// Multi-signal PELT
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct MultiPeltInputDto {
+    signals: Vec<Vec<f64>>,
+    #[serde(default = "default_cost")]
+    cost: String,
+    #[serde(default = "default_penalty")]
+    penalty: PeltPenaltyDto,
+    #[serde(default = "default_min_seg")]
+    min_segment_len: usize,
+}
+
+/// Detect changepoints in multi-signal data using PELT.
+///
+/// # Input JSON
+///
+/// ```json
+/// {
+///   "signals": [[0.0, 0.0, 5.0, 5.0], [0.0, 0.0, 3.0, 3.0]],
+///   "cost": "l2",
+///   "penalty": "bic",
+///   "min_segment_len": 2
+/// }
+/// ```
+///
+/// - `signals` (required): Array of signal channels (each same length).
+/// - `cost`, `penalty`, `min_segment_len`: Same as `detect_changepoints`.
+///
+/// # Output JSON
+///
+/// ```json
+/// { "changepoints": [2], "n_segments": 2 }
+/// ```
+#[wasm_bindgen]
+pub fn detect_changepoints_multi(input_json: JsValue) -> Result<JsValue, JsValue> {
+    let input: MultiPeltInputDto = serde_wasm_bindgen::from_value(input_json)
+        .map_err(|e| js_err(format!("invalid input: {e}")))?;
+
+    if input.signals.is_empty() {
+        return Err(js_err("signals must not be empty"));
+    }
+
+    let cost = match input.cost.as_str() {
+        "l2" => crate::detection::CostFunction::L2,
+        "normal" => crate::detection::CostFunction::Normal,
+        other => return Err(js_err(format!("unknown cost function: {other}"))),
+    };
+
+    let penalty = match input.penalty {
+        PeltPenaltyDto::Named(ref s) if s == "bic" => crate::detection::Penalty::Bic,
+        PeltPenaltyDto::Named(ref s) => return Err(js_err(format!("unknown penalty: {s}"))),
+        PeltPenaltyDto::Value(v) => crate::detection::Penalty::Custom(v),
+    };
+
+    let pelt =
+        crate::detection::Pelt::with_min_segment_len(cost, penalty, input.min_segment_len)
+            .ok_or_else(|| js_err("invalid parameters"))?;
+
+    let refs: Vec<&[f64]> = input.signals.iter().map(|s| s.as_slice()).collect();
+    let result = pelt
+        .detect_multi(&refs)
+        .ok_or_else(|| js_err("all signals must have the same length"))?;
+
+    let dto = PeltResultDto {
+        n_segments: result.changepoints.len() + 1,
+        changepoints: result.changepoints,
+    };
+    to_js(&dto)
+}
