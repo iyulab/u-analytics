@@ -11,7 +11,7 @@
 //! u-analytics = { version = "...", features = ["wasm"] }
 //! ```
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -462,6 +462,105 @@ pub fn t_chart(times: &[f64]) -> Result<JsValue, JsValue> {
     let dto = TChartDto {
         t_bar: chart.t_bar,
         points,
+    };
+    to_js(&dto)
+}
+
+// ---------------------------------------------------------------------------
+// PELT changepoint detection
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct PeltInputDto {
+    data: Vec<f64>,
+    #[serde(default = "default_cost")]
+    cost: String,
+    #[serde(default = "default_penalty")]
+    penalty: PeltPenaltyDto,
+    #[serde(default = "default_min_seg")]
+    min_segment_len: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PeltPenaltyDto {
+    Named(String),
+    Value(f64),
+}
+
+fn default_cost() -> String {
+    "l2".to_owned()
+}
+
+fn default_penalty() -> PeltPenaltyDto {
+    PeltPenaltyDto::Named("bic".to_owned())
+}
+
+fn default_min_seg() -> usize {
+    2
+}
+
+#[derive(Serialize)]
+struct PeltResultDto {
+    changepoints: Vec<usize>,
+    n_segments: usize,
+}
+
+/// Detect changepoints using the PELT algorithm (Killick et al., 2012).
+///
+/// # Input JSON
+///
+/// ```json
+/// {
+///   "data": [1.0, 1.1, 0.9, 5.0, 5.1, 4.9],
+///   "cost": "l2",
+///   "penalty": "bic",
+///   "min_segment_len": 2
+/// }
+/// ```
+///
+/// - `data` (required): Array of f64 values.
+/// - `cost` (optional): `"l2"` (mean change, default) or `"normal"` (mean+variance).
+/// - `penalty` (optional): `"bic"` (default) or a positive number.
+/// - `min_segment_len` (optional): Minimum segment length (default 2, must be >= 2).
+///
+/// # Output JSON
+///
+/// ```json
+/// { "changepoints": [3], "n_segments": 2 }
+/// ```
+#[wasm_bindgen]
+pub fn detect_changepoints(input_json: JsValue) -> Result<JsValue, JsValue> {
+    let input: PeltInputDto = serde_wasm_bindgen::from_value(input_json)
+        .map_err(|e| js_err(format!("invalid input: {e}")))?;
+
+    if input.data.is_empty() {
+        return Err(js_err("data must not be empty"));
+    }
+
+    let cost = match input.cost.as_str() {
+        "l2" => crate::detection::CostFunction::L2,
+        "normal" => crate::detection::CostFunction::Normal,
+        other => return Err(js_err(format!("unknown cost function: {other}"))),
+    };
+
+    let penalty = match input.penalty {
+        PeltPenaltyDto::Named(ref s) if s == "bic" => crate::detection::Penalty::Bic,
+        PeltPenaltyDto::Named(ref s) => return Err(js_err(format!("unknown penalty: {s}"))),
+        PeltPenaltyDto::Value(v) => crate::detection::Penalty::Custom(v),
+    };
+
+    let pelt =
+        crate::detection::Pelt::with_min_segment_len(cost, penalty, input.min_segment_len)
+            .ok_or_else(|| {
+                js_err("invalid parameters (penalty must be positive, min_segment_len >= 2)")
+            })?;
+
+    let result = pelt.detect(&input.data);
+
+    let dto = PeltResultDto {
+        n_segments: result.changepoints.len() + 1,
+        changepoints: result.changepoints,
     };
     to_js(&dto)
 }
