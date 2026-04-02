@@ -21,8 +21,10 @@
 
 mod indices;
 mod nonnormal;
+mod percentile;
 mod sigma_level;
 
 pub use indices::{CapabilityIndices, ProcessCapability};
 pub use nonnormal::{boxcox_capability, NonNormalCapabilityError, NonNormalCapabilityResult};
+pub use percentile::{percentile_capability, PercentileCapabilityResult};
 pub use sigma_level::{ppm_to_sigma, sigma_to_ppm};
