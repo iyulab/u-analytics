@@ -635,3 +635,240 @@ pub fn detect_changepoints_multi(input_json: JsValue) -> Result<JsValue, JsValue
     };
     to_js(&dto)
 }
+
+// ---------------------------------------------------------------------------
+// Gage R&R (MSA)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct GageRRInputDto {
+    measurements: Vec<Vec<Vec<f64>>>,
+    tolerance: Option<f64>,
+}
+
+#[derive(Serialize)]
+struct GageRRResultDto {
+    ev: f64,
+    av: f64,
+    grr: f64,
+    pv: f64,
+    tv: f64,
+    percent_ev: f64,
+    percent_av: f64,
+    percent_grr: f64,
+    percent_pv: f64,
+    percent_tolerance: Option<f64>,
+    ndc: u32,
+    status: String,
+}
+
+#[derive(Serialize)]
+struct GageRRAnovaResultDto {
+    anova_table: Vec<AnovaRowDto>,
+    variance_components: VarianceComponentsDto,
+    ev: f64,
+    av: f64,
+    grr: f64,
+    pv: f64,
+    tv: f64,
+    percent_grr: f64,
+    percent_tolerance: Option<f64>,
+    ndc: u32,
+    status: String,
+    interaction_significant: bool,
+    interaction_pooled: bool,
+}
+
+#[derive(Serialize)]
+struct AnovaRowDto {
+    source: String,
+    df: f64,
+    ss: f64,
+    ms: f64,
+    f_value: Option<f64>,
+    p_value: Option<f64>,
+}
+
+#[derive(Serialize)]
+struct VarianceComponentsDto {
+    part: f64,
+    operator: f64,
+    interaction: f64,
+    repeatability: f64,
+    reproducibility: f64,
+    total: f64,
+}
+
+#[derive(Serialize)]
+struct PercentileCapabilityDto {
+    cp_star: Option<f64>,
+    cpk_star: Option<f64>,
+    cpu_star: Option<f64>,
+    cpl_star: Option<f64>,
+    median: f64,
+    percentile_lower: f64,
+    percentile_upper: f64,
+}
+
+fn grr_status_str(status: crate::msa::GrrStatus) -> &'static str {
+    match status {
+        crate::msa::GrrStatus::Acceptable => "Acceptable",
+        crate::msa::GrrStatus::Marginal => "Marginal",
+        crate::msa::GrrStatus::Unacceptable => "Unacceptable",
+    }
+}
+
+/// Compute Gage R&R using the X̄-R (Average & Range) method.
+///
+/// # Input JSON
+///
+/// ```json
+/// {
+///   "measurements": [[[0.29, 0.41], [0.08, 0.25]], [[1.34, 1.17], [1.19, 0.94]]],
+///   "tolerance": 4.0
+/// }
+/// ```
+///
+/// `measurements[part][operator][trial]`. Tolerance is optional.
+///
+/// # Output JSON
+///
+/// Object with fields: `ev`, `av`, `grr`, `pv`, `tv`, `percent_ev`, `percent_av`,
+/// `percent_grr`, `percent_pv`, `percent_tolerance`, `ndc`, `status`.
+#[wasm_bindgen]
+pub fn gage_rr_xbar_r(input_json: JsValue) -> Result<JsValue, JsValue> {
+    let dto: GageRRInputDto = serde_wasm_bindgen::from_value(input_json)
+        .map_err(|e| js_err(format!("invalid input: {e}")))?;
+
+    let input = crate::msa::GageRRInput {
+        measurements: dto.measurements,
+        tolerance: dto.tolerance,
+    };
+
+    let result = crate::msa::gage_rr_xbar_r(&input).map_err(js_err)?;
+
+    let out = GageRRResultDto {
+        ev: result.ev,
+        av: result.av,
+        grr: result.grr,
+        pv: result.pv,
+        tv: result.tv,
+        percent_ev: result.percent_ev,
+        percent_av: result.percent_av,
+        percent_grr: result.percent_grr,
+        percent_pv: result.percent_pv,
+        percent_tolerance: result.percent_tolerance,
+        ndc: result.ndc,
+        status: grr_status_str(result.status).to_owned(),
+    };
+    to_js(&out)
+}
+
+/// Compute Gage R&R using the two-factor crossed ANOVA method.
+///
+/// # Input JSON
+///
+/// Same format as `gage_rr_xbar_r`.
+///
+/// # Output JSON
+///
+/// Object with fields: `anova_table`, `variance_components`, `ev`, `av`, `grr`,
+/// `pv`, `tv`, `percent_grr`, `percent_tolerance`, `ndc`, `status`,
+/// `interaction_significant`, `interaction_pooled`.
+#[wasm_bindgen]
+pub fn gage_rr_anova(input_json: JsValue) -> Result<JsValue, JsValue> {
+    let dto: GageRRInputDto = serde_wasm_bindgen::from_value(input_json)
+        .map_err(|e| js_err(format!("invalid input: {e}")))?;
+
+    let input = crate::msa::GageRRInput {
+        measurements: dto.measurements,
+        tolerance: dto.tolerance,
+    };
+
+    let result = crate::msa::gage_rr_anova(&input).map_err(js_err)?;
+
+    let anova_rows: Vec<AnovaRowDto> = result
+        .anova_table
+        .rows
+        .iter()
+        .map(|r| AnovaRowDto {
+            source: r.source.clone(),
+            df: r.df,
+            ss: r.ss,
+            ms: r.ms,
+            f_value: r.f_value,
+            p_value: r.p_value,
+        })
+        .collect();
+
+    let vc = &result.variance_components;
+    let out = GageRRAnovaResultDto {
+        anova_table: anova_rows,
+        variance_components: VarianceComponentsDto {
+            part: vc.part,
+            operator: vc.operator,
+            interaction: vc.interaction,
+            repeatability: vc.repeatability,
+            reproducibility: vc.reproducibility,
+            total: vc.total,
+        },
+        ev: result.ev,
+        av: result.av,
+        grr: result.grr,
+        pv: result.pv,
+        tv: result.tv,
+        percent_grr: result.percent_grr,
+        percent_tolerance: result.percent_tolerance,
+        ndc: result.ndc,
+        status: grr_status_str(result.status).to_owned(),
+        interaction_significant: result.interaction_significant,
+        interaction_pooled: result.interaction_pooled,
+    };
+    to_js(&out)
+}
+
+/// Compute percentile-based capability indices (ISO 22514-2).
+///
+/// # Input JSON
+///
+/// ```json
+/// {
+///   "data": [1.0, 2.0, ...],
+///   "lsl": 0.0,
+///   "usl": 10.0
+/// }
+/// ```
+///
+/// At least one of `lsl` or `usl` must be provided. Requires >= 20 data points.
+///
+/// # Output JSON
+///
+/// Object with fields: `cp_star`, `cpk_star`, `cpu_star`, `cpl_star`,
+/// `median`, `percentile_lower`, `percentile_upper`.
+#[wasm_bindgen]
+pub fn percentile_capability(input_json: JsValue) -> Result<JsValue, JsValue> {
+    #[derive(Deserialize)]
+    struct Input {
+        data: Vec<f64>,
+        lsl: Option<f64>,
+        usl: Option<f64>,
+    }
+
+    let input: Input = serde_wasm_bindgen::from_value(input_json)
+        .map_err(|e| js_err(format!("invalid input: {e}")))?;
+
+    let result =
+        crate::capability::percentile_capability(&input.data, input.lsl, input.usl)
+            .map_err(js_err)?;
+
+    let dto = PercentileCapabilityDto {
+        cp_star: result.cp_star,
+        cpk_star: result.cpk_star,
+        cpu_star: result.cpu_star,
+        cpl_star: result.cpl_star,
+        median: result.median,
+        percentile_lower: result.percentile_lower,
+        percentile_upper: result.percentile_upper,
+    };
+    to_js(&dto)
+}

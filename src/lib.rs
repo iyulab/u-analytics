@@ -18,6 +18,7 @@
 //! - [`regression`] — Regression analysis (simple, multiple OLS, VIF)
 //! - [`distribution`] — Distribution analysis (ECDF, histogram bins, QQ-plot, KS test)
 //! - [`testing`] — Hypothesis testing (t-tests, ANOVA, chi-squared, normality)
+//! - [`msa`] — Measurement System Analysis (Gage R&R, ANOVA method)
 //!
 //! ## Design Philosophy
 //!
@@ -29,6 +30,7 @@ pub mod capability;
 pub mod correlation;
 pub mod detection;
 pub mod distribution;
+pub mod msa;
 pub mod regression;
 pub mod smoothing;
 pub mod spc;
