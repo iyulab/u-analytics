@@ -857,9 +857,8 @@ pub fn percentile_capability(input_json: JsValue) -> Result<JsValue, JsValue> {
     let input: Input = serde_wasm_bindgen::from_value(input_json)
         .map_err(|e| js_err(format!("invalid input: {e}")))?;
 
-    let result =
-        crate::capability::percentile_capability(&input.data, input.lsl, input.usl)
-            .map_err(js_err)?;
+    let result = crate::capability::percentile_capability(&input.data, input.lsl, input.usl)
+        .map_err(js_err)?;
 
     let dto = PercentileCapabilityDto {
         cp_star: result.cp_star,

@@ -232,7 +232,7 @@ fn validate_measurements(
                     return Err("all measurements must be finite");
                 }
             }
-}
+        }
     }
 
     Ok((n_parts, n_operators, n_trials))
@@ -283,14 +283,8 @@ pub fn gage_rr_xbar_r(input: &GageRRInput) -> Result<GageRRResult, &'static str>
     let mut ranges: Vec<f64> = Vec::with_capacity(n_parts * n_operators);
     for part in &input.measurements {
         for trials in part {
-            let min = trials
-                .iter()
-                .copied()
-                .fold(f64::INFINITY, f64::min);
-            let max = trials
-                .iter()
-                .copied()
-                .fold(f64::NEG_INFINITY, f64::max);
+            let min = trials.iter().copied().fold(f64::INFINITY, f64::min);
+            let max = trials.iter().copied().fold(f64::NEG_INFINITY, f64::max);
             ranges.push(max - min);
         }
     }
@@ -317,10 +311,7 @@ pub fn gage_rr_xbar_r(input: &GageRRInput) -> Result<GageRRResult, &'static str>
         .iter()
         .copied()
         .fold(f64::NEG_INFINITY, f64::max)
-        - operator_avgs
-            .iter()
-            .copied()
-            .fold(f64::INFINITY, f64::min);
+        - operator_avgs.iter().copied().fold(f64::INFINITY, f64::min);
 
     // Step 4: EV and AV
     let k1 = K1[n_trials - 2];
@@ -352,14 +343,8 @@ pub fn gage_rr_xbar_r(input: &GageRRInput) -> Result<GageRRResult, &'static str>
         part_means.push(sum / count as f64);
     }
 
-    let rp = part_means
-        .iter()
-        .copied()
-        .fold(f64::NEG_INFINITY, f64::max)
-        - part_means
-            .iter()
-            .copied()
-            .fold(f64::INFINITY, f64::min);
+    let rp = part_means.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+        - part_means.iter().copied().fold(f64::INFINITY, f64::min);
 
     let k3 = K3[n_parts - 2];
     let pv = rp * k3;
@@ -672,11 +657,7 @@ pub fn gage_rr_anova(input: &GageRRInput) -> Result<GageRRAnovaResult, &'static 
     let pv = sigma2_part.sqrt();
     let tv = sigma2_total.sqrt();
 
-    let percent_grr = if tv > 1e-300 {
-        grr / tv * 100.0
-    } else {
-        0.0
-    };
+    let percent_grr = if tv > 1e-300 { grr / tv * 100.0 } else { 0.0 };
 
     let percent_tolerance = input.tolerance.and_then(|tol| {
         if tol > 1e-300 {
@@ -959,7 +940,8 @@ mod tests {
         );
 
         // σ²_reproducibility = σ²_operator + σ²_interaction
-        let expected_repro = result.variance_components.operator + result.variance_components.interaction;
+        let expected_repro =
+            result.variance_components.operator + result.variance_components.interaction;
         assert!(
             (result.variance_components.reproducibility - expected_repro).abs() < 1e-10,
             "σ²_reproducibility identity failed"
@@ -1034,9 +1016,21 @@ mod tests {
     fn anova_interaction_pooling() {
         // Create data with negligible interaction (operators measure similarly)
         let data = vec![
-            vec![vec![10.0, 10.1, 10.0], vec![10.0, 10.0, 10.1], vec![10.1, 10.0, 10.0]],
-            vec![vec![20.0, 20.1, 20.0], vec![20.0, 20.0, 20.1], vec![20.1, 20.0, 20.0]],
-            vec![vec![15.0, 15.1, 15.0], vec![15.0, 15.0, 15.1], vec![15.1, 15.0, 15.0]],
+            vec![
+                vec![10.0, 10.1, 10.0],
+                vec![10.0, 10.0, 10.1],
+                vec![10.1, 10.0, 10.0],
+            ],
+            vec![
+                vec![20.0, 20.1, 20.0],
+                vec![20.0, 20.0, 20.1],
+                vec![20.1, 20.0, 20.0],
+            ],
+            vec![
+                vec![15.0, 15.1, 15.0],
+                vec![15.0, 15.0, 15.1],
+                vec![15.1, 15.0, 15.0],
+            ],
         ];
         let input = GageRRInput {
             measurements: data,
@@ -1097,7 +1091,12 @@ mod tests {
                 );
             }
             if let Some(f) = row.f_value {
-                assert!(f >= 0.0, "F-value for {} should be non-negative: {}", row.source, f);
+                assert!(
+                    f >= 0.0,
+                    "F-value for {} should be non-negative: {}",
+                    row.source,
+                    f
+                );
             }
         }
     }

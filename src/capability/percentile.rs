@@ -90,12 +90,9 @@ pub fn percentile_capability(
     }
 
     // Compute percentiles using u-numflow (R-7 linear interpolation)
-    let p_lower = stats::quantile(data, 0.00135)
-        .ok_or("failed to compute 0.135th percentile")?;
-    let p_upper = stats::quantile(data, 0.99865)
-        .ok_or("failed to compute 99.865th percentile")?;
-    let median = stats::quantile(data, 0.5)
-        .ok_or("failed to compute median")?;
+    let p_lower = stats::quantile(data, 0.00135).ok_or("failed to compute 0.135th percentile")?;
+    let p_upper = stats::quantile(data, 0.99865).ok_or("failed to compute 99.865th percentile")?;
+    let median = stats::quantile(data, 0.5).ok_or("failed to compute median")?;
 
     // Validate spread
     let spread = p_upper - p_lower;
@@ -159,7 +156,9 @@ mod tests {
 
     /// Generate uniform-like data for testing.
     fn uniform_data(n: usize) -> Vec<f64> {
-        (0..n).map(|i| 10.0 + (i as f64) / (n as f64 - 1.0) * 10.0).collect()
+        (0..n)
+            .map(|i| 10.0 + (i as f64) / (n as f64 - 1.0) * 10.0)
+            .collect()
     }
 
     #[test]
@@ -258,11 +257,7 @@ mod tests {
         // Upper percentile should be near but <= data maximum
         assert!(
             result.percentile_upper
-                <= data
-                    .iter()
-                    .copied()
-                    .fold(f64::NEG_INFINITY, f64::max)
-                    + 1e-10,
+                <= data.iter().copied().fold(f64::NEG_INFINITY, f64::max) + 1e-10,
             "upper percentile above data max"
         );
         // p_lower < median < p_upper
