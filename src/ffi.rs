@@ -666,5 +666,5 @@ pub unsafe extern "C" fn uanalytics_free_string(ptr: *mut libc::c_char) {
 #[no_mangle]
 pub extern "C" fn uanalytics_version() -> *mut libc::c_char {
     let version = env!("CARGO_PKG_VERSION");
-    CString::new(version).unwrap().into_raw()
+    CString::new(version).expect("version string has no interior NUL").into_raw()
 }
