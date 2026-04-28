@@ -445,6 +445,62 @@ pub fn spearman_matrix(variables: &[&[f64]]) -> Option<Matrix> {
     correlation_matrix(&ranked_refs)
 }
 
+/// Computes a Kendall tau-b correlation matrix for the given variables.
+///
+/// Each off-diagonal entry is the result of [`kendall_tau_b`] for the
+/// corresponding pair of variables; diagonal entries are 1.0.
+///
+/// # Returns
+///
+/// `None` if there are fewer than 2 variables, fewer than 3 observations,
+/// any variable has differing length, contains a non-finite value, or any
+/// pairwise computation returns `None`.
+///
+/// # References
+///
+/// Kendall (1938). "A new measure of rank correlation".
+/// Knight (1966). "A computer method for calculating Kendall's tau with
+/// ungrouped data" (used internally by [`kendall_tau_b`] for O(n log n)).
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::correlation::kendall_matrix;
+///
+/// let x = [1.0, 2.0, 3.0, 4.0, 5.0];
+/// let y = [2.0, 4.0, 6.0, 8.0, 10.0];      // perfectly monotonic with x
+/// let z = [5.0, 4.0, 3.0, 2.0, 1.0];        // perfectly anti-monotonic with x
+/// let mat = kendall_matrix(&[&x, &y, &z]).unwrap();
+/// assert!((mat.get(0, 1) - 1.0).abs() < 1e-10);
+/// assert!((mat.get(0, 2) - (-1.0)).abs() < 1e-10);
+/// ```
+pub fn kendall_matrix(variables: &[&[f64]]) -> Option<Matrix> {
+    let p = variables.len();
+    if p < 2 {
+        return None;
+    }
+    let n = variables[0].len();
+    if n < 3 {
+        return None;
+    }
+    for v in variables {
+        if v.len() != n || v.iter().any(|x| !x.is_finite()) {
+            return None;
+        }
+    }
+
+    let mut data = vec![0.0_f64; p * p];
+    for i in 0..p {
+        data[i * p + i] = 1.0;
+        for j in (i + 1)..p {
+            let r = kendall_tau_b(variables[i], variables[j])?.r;
+            data[i * p + j] = r;
+            data[j * p + i] = r;
+        }
+    }
+    Matrix::new(p, p, data).ok()
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -988,6 +1044,47 @@ mod tests {
         assert!((mat.get(0, 1) - 1.0).abs() < 1e-10);
         // x and z are perfectly anti-monotone
         assert!((mat.get(0, 2) + 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn kendall_matrix_basic() {
+        let x = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let y = [2.0, 4.0, 6.0, 8.0, 10.0]; // perfectly monotone with x
+        let z = [5.0, 4.0, 3.0, 2.0, 1.0]; // perfectly anti-monotone with x
+        let mat = kendall_matrix(&[&x, &y, &z]).expect("should compute");
+
+        assert_eq!(mat.rows(), 3);
+        assert!((mat.get(0, 0) - 1.0).abs() < 1e-15);
+        assert!((mat.get(1, 1) - 1.0).abs() < 1e-15);
+        assert!((mat.get(2, 2) - 1.0).abs() < 1e-15);
+
+        assert!((mat.get(0, 1) - 1.0).abs() < 1e-10);
+        assert!((mat.get(0, 2) + 1.0).abs() < 1e-10);
+
+        // Symmetric
+        assert!((mat.get(0, 1) - mat.get(1, 0)).abs() < 1e-15);
+        assert!((mat.get(0, 2) - mat.get(2, 0)).abs() < 1e-15);
+    }
+
+    #[test]
+    fn kendall_matrix_insufficient_variables() {
+        let x = [1.0, 2.0, 3.0];
+        assert!(kendall_matrix(&[&x]).is_none());
+    }
+
+    #[test]
+    fn kendall_matrix_length_mismatch() {
+        let x = [1.0, 2.0, 3.0, 4.0];
+        let y = [4.0, 5.0];
+        assert!(kendall_matrix(&[&x, &y]).is_none());
+    }
+
+    #[test]
+    fn kendall_matrix_with_ties() {
+        let x = [1.0, 2.0, 2.0, 3.0, 4.0];
+        let y = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let mat = kendall_matrix(&[&x, &y]).expect("should compute");
+        assert!(mat.get(0, 1) > 0.7);
     }
 
     // -----------------------------------------------------------------------
