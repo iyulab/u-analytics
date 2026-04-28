@@ -515,10 +515,7 @@ pub fn vif(predictors: &[&[f64]]) -> Option<Vec<f64>> {
     if n <= p {
         return None;
     }
-    if predictors
-        .iter()
-        .any(|c| c.iter().any(|v| !v.is_finite()))
-    {
+    if predictors.iter().any(|c| c.iter().any(|v| !v.is_finite())) {
         return None;
     }
     Some(compute_vif(predictors))
@@ -565,10 +562,7 @@ pub fn condition_number(predictors: &[&[f64]]) -> Option<f64> {
     if n <= p {
         return None;
     }
-    if predictors
-        .iter()
-        .any(|c| c.iter().any(|v| !v.is_finite()))
-    {
+    if predictors.iter().any(|c| c.iter().any(|v| !v.is_finite())) {
         return None;
     }
 
