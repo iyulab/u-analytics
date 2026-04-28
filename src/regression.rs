@@ -471,6 +471,148 @@ pub fn predict_multiple(
     Some(result)
 }
 
+// ---------------------------------------------------------------------------
+// Multicollinearity diagnostics (public)
+// ---------------------------------------------------------------------------
+
+/// Computes the Variance Inflation Factor for each predictor.
+///
+/// `VIF_j = 1 / (1 - R²_j)`, where `R²_j` is the coefficient of determination
+/// from regressing predictor `j` on all other predictors. Standard thresholds
+/// are `VIF > 5` (moderate multicollinearity) and `VIF > 10` (severe).
+///
+/// # Returns
+///
+/// `None` if `predictors` is empty, lengths differ, fewer than `p+1`
+/// observations, or any predictor contains a non-finite value. With a single
+/// predictor, returns `Some(vec![1.0])` since VIF is undefined for one
+/// regressor.
+///
+/// # References
+///
+/// Marquardt (1970). "Generalized inverses, ridge regression."
+/// Belsley, Kuh, Welsch (1980). *Regression Diagnostics*.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::regression::vif;
+///
+/// let x1 = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+/// let x2 = [8.0, 1.0, 6.0, 3.0, 5.0, 7.0, 2.0, 4.0];
+/// let v = vif(&[&x1, &x2]).unwrap();
+/// assert!(v[0] < 2.0); // independent predictors
+/// ```
+pub fn vif(predictors: &[&[f64]]) -> Option<Vec<f64>> {
+    let p = predictors.len();
+    if p == 0 {
+        return None;
+    }
+    let n = predictors[0].len();
+    if !predictors.iter().all(|c| c.len() == n) {
+        return None;
+    }
+    if n <= p {
+        return None;
+    }
+    if predictors
+        .iter()
+        .any(|c| c.iter().any(|v| !v.is_finite()))
+    {
+        return None;
+    }
+    Some(compute_vif(predictors))
+}
+
+/// Computes the 2-norm condition number of the sample covariance matrix.
+///
+/// `cond(Σ) = λ_max / λ_min`, where `λ` are the eigenvalues of the unbiased
+/// sample covariance matrix of the (column-major) predictors. Standard
+/// threshold: `cond > 30` indicates multicollinearity worth investigating;
+/// `cond > 100` is severe (Belsley 1991).
+///
+/// # Returns
+///
+/// `None` for empty input, length mismatch, fewer than `p+1` observations,
+/// non-finite values, or eigenvalue decomposition failure. Returns
+/// `f64::INFINITY` when the smallest eigenvalue is below `1e-15`
+/// (numerically singular).
+///
+/// # References
+///
+/// Belsley (1991). *Conditioning Diagnostics*.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::regression::condition_number;
+///
+/// let x1 = [1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0];
+/// let x2 = [1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0];
+/// let c = condition_number(&[&x1, &x2]).unwrap();
+/// assert!(c < 5.0); // near-orthogonal columns: cond should be small
+/// ```
+pub fn condition_number(predictors: &[&[f64]]) -> Option<f64> {
+    use u_numflow::matrix::Matrix;
+    let p = predictors.len();
+    if p == 0 {
+        return None;
+    }
+    let n = predictors[0].len();
+    if !predictors.iter().all(|c| c.len() == n) {
+        return None;
+    }
+    if n <= p {
+        return None;
+    }
+    if predictors
+        .iter()
+        .any(|c| c.iter().any(|v| !v.is_finite()))
+    {
+        return None;
+    }
+
+    // Sample covariance matrix (unbiased, denominator n-1)
+    let mut means = vec![0.0_f64; p];
+    for (j, col) in predictors.iter().enumerate() {
+        means[j] = col.iter().sum::<f64>() / n as f64;
+    }
+    let mut cov = vec![0.0_f64; p * p];
+    let denom = (n - 1) as f64;
+    for r in 0..p {
+        let col_r = predictors[r];
+        let mean_r = means[r];
+        for c in r..p {
+            let col_c = predictors[c];
+            let mean_c = means[c];
+            let sum: f64 = col_r
+                .iter()
+                .zip(col_c.iter())
+                .map(|(&a, &b)| (a - mean_r) * (b - mean_c))
+                .sum();
+            let v = sum / denom;
+            cov[r * p + c] = v;
+            cov[c * p + r] = v;
+        }
+    }
+
+    let mat = Matrix::new(p, p, cov).ok()?;
+    let (eigenvalues, _eigenvectors) = mat.eigen_symmetric().ok()?;
+    let lambda_max = eigenvalues
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    let lambda_min = eigenvalues.iter().copied().fold(f64::INFINITY, f64::min);
+
+    if !lambda_max.is_finite() || lambda_max <= 0.0 {
+        return None;
+    }
+    if lambda_min < 1e-15 {
+        return Some(f64::INFINITY);
+    }
+    Some(lambda_max / lambda_min)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -779,6 +921,70 @@ mod tests {
             pred[0],
             expected
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Multicollinearity diagnostics — public vif() / condition_number()
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn vif_pub_independent_predictors() {
+        let x1 = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let x2 = [8.0, 1.0, 6.0, 3.0, 5.0, 7.0, 2.0, 4.0];
+        let v = vif(&[&x1, &x2]).expect("should compute");
+        for r in &v {
+            assert!(*r < 2.0, "VIF should be near 1.0 for independent, got {r}");
+        }
+    }
+
+    #[test]
+    fn vif_pub_collinear_predictors() {
+        let x1: Vec<f64> = (0..20).map(|i| i as f64).collect();
+        let x2: Vec<f64> = x1.iter().map(|&v| v * 2.0 + 0.001).collect();
+        let v = vif(&[&x1[..], &x2[..]]).expect("should compute");
+        assert!(
+            v[0] > 50.0,
+            "VIF should explode under near-collinearity, got {}",
+            v[0]
+        );
+    }
+
+    #[test]
+    fn vif_pub_rejects_short_input() {
+        let x = [1.0, 2.0];
+        assert!(vif(&[&x[..], &x[..]]).is_none());
+    }
+
+    #[test]
+    fn vif_pub_rejects_non_finite() {
+        let x1 = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let x2 = [1.0, 2.0, f64::NAN, 4.0, 5.0, 6.0];
+        assert!(vif(&[&x1[..], &x2[..]]).is_none());
+    }
+
+    #[test]
+    fn condition_number_orthogonal() {
+        let x1 = [1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0];
+        let x2 = [1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0];
+        let c = condition_number(&[&x1[..], &x2[..]]).expect("should compute");
+        assert!(c < 5.0, "near-orthogonal: cond should be small, got {c}");
+    }
+
+    #[test]
+    fn condition_number_collinear_explodes() {
+        let x1: Vec<f64> = (0..20).map(|i| i as f64).collect();
+        let x2: Vec<f64> = x1.iter().map(|&v| v * 2.0 + 1e-6).collect();
+        let c = condition_number(&[&x1[..], &x2[..]]).expect("should compute");
+        assert!(
+            c > 1e5 || c.is_infinite(),
+            "collinear: cond should be huge, got {c}"
+        );
+    }
+
+    #[test]
+    fn condition_number_rejects_short_input() {
+        let x = [1.0, 2.0];
+        assert!(condition_number(&[&x[..], &x[..]]).is_none());
     }
 
     #[test]
