@@ -129,6 +129,18 @@ fn to_js<T: Serialize>(val: &T) -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(val).map_err(js_err)
 }
 
+/// Deserialize a native JS value, rejecting JSON strings with an actionable
+/// message and prefixing the offending parameter name to any serde error.
+fn from_js<T: serde::de::DeserializeOwned>(value: JsValue, param: &str) -> Result<T, JsValue> {
+    if value.as_string().is_some() {
+        return Err(js_err(format!(
+            "{param}: expected a native JS object/array, got a string — \
+             pass the value directly, not JSON.stringify(...)"
+        )));
+    }
+    serde_wasm_bindgen::from_value(value).map_err(|e| js_err(format!("{param}: {e}")))
+}
+
 fn violation_name(v: crate::spc::ViolationType) -> &'static str {
     use crate::spc::ViolationType;
     match v {
@@ -159,11 +171,10 @@ fn violation_name(v: crate::spc::ViolationType) -> &'static str {
 /// Object with fields: `xbar_cl`, `xbar_ucl`, `xbar_lcl`, `r_cl`, `r_ucl`,
 /// `r_lcl`, `xbar_points`, `r_points`, `in_control`.
 #[wasm_bindgen]
-pub fn xbar_r_chart(data_json: JsValue) -> Result<JsValue, JsValue> {
+pub fn xbar_r_chart(data: JsValue) -> Result<JsValue, JsValue> {
     use crate::spc::{ControlChart, XBarRChart};
 
-    let subgroups: Vec<Vec<f64>> = serde_wasm_bindgen::from_value(data_json)
-        .map_err(|e| js_err(format!("invalid input: {e}")))?;
+    let subgroups: Vec<Vec<f64>> = from_js(data, "data")?;
 
     if subgroups.is_empty() {
         return Err(js_err("at least one subgroup required"));
@@ -240,14 +251,10 @@ pub fn xbar_r_chart(data_json: JsValue) -> Result<JsValue, JsValue> {
 ///
 /// Object with fields: `p_bar`, `points` (array), `in_control`.
 #[wasm_bindgen]
-pub fn p_chart(samples_json: JsValue) -> Result<JsValue, JsValue> {
+pub fn p_chart(samples: JsValue) -> Result<JsValue, JsValue> {
     use crate::spc::PChart;
 
-    let raw: Vec<[u64; 2]> = serde_wasm_bindgen::from_value(samples_json).map_err(|e| {
-        js_err(format!(
-            "invalid input — expected [[defectives, size], ...]: {e}"
-        ))
-    })?;
+    let raw: Vec<[u64; 2]> = from_js(samples, "samples (expected [[defectives, size], ...])")?;
 
     let mut chart = PChart::new();
     for pair in &raw {
@@ -361,12 +368,8 @@ pub fn anderson_darling_normality(data: &[f64]) -> Result<JsValue, JsValue> {
 ///
 /// Object with fields: `p_bar`, `phi`, `points` (array).
 #[wasm_bindgen]
-pub fn laney_p_chart(samples_json: JsValue) -> Result<JsValue, JsValue> {
-    let raw: Vec<[u64; 2]> = serde_wasm_bindgen::from_value(samples_json).map_err(|e| {
-        js_err(format!(
-            "invalid input — expected [[defectives, size], ...]: {e}"
-        ))
-    })?;
+pub fn laney_p_chart(samples: JsValue) -> Result<JsValue, JsValue> {
+    let raw: Vec<[u64; 2]> = from_js(samples, "samples (expected [[defectives, size], ...])")?;
 
     let samples: Vec<(u64, u64)> = raw.into_iter().map(|p| (p[0], p[1])).collect();
 
@@ -530,9 +533,8 @@ struct PeltResultDto {
 /// { "changepoints": [3], "n_segments": 2 }
 /// ```
 #[wasm_bindgen]
-pub fn detect_changepoints(input_json: JsValue) -> Result<JsValue, JsValue> {
-    let input: PeltInputDto = serde_wasm_bindgen::from_value(input_json)
-        .map_err(|e| js_err(format!("invalid input: {e}")))?;
+pub fn detect_changepoints(input: JsValue) -> Result<JsValue, JsValue> {
+    let input: PeltInputDto = from_js(input, "input")?;
 
     if input.data.is_empty() {
         return Err(js_err("data must not be empty"));
@@ -601,9 +603,8 @@ struct MultiPeltInputDto {
 /// { "changepoints": [2], "n_segments": 2 }
 /// ```
 #[wasm_bindgen]
-pub fn detect_changepoints_multi(input_json: JsValue) -> Result<JsValue, JsValue> {
-    let input: MultiPeltInputDto = serde_wasm_bindgen::from_value(input_json)
-        .map_err(|e| js_err(format!("invalid input: {e}")))?;
+pub fn detect_changepoints_multi(input: JsValue) -> Result<JsValue, JsValue> {
+    let input: MultiPeltInputDto = from_js(input, "input")?;
 
     if input.signals.is_empty() {
         return Err(js_err("signals must not be empty"));
@@ -736,9 +737,8 @@ fn grr_status_str(status: crate::msa::GrrStatus) -> &'static str {
 /// Object with fields: `ev`, `av`, `grr`, `pv`, `tv`, `percent_ev`, `percent_av`,
 /// `percent_grr`, `percent_pv`, `percent_tolerance`, `ndc`, `status`.
 #[wasm_bindgen]
-pub fn gage_rr_xbar_r(input_json: JsValue) -> Result<JsValue, JsValue> {
-    let dto: GageRRInputDto = serde_wasm_bindgen::from_value(input_json)
-        .map_err(|e| js_err(format!("invalid input: {e}")))?;
+pub fn gage_rr_xbar_r(input: JsValue) -> Result<JsValue, JsValue> {
+    let dto: GageRRInputDto = from_js(input, "input")?;
 
     let input = crate::msa::GageRRInput {
         measurements: dto.measurements,
@@ -776,9 +776,8 @@ pub fn gage_rr_xbar_r(input_json: JsValue) -> Result<JsValue, JsValue> {
 /// `pv`, `tv`, `percent_grr`, `percent_tolerance`, `ndc`, `status`,
 /// `interaction_significant`, `interaction_pooled`.
 #[wasm_bindgen]
-pub fn gage_rr_anova(input_json: JsValue) -> Result<JsValue, JsValue> {
-    let dto: GageRRInputDto = serde_wasm_bindgen::from_value(input_json)
-        .map_err(|e| js_err(format!("invalid input: {e}")))?;
+pub fn gage_rr_anova(input: JsValue) -> Result<JsValue, JsValue> {
+    let dto: GageRRInputDto = from_js(input, "input")?;
 
     let input = crate::msa::GageRRInput {
         measurements: dto.measurements,
@@ -846,7 +845,7 @@ pub fn gage_rr_anova(input_json: JsValue) -> Result<JsValue, JsValue> {
 /// Object with fields: `cp_star`, `cpk_star`, `cpu_star`, `cpl_star`,
 /// `median`, `percentile_lower`, `percentile_upper`.
 #[wasm_bindgen]
-pub fn percentile_capability(input_json: JsValue) -> Result<JsValue, JsValue> {
+pub fn percentile_capability(input: JsValue) -> Result<JsValue, JsValue> {
     #[derive(Deserialize)]
     struct Input {
         data: Vec<f64>,
@@ -854,8 +853,7 @@ pub fn percentile_capability(input_json: JsValue) -> Result<JsValue, JsValue> {
         usl: Option<f64>,
     }
 
-    let input: Input = serde_wasm_bindgen::from_value(input_json)
-        .map_err(|e| js_err(format!("invalid input: {e}")))?;
+    let input: Input = from_js(input, "input")?;
 
     let result = crate::capability::percentile_capability(&input.data, input.lsl, input.usl)
         .map_err(js_err)?;
