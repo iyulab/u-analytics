@@ -1,6 +1,6 @@
 [package]
 name = "u-analytics"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 authors = ["iyulab"]
 license = "MIT"
@@ -14,7 +14,7 @@ readme = "README.md"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-wasm = ["dep:wasm-bindgen", "dep:serde-wasm-bindgen", "dep:serde"]
+wasm = ["dep:wasm-bindgen", "dep:serde-wasm-bindgen", "dep:serde_json", "dep:serde"]
 ffi = ["dep:serde", "dep:serde_json", "dep:libc"]
 
 [dependencies]
@@ -29,4 +29,5 @@ serde-wasm-bindgen = { version = "0.6", optional = true }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]
+serde_json = "1.0"
 proptest = "1.4"

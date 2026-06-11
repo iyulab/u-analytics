@@ -8,6 +8,17 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-12
+
+### Changed — BREAKING (WASM)
+
+- WASM input objects (`detect_changepoints`, `detect_changepoints_multi`,
+  `gage_rr_xbar_r`, `gage_rr_anova`, `percentile_capability`) now **reject
+  unknown keys** with an explicit `unknown field` error instead of silently
+  ignoring them (`serde(deny_unknown_fields)`, enforced through a
+  `serde_json::Value` round-trip at the JS boundary). Typos and unsupported
+  options previously failed silently; remove any extra keys when upgrading.
+
 ## [0.5.0] - 2026-06-11
 
 ### Added

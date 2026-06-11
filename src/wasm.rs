@@ -138,7 +138,12 @@ fn from_js<T: serde::de::DeserializeOwned>(value: JsValue, param: &str) -> Resul
              pass the value directly, not JSON.stringify(...)"
         )));
     }
-    serde_wasm_bindgen::from_value(value).map_err(|e| js_err(format!("{param}: {e}")))
+    // serde-wasm-bindgen reads only a struct's declared fields from a JS
+    // object, so `deny_unknown_fields` never sees extra keys. Round-trip
+    // through serde_json::Value so the strict wire schema is enforced.
+    let json: serde_json::Value =
+        serde_wasm_bindgen::from_value(value).map_err(|e| js_err(format!("{param}: {e}")))?;
+    serde_json::from_value(json).map_err(|e| js_err(format!("{param}: {e}")))
 }
 
 fn violation_name(v: crate::spc::ViolationType) -> &'static str {
@@ -474,6 +479,7 @@ pub fn t_chart(times: &[f64]) -> Result<JsValue, JsValue> {
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PeltInputDto {
     data: Vec<f64>,
     #[serde(default = "default_cost")]
@@ -571,6 +577,7 @@ pub fn detect_changepoints(input: JsValue) -> Result<JsValue, JsValue> {
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct MultiPeltInputDto {
     signals: Vec<Vec<f64>>,
     #[serde(default = "default_cost")]
@@ -642,9 +649,19 @@ pub fn detect_changepoints_multi(input: JsValue) -> Result<JsValue, JsValue> {
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct GageRRInputDto {
     measurements: Vec<Vec<Vec<f64>>>,
     tolerance: Option<f64>,
+}
+
+/// Input for `percentile_capability`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PercentileCapabilityInputDto {
+    data: Vec<f64>,
+    lsl: Option<f64>,
+    usl: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -846,14 +863,7 @@ pub fn gage_rr_anova(input: JsValue) -> Result<JsValue, JsValue> {
 /// `median`, `percentile_lower`, `percentile_upper`.
 #[wasm_bindgen]
 pub fn percentile_capability(input: JsValue) -> Result<JsValue, JsValue> {
-    #[derive(Deserialize)]
-    struct Input {
-        data: Vec<f64>,
-        lsl: Option<f64>,
-        usl: Option<f64>,
-    }
-
-    let input: Input = from_js(input, "input")?;
+    let input: PercentileCapabilityInputDto = from_js(input, "input")?;
 
     let result = crate::capability::percentile_capability(&input.data, input.lsl, input.usl)
         .map_err(js_err)?;
@@ -868,4 +878,46 @@ pub fn percentile_capability(input: JsValue) -> Result<JsValue, JsValue> {
         percentile_upper: result.percentile_upper,
     };
     to_js(&dto)
+}
+
+// ── Wire-schema strictness tests ─────────────────────────────────────
+
+#[cfg(test)]
+mod dto_strictness_tests {
+    use serde_json::json;
+
+    fn assert_rejects_unknown<T: serde::de::DeserializeOwned>(v: serde_json::Value) {
+        match serde_json::from_value::<T>(v) {
+            Ok(_) => panic!("unknown key must be rejected"),
+            Err(e) => assert!(e.to_string().contains("unknown field"), "{e}"),
+        }
+    }
+
+    #[test]
+    fn pelt_input_rejects_unknown_keys() {
+        assert_rejects_unknown::<super::PeltInputDto>(
+            json!({ "data": [1.0, 2.0], "minSegmentLen": 3 }),
+        );
+    }
+
+    #[test]
+    fn multi_pelt_input_rejects_unknown_keys() {
+        assert_rejects_unknown::<super::MultiPeltInputDto>(
+            json!({ "signals": [[1.0, 2.0]], "penalty_value": 1.0 }),
+        );
+    }
+
+    #[test]
+    fn gage_rr_input_rejects_unknown_keys() {
+        assert_rejects_unknown::<super::GageRRInputDto>(
+            json!({ "measurements": [[[1.0]]], "tol": 0.5 }),
+        );
+    }
+
+    #[test]
+    fn percentile_capability_input_rejects_unknown_keys() {
+        assert_rejects_unknown::<super::PercentileCapabilityInputDto>(
+            json!({ "data": [1.0, 2.0], "target": 1.5 }),
+        );
+    }
 }
