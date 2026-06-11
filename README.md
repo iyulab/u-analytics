@@ -20,7 +20,7 @@ hypothesis testing for industrial quality engineering.
 | `smoothing` | Time series smoothing (SES, Holt linear trend, Holt-Winters seasonal) |
 | `correlation` | Correlation analysis (Pearson, Spearman, Kendall, partial, correlation matrices) |
 | `regression` | Regression analysis (simple OLS, multiple OLS, VIF multicollinearity) |
-| `distribution` | Distribution analysis (ECDF, histogram bins — Sturges/Scott/FD, QQ-plot, KS test) |
+| `distribution` | Distribution analysis (ECDF, histogram bins — Sturges/Scott/FD/Fixed, QQ-plot, KS test) |
 | `testing` | Hypothesis testing (t-tests, ANOVA, chi-squared, normality — SW/AD/JB) |
 
 ## Features

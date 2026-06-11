@@ -81,6 +81,8 @@ pub enum BinMethod {
     Scott,
     /// Freedman-Diaconis rule: h = 2·IQR·n^(-1/3). Robust to outliers.
     FreedmanDiaconis,
+    /// Explicit bin count chosen by the caller. Must be ≥ 1.
+    Fixed(usize),
 }
 
 /// Result of histogram bin computation.
@@ -140,7 +142,7 @@ pub fn histogram_bins(data: &[f64], method: BinMethod) -> Option<HistogramBins> 
                 return None;
             }
             let h = 3.49 * sd * nf.powf(-1.0 / 3.0);
-            (range / h).ceil() as usize
+            ((range / h).ceil() as usize).max(2)
         }
         BinMethod::FreedmanDiaconis => {
             let q1 = stats::quantile(data, 0.25)?;
@@ -152,11 +154,14 @@ pub fn histogram_bins(data: &[f64], method: BinMethod) -> Option<HistogramBins> 
                 k.max(2)
             } else {
                 let h = 2.0 * iqr * nf.powf(-1.0 / 3.0);
-                (range / h).ceil() as usize
+                ((range / h).ceil() as usize).max(2)
             }
         }
-    }
-    .max(2);
+        // Caller-specified count is honored exactly (no automatic floor);
+        // zero bins is invalid input.
+        BinMethod::Fixed(0) => return None,
+        BinMethod::Fixed(k) => k,
+    };
 
     let bin_width = range / n_bins as f64;
 
@@ -1152,6 +1157,38 @@ mod tests {
     fn hist_edge_cases() {
         assert!(histogram_bins(&[1.0], BinMethod::Sturges).is_none()); // < 2
         assert!(histogram_bins(&[5.0, 5.0, 5.0], BinMethod::Sturges).is_none());
+        // zero range
+    }
+
+    #[test]
+    fn hist_fixed_exact_count() {
+        let data: Vec<f64> = (0..100).map(|i| i as f64).collect();
+        let r = histogram_bins(&data, BinMethod::Fixed(5)).expect("should compute");
+        assert_eq!(r.n_bins, 5);
+        assert_eq!(r.edges.len(), 6);
+        assert_eq!(r.counts.len(), 5);
+        let total: usize = r.counts.iter().sum();
+        assert_eq!(total, 100);
+    }
+
+    #[test]
+    fn hist_fixed_single_bin() {
+        let data = [1.0, 2.0, 3.0];
+        let r = histogram_bins(&data, BinMethod::Fixed(1)).expect("should compute");
+        assert_eq!(r.n_bins, 1);
+        assert_eq!(r.counts, vec![3]);
+    }
+
+    #[test]
+    fn hist_fixed_zero_is_invalid() {
+        let data = [1.0, 2.0, 3.0];
+        assert!(histogram_bins(&data, BinMethod::Fixed(0)).is_none());
+    }
+
+    #[test]
+    fn hist_fixed_shares_input_guards() {
+        assert!(histogram_bins(&[1.0], BinMethod::Fixed(5)).is_none()); // < 2 points
+        assert!(histogram_bins(&[5.0, 5.0, 5.0], BinMethod::Fixed(5)).is_none());
         // zero range
     }
 
