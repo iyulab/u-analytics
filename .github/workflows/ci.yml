@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -103,8 +107,7 @@ jobs:
         run: |
           mkdir -p ../../foundation
           git clone --depth 1 https://github.com/iyulab/u-numflow.git ../../foundation/u-numflow
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
+      - uses: taiki-e/install-action@cargo-audit
       - run: cargo audit
 
   coverage:
