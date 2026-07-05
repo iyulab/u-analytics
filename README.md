@@ -127,10 +127,33 @@ let data = [10.1, 9.9, 10.0, 10.2, 12.0, 12.1, 11.9, 12.3];
 let signals = cusum.signal_points(&data);
 ```
 
+## JavaScript / WASM (npm)
+
+```bash
+npm install @iyulab/u-analytics
+```
+
+The npm package ships two entry points, selected automatically via the
+`exports` map:
+
+| Environment | Entry | Notes |
+|---|---|---|
+| Bundlers (webpack, Vite, …) | ESM + WebAssembly ESM-integration | `default` condition |
+| Node.js (`require` **and** `import`) | CJS glue that loads the wasm from the filesystem | `node` condition — works in CJS TS runners (`tsx`, `ts-node`) without loader hooks |
+
+```js
+// Both work in Node — no bundler, no experimental flags:
+const { anderson_darling_normality } = require("@iyulab/u-analytics");
+// or: import { anderson_darling_normality } from "@iyulab/u-analytics";
+
+anderson_darling_normality(new Float64Array([4.9, 5.1, 5.0, 5.2, 4.8, 5.05]));
+// → { statistic, statistic_modified, p_value }
+```
+
 ## Test Status
 
 ```
-446 lib tests + 68 doc-tests = 514 total
+541 lib tests + 75 doc-tests = 616 total
 0 clippy warnings
 ```
 

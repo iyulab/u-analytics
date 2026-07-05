@@ -1,6 +1,6 @@
 [package]
 name = "u-analytics"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 authors = ["iyulab"]
 license = "MIT"
@@ -18,7 +18,7 @@ wasm = ["dep:wasm-bindgen", "dep:serde-wasm-bindgen", "dep:serde_json", "dep:ser
 ffi = ["dep:serde", "dep:serde_json", "dep:libc"]
 
 [dependencies]
-u-numflow = { version = "0.2", path = "../../foundation/u-numflow" }
+u-numflow = { version = "0.3", path = "../../foundation/u-numflow" }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
 libc = { version = "0.2", optional = true }
