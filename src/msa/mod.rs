@@ -624,9 +624,21 @@ pub fn gage_rr_anova(input: &GageRRInput) -> Result<GageRRAnovaResult, &'static 
     }
     rows.push(AnovaRow {
         source: "Repeatability".to_owned(),
-        df: if interaction_pooled { pooled_df } else { df_error },
-        ss: if interaction_pooled { pooled_ss } else { ss_error },
-        ms: if interaction_pooled { ms_pooled } else { ms_error },
+        df: if interaction_pooled {
+            pooled_df
+        } else {
+            df_error
+        },
+        ss: if interaction_pooled {
+            pooled_ss
+        } else {
+            ss_error
+        },
+        ms: if interaction_pooled {
+            ms_pooled
+        } else {
+            ms_error
+        },
         f_value: None,
         p_value: None,
     });
@@ -646,7 +658,12 @@ pub fn gage_rr_anova(input: &GageRRInput) -> Result<GageRRAnovaResult, &'static 
     // raw MS_error while operator/part used the pooled MS, mixing two models in
     // one result and inflating GRR / %GRR. `.max(0.0)` guards against a negative
     // std-dev (NaN) when rounding pushes the (already ~0) MS slightly below zero.
-    let sigma2_repeatability = (if interaction_pooled { ms_pooled } else { ms_error }).max(0.0);
+    let sigma2_repeatability = (if interaction_pooled {
+        ms_pooled
+    } else {
+        ms_error
+    })
+    .max(0.0);
 
     let sigma2_interaction = if interaction_pooled {
         0.0
@@ -1211,7 +1228,11 @@ mod tests {
             }
         }
         // Repeatability is ~0, so GRR-derived std devs must stay finite (no NaN).
-        assert!(result.ev.is_finite(), "EV must be finite, got {}", result.ev);
+        assert!(
+            result.ev.is_finite(),
+            "EV must be finite, got {}",
+            result.ev
+        );
         assert!(
             result.percent_grr.is_finite(),
             "%GRR must be finite, got {}",

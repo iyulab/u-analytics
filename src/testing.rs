@@ -2244,9 +2244,21 @@ mod tests {
         let data: Vec<f64> = (0..9000).map(|_| -(1.0 - rng()).ln()).collect();
         let a = anderson_darling_test(&data).expect("computes");
         let b = anderson_darling_normality(&data).expect("computes");
-        assert!(a.statistic_star > 300.0, "expected large A*², got {}", a.statistic_star);
-        assert!(a.p_value < 0.5, "test() overflowed toward normal: p={}", a.p_value);
-        assert!(b.p_value < 0.5, "normality() overflowed toward normal: p={}", b.p_value);
+        assert!(
+            a.statistic_star > 300.0,
+            "expected large A*², got {}",
+            a.statistic_star
+        );
+        assert!(
+            a.p_value < 0.5,
+            "test() overflowed toward normal: p={}",
+            a.p_value
+        );
+        assert!(
+            b.p_value < 0.5,
+            "normality() overflowed toward normal: p={}",
+            b.p_value
+        );
     }
 
     // -----------------------------------------------------------------------
