@@ -8,6 +8,31 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-07-15
+
+### Fixed
+
+- **`gage_rr_anova` — pooled repeatability consistency.** When the operator×part
+  interaction is pooled into error (AIAG p > 0.25), the repeatability variance
+  component now uses the pooled error MS like the operator/part components,
+  instead of leaking the un-pooled raw `MS_error`. Previously this internal
+  inconsistency inflated `GRR` / `%GRR` and could tip the AIAG acceptability grade
+  near threshold. The returned `anova_table` is now consistent with the pooled
+  model too: it reports the pooled error row (so the Part/Operator `f_value` is
+  reproducible from the table's own MS values) and drops the folded-in interaction
+  row, and the row degrees of freedom sum to the total.
+- **`gage_rr_anova` — degenerate F-denominator.** A mean-square denominator that
+  collapses to floating-point noise (e.g. every trial within each cell identical)
+  now yields `f_value`/`p_value` = `None` via a sign-independent *relative*
+  degeneracy floor, instead of a spurious ~1e12 finite F (rendered as "very
+  significant") or a result that flipped between a huge value and `None` depending
+  on the sign of the rounding noise.
+- **`anderson_darling_test` / `anderson_darling_normality` — large-n p-value
+  overflow.** For clearly non-normal data at large n the p-value no longer
+  overflows to exactly `1.0` ("perfectly normal") while the A² statistic is large
+  and still growing. The upper-tail approximation's evaluation point is now clamped
+  to its polynomial vertex, keeping the p-value monotonically non-increasing in A².
+
 ## [0.6.2] - 2026-07-05
 
 ### Fixed

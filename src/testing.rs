@@ -514,6 +514,43 @@ pub struct AndersonDarlingResult {
     pub p_value: f64,
 }
 
+/// Upper-tail p-value for the Anderson-Darling A*² statistic, using the
+/// D'Agostino & Stephens (1986) piecewise approximation.
+///
+/// # Numerical range
+///
+/// The large-A*² branch `exp(1.2937 − 5.709·A*² + 0.0186·A*²²)` is a bounded-range
+/// fit: its positive quadratic term turns the exponent back *upward* past the
+/// vertex A*² = 5.709 / (2·0.0186) ≈ 153.47. Left unguarded, for a strongly
+/// non-normal large sample (A*² in the hundreds) the exponent grows positive, the
+/// exponential overflows, and after `clamp(0, 1)` the p-value flips to exactly
+/// `1.0` ("perfectly normal") while A*² is simultaneously huge and still growing —
+/// an internally inconsistent result. Clamping the evaluation point to the vertex
+/// makes the p-value monotonically non-increasing in A*², plateauing at a tiny
+/// (~5e-190) representable floor instead of jumping to 1.
+///
+/// # References
+///
+/// - D'Agostino & Stephens (1986). "Tests based on EDF statistics". In
+///   *Goodness-of-Fit Techniques*. Marcel Dekker.
+fn ad_upper_tail_pvalue(a2_star: f64) -> f64 {
+    // Vertex of the upper-branch quadratic 1.2937 − 5.709·x + 0.0186·x²; beyond it
+    // the fit is invalid and non-monotone, so evaluation is clamped here.
+    const UPPER_BRANCH_VERTEX: f64 = 153.467_741_935_483_87; // 5.709 / (2 * 0.0186)
+
+    let p = if a2_star >= 0.6 {
+        let x = a2_star.min(UPPER_BRANCH_VERTEX);
+        (1.2937 - 5.709 * x + 0.0186 * x * x).exp()
+    } else if a2_star > 0.34 {
+        (0.9177 - 4.279 * a2_star - 1.38 * a2_star * a2_star).exp()
+    } else if a2_star > 0.2 {
+        1.0 - (-8.318 + 42.796 * a2_star - 59.938 * a2_star * a2_star).exp()
+    } else {
+        1.0 - (-13.436 + 101.14 * a2_star - 223.73 * a2_star * a2_star).exp()
+    };
+    p.clamp(0.0, 1.0)
+}
+
 /// Anderson-Darling normality test: H₀: data is normally distributed.
 ///
 /// More sensitive to tail deviations than Kolmogorov-Smirnov.
@@ -589,21 +626,14 @@ pub fn anderson_darling_test(data: &[f64]) -> Option<AndersonDarlingResult> {
     // Stephens (1986) correction for sample size
     let a2_star = a2 * (1.0 + 0.75 / nf + 2.25 / (nf * nf));
 
-    // P-value from piecewise approximation (D'Agostino & Stephens 1986)
-    let p = if a2_star >= 0.6 {
-        (1.2937 - 5.709 * a2_star + 0.0186 * a2_star * a2_star).exp()
-    } else if a2_star > 0.34 {
-        (0.9177 - 4.279 * a2_star - 1.38 * a2_star * a2_star).exp()
-    } else if a2_star > 0.2 {
-        1.0 - (-8.318 + 42.796 * a2_star - 59.938 * a2_star * a2_star).exp()
-    } else {
-        1.0 - (-13.436 + 101.14 * a2_star - 223.73 * a2_star * a2_star).exp()
-    };
+    // P-value from piecewise approximation (D'Agostino & Stephens 1986), with the
+    // large-A*² branch clamped to its valid range (see `ad_upper_tail_pvalue`).
+    let p = ad_upper_tail_pvalue(a2_star);
 
     Some(AndersonDarlingResult {
         statistic: a2,
         statistic_star: a2_star,
-        p_value: p.clamp(0.0, 1.0),
+        p_value: p,
     })
 }
 
@@ -691,21 +721,15 @@ pub fn anderson_darling_normality(data: &[f64]) -> Option<AdNormalityResult> {
     let a2 = -nf - s / nf;
     let a2_star = a2 * (1.0 + 0.75 / nf + 2.25 / (nf * nf));
 
-    // Stephens (1974) piecewise p-value approximation
-    let p = if a2_star < 0.200 {
-        1.0 - (-13.436 + 101.14 * a2_star - 223.73 * a2_star * a2_star).exp()
-    } else if a2_star < 0.340 {
-        1.0 - (-8.318 + 42.796 * a2_star - 59.938 * a2_star * a2_star).exp()
-    } else if a2_star < 0.600 {
-        (0.9177 - 4.279 * a2_star - 1.38 * a2_star * a2_star).exp()
-    } else {
-        (1.2937 - 5.709 * a2_star + 0.0186 * a2_star * a2_star).exp()
-    };
+    // Piecewise p-value approximation, sharing the range-clamped upper-tail branch
+    // (see `ad_upper_tail_pvalue`) so large A*² plateaus near 0 instead of
+    // overflowing to exactly 1.
+    let p = ad_upper_tail_pvalue(a2_star);
 
     Some(AdNormalityResult {
         statistic: a2,
         statistic_modified: a2_star,
-        p_value: p.clamp(0.0, 1.0),
+        p_value: p,
     })
 }
 
@@ -2152,6 +2176,78 @@ fn adf_critical_values(model: AdfModel, n: usize) -> [f64; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -----------------------------------------------------------------------
+    // Anderson-Darling large-n p-value overflow (upstream-014)
+    // -----------------------------------------------------------------------
+
+    /// Public-domain Mulberry32 PRNG (matches the upstream-014 reproduction).
+    fn mulberry32(seed: u32) -> impl FnMut() -> f64 {
+        let mut a = seed;
+        move || {
+            a = a.wrapping_add(0x6d2b_79f5);
+            let mut t = a;
+            t = (t ^ (t >> 15)).wrapping_mul(t | 1);
+            t ^= t.wrapping_add((t ^ (t >> 7)).wrapping_mul(t | 61));
+            ((t ^ (t >> 14)) as f64) / 4_294_967_296.0
+        }
+    }
+
+    /// Regression (upstream-014): for a fixed, clearly non-normal distribution
+    /// shape (exponential), as n grows the A*² statistic grows monotonically and
+    /// the p-value must keep tracking toward 0 — it must NEVER jump to exactly 1.0
+    /// ("perfectly normal") while A*² is simultaneously large and growing. Before
+    /// the fix, the p-value overflowed to exactly 1 past n≈7000.
+    #[test]
+    fn ad_pvalue_no_overflow_large_nonnormal_n() {
+        let mut rng = mulberry32(0x5350_4331);
+        let full: Vec<f64> = (0..20_000)
+            .map(|_| {
+                let u = rng();
+                -(1.0 - u).ln() // inverse-CDF exponential, rate=1
+            })
+            .collect();
+
+        let mut prev_a2 = 0.0_f64;
+        let mut prev_p = f64::INFINITY;
+        for &n in &[3000usize, 5000, 6000, 7000, 8000, 10000, 16000, 20000] {
+            let r = anderson_darling_normality(&full[..n]).expect("computes");
+            // A*² must keep growing for an increasingly non-normal large sample.
+            assert!(
+                r.statistic_modified > prev_a2,
+                "A*² must grow with n; n={n} A*²={} prev={prev_a2}",
+                r.statistic_modified
+            );
+            // The core defect: p must never flip to exactly 1.0 while A*² is huge.
+            assert!(
+                r.p_value < 0.5,
+                "clearly non-normal data (n={n}, A*²={}) must not report p={} ≈ normal",
+                r.statistic_modified,
+                r.p_value
+            );
+            // Monotone non-increasing: p tracks the growing statistic downward.
+            assert!(
+                r.p_value <= prev_p + 1e-12,
+                "p must be non-increasing as A*² grows; n={n} p={} prev={prev_p}",
+                r.p_value
+            );
+            prev_a2 = r.statistic_modified;
+            prev_p = r.p_value;
+        }
+    }
+
+    /// Both AD entry points share the range-clamped upper-tail branch, so both
+    /// must be immune to the overflow.
+    #[test]
+    fn ad_both_functions_immune_to_overflow() {
+        let mut rng = mulberry32(0x0bad_c0de);
+        let data: Vec<f64> = (0..9000).map(|_| -(1.0 - rng()).ln()).collect();
+        let a = anderson_darling_test(&data).expect("computes");
+        let b = anderson_darling_normality(&data).expect("computes");
+        assert!(a.statistic_star > 300.0, "expected large A*², got {}", a.statistic_star);
+        assert!(a.p_value < 0.5, "test() overflowed toward normal: p={}", a.p_value);
+        assert!(b.p_value < 0.5, "normality() overflowed toward normal: p={}", b.p_value);
+    }
 
     // -----------------------------------------------------------------------
     // One-sample t-test

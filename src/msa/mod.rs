@@ -524,8 +524,21 @@ pub fn gage_rr_anova(input: &GageRRInput) -> Result<GageRRAnovaResult, &'static 
         0.0
     };
 
+    // A mean-square denominator is numerically *degenerate* — indistinguishable
+    // from zero variance — when it collapses to floating-point noise relative to
+    // the total variation (e.g. every trial within each cell identical, so the
+    // within-cell repeatability SS is 0 up to rounding: ms ≈ ±1e-17). A *relative*
+    // floor, with a small absolute backstop for the all-identical case where the
+    // total MS is itself ~0, keeps the boundary sign-independent: a repeatability
+    // MS of +2e-17 and one that dips to −4e-18 under rounding are BOTH reported as
+    // "not computable" (F/p = None), rather than flipping between a spurious ~1e12
+    // finite F ("very significant") and None depending on the noise sign.
+    let ms_total = ss_total / df_total;
+    let degenerate_floor = (1e-9 * ms_total.abs()).max(1e-12);
+    let is_valid_denom = |ms: f64| ms > degenerate_floor;
+
     // F statistics and p-values
-    let (f_interaction, p_interaction) = if ms_error > 1e-300 && df_interaction > 0.0 {
+    let (f_interaction, p_interaction) = if is_valid_denom(ms_error) && df_interaction > 0.0 {
         let f_val = ms_interaction / ms_error;
         let p_val = 1.0 - special::f_distribution_cdf(f_val, df_interaction, df_error);
         (Some(f_val), Some(p_val))
@@ -537,17 +550,27 @@ pub fn gage_rr_anova(input: &GageRRInput) -> Result<GageRRAnovaResult, &'static 
     let interaction_significant = p_interaction.is_some_and(|p| p <= 0.25);
     let interaction_pooled = !interaction_significant;
 
+    // Pooled error term (AIAG "without interaction" model): interaction SS/df is
+    // folded into the error term, yielding a single pooled MS that serves as BOTH
+    // the common F-test denominator AND the repeatability variance component.
+    // Computed once here so every consumer (F-tests, ANOVA table, variance
+    // components) uses the identical value.
+    let pooled_ss = ss_error + ss_interaction;
+    let pooled_df = df_error + df_interaction;
+    let ms_pooled = if pooled_df > 0.0 {
+        pooled_ss / pooled_df
+    } else {
+        ms_error
+    };
+
     // Determine the denominator for Part and Operator F-tests
     let (denom_ms, denom_df) = if interaction_pooled {
-        // Pool interaction into error
-        let pooled_ss = ss_error + ss_interaction;
-        let pooled_df = df_error + df_interaction;
-        (pooled_ss / pooled_df, pooled_df)
+        (ms_pooled, pooled_df)
     } else {
         (ms_interaction, df_interaction)
     };
 
-    let (f_part, p_part) = if denom_ms > 1e-300 {
+    let (f_part, p_part) = if is_valid_denom(denom_ms) {
         let f_val = ms_part / denom_ms;
         let p_val = 1.0 - special::f_distribution_cdf(f_val, df_part, denom_df);
         (Some(f_val), Some(p_val))
@@ -555,7 +578,7 @@ pub fn gage_rr_anova(input: &GageRRInput) -> Result<GageRRAnovaResult, &'static 
         (None, None)
     };
 
-    let (f_operator, p_operator) = if denom_ms > 1e-300 {
+    let (f_operator, p_operator) = if is_valid_denom(denom_ms) {
         let f_val = ms_operator / denom_ms;
         let p_val = 1.0 - special::f_distribution_cdf(f_val, df_operator, denom_df);
         (Some(f_val), Some(p_val))
@@ -563,54 +586,67 @@ pub fn gage_rr_anova(input: &GageRRInput) -> Result<GageRRAnovaResult, &'static 
         (None, None)
     };
 
-    // Build ANOVA table
-    let anova_table = AnovaTable {
-        rows: vec![
-            AnovaRow {
-                source: "Part".to_owned(),
-                df: df_part,
-                ss: ss_part,
-                ms: ms_part,
-                f_value: f_part,
-                p_value: p_part,
-            },
-            AnovaRow {
-                source: "Operator".to_owned(),
-                df: df_operator,
-                ss: ss_operator,
-                ms: ms_operator,
-                f_value: f_operator,
-                p_value: p_operator,
-            },
-            AnovaRow {
-                source: "Part×Operator".to_owned(),
-                df: df_interaction,
-                ss: ss_interaction,
-                ms: ms_interaction,
-                f_value: f_interaction,
-                p_value: p_interaction,
-            },
-            AnovaRow {
-                source: "Repeatability".to_owned(),
-                df: df_error,
-                ss: ss_error,
-                ms: ms_error,
-                f_value: None,
-                p_value: None,
-            },
-            AnovaRow {
-                source: "Total".to_owned(),
-                df: df_total,
-                ss: ss_total,
-                ms: ss_total / df_total,
-                f_value: None,
-                p_value: None,
-            },
-        ],
-    };
+    // Build ANOVA table. The error/repeatability row must reflect the SAME model
+    // the F-tests and variance components use. When the interaction is pooled we
+    // report the pooled error term (df = df_error + df_interaction) and drop the
+    // Part×Operator row (it has been folded into error), so that (a) the row df's
+    // sum to df_total and (b) the returned f_value for Part/Operator is
+    // reproducible from the table's own MS values (f_part = ms_part / ms_pooled).
+    // Previously the flag said "pooled" while the table still showed the unpooled
+    // Error row, making the reported F un-reproducible from the displayed numbers.
+    let mut rows = vec![
+        AnovaRow {
+            source: "Part".to_owned(),
+            df: df_part,
+            ss: ss_part,
+            ms: ms_part,
+            f_value: f_part,
+            p_value: p_part,
+        },
+        AnovaRow {
+            source: "Operator".to_owned(),
+            df: df_operator,
+            ss: ss_operator,
+            ms: ms_operator,
+            f_value: f_operator,
+            p_value: p_operator,
+        },
+    ];
+    if !interaction_pooled {
+        rows.push(AnovaRow {
+            source: "Part×Operator".to_owned(),
+            df: df_interaction,
+            ss: ss_interaction,
+            ms: ms_interaction,
+            f_value: f_interaction,
+            p_value: p_interaction,
+        });
+    }
+    rows.push(AnovaRow {
+        source: "Repeatability".to_owned(),
+        df: if interaction_pooled { pooled_df } else { df_error },
+        ss: if interaction_pooled { pooled_ss } else { ss_error },
+        ms: if interaction_pooled { ms_pooled } else { ms_error },
+        f_value: None,
+        p_value: None,
+    });
+    rows.push(AnovaRow {
+        source: "Total".to_owned(),
+        df: df_total,
+        ss: ss_total,
+        ms: ss_total / df_total,
+        f_value: None,
+        p_value: None,
+    });
+    let anova_table = AnovaTable { rows };
 
-    // Variance components from expected mean squares
-    let sigma2_repeatability = ms_error;
+    // Variance components from expected mean squares. When the interaction is
+    // pooled, EVERY component — repeatability included — is derived from the
+    // single pooled error MS. Previously repeatability alone leaked the un-pooled
+    // raw MS_error while operator/part used the pooled MS, mixing two models in
+    // one result and inflating GRR / %GRR. `.max(0.0)` guards against a negative
+    // std-dev (NaN) when rounding pushes the (already ~0) MS slightly below zero.
+    let sigma2_repeatability = (if interaction_pooled { ms_pooled } else { ms_error }).max(0.0);
 
     let sigma2_interaction = if interaction_pooled {
         0.0
@@ -620,8 +656,7 @@ pub fn gage_rr_anova(input: &GageRRInput) -> Result<GageRRAnovaResult, &'static 
     };
 
     let sigma2_operator = if interaction_pooled {
-        let pooled_ms = (ss_error + ss_interaction) / (df_error + df_interaction);
-        let val = (ms_operator - pooled_ms) / (p * r) as f64;
+        let val = (ms_operator - ms_pooled) / (p * r) as f64;
         val.max(0.0)
     } else {
         let val = (ms_operator - ms_interaction) / (p * r) as f64;
@@ -629,8 +664,7 @@ pub fn gage_rr_anova(input: &GageRRInput) -> Result<GageRRAnovaResult, &'static 
     };
 
     let sigma2_part = if interaction_pooled {
-        let pooled_ms = (ss_error + ss_interaction) / (df_error + df_interaction);
-        let val = (ms_part - pooled_ms) / (o * r) as f64;
+        let val = (ms_part - ms_pooled) / (o * r) as f64;
         val.max(0.0)
     } else {
         let val = (ms_part - ms_interaction) / (o * r) as f64;
@@ -1042,6 +1076,147 @@ mod tests {
         if result.interaction_pooled {
             assert_eq!(result.variance_components.interaction, 0.0);
         }
+    }
+
+    /// Regression (upstream-013): when the interaction is pooled, EVERY variance
+    /// component — repeatability included — must be derived from the single pooled
+    /// error MS, and the returned ANOVA table's Repeatability row must report that
+    /// same pooled term so the Part/Operator F is reproducible from the table.
+    ///
+    /// The discriminating invariant: the denominator actually used for the Part
+    /// F-test is `ms_part / f_part`. Before the fix σ²_repeatability leaked the raw
+    /// (un-pooled) MS_error while f_part used the pooled MS, so they disagreed.
+    #[test]
+    fn anova_pooled_repeatability_uses_pooled_ms() {
+        // 3 parts × 3 operators × 3 trials with a dominant part effect and
+        // negligible operator/interaction — this pools (interaction p > 0.25).
+        let data = vec![
+            vec![
+                vec![10.0, 10.1, 10.0],
+                vec![10.0, 10.0, 10.1],
+                vec![10.1, 10.0, 10.0],
+            ],
+            vec![
+                vec![20.0, 20.1, 20.0],
+                vec![20.0, 20.0, 20.1],
+                vec![20.1, 20.0, 20.0],
+            ],
+            vec![
+                vec![15.0, 15.1, 15.0],
+                vec![15.0, 15.0, 15.1],
+                vec![15.1, 15.0, 15.0],
+            ],
+        ];
+        let input = GageRRInput {
+            measurements: data,
+            tolerance: None,
+        };
+        let result = gage_rr_anova(&input).expect("should compute");
+        assert!(result.interaction_pooled, "this dataset should pool");
+
+        let rep_row = result
+            .anova_table
+            .rows
+            .iter()
+            .find(|r| r.source == "Repeatability")
+            .expect("Repeatability row present");
+        let part = result
+            .anova_table
+            .rows
+            .iter()
+            .find(|r| r.source == "Part")
+            .expect("Part row");
+
+        // The pooled denominator actually used for f_part.
+        let pooled_denom = part.ms / part.f_value.expect("Part F present");
+
+        // (a) σ²_repeatability equals that pooled denominator — NOT the raw MS.
+        assert!(
+            (result.variance_components.repeatability - pooled_denom).abs() < 1e-10,
+            "σ²_repeatability ({}) must equal the pooled denominator ({pooled_denom})",
+            result.variance_components.repeatability
+        );
+        // (b) The Repeatability row MS equals it too — F reproducible from table.
+        assert!(
+            (rep_row.ms - pooled_denom).abs() < 1e-10,
+            "Repeatability row MS ({}) must equal the pooled denominator ({pooled_denom})",
+            rep_row.ms
+        );
+        // (c) When pooled, no standalone interaction row; df's sum to df_total.
+        assert!(
+            !result
+                .anova_table
+                .rows
+                .iter()
+                .any(|r| r.source == "Part×Operator"),
+            "pooled table must not carry a separate interaction row"
+        );
+        let df_sum: f64 = result
+            .anova_table
+            .rows
+            .iter()
+            .filter(|r| r.source != "Total")
+            .map(|r| r.df)
+            .sum();
+        let df_total = result
+            .anova_table
+            .rows
+            .iter()
+            .find(|r| r.source == "Total")
+            .expect("Total row")
+            .df;
+        assert!(
+            (df_sum - df_total).abs() < 1e-9,
+            "component df ({df_sum}) must sum to total df ({df_total})"
+        );
+    }
+
+    /// Regression (upstream-011): a degenerate denominator (every trial within
+    /// each cell identical → repeatability MS ≈ floating-point noise) must yield
+    /// F/p = None, not a spurious ~1e12 finite F, and must do so regardless of the
+    /// sign of the rounding noise.
+    #[test]
+    fn anova_degenerate_denominator_returns_none() {
+        // Take the AIAG reference layout (10×3×3) and collapse every trial within
+        // a cell to that cell's first value, so the within-cell repeatability SS is
+        // 0. At this scale/count the SS *decomposition* residual does not cancel to
+        // exact 0 — it lands on surviving floating-point noise (ms_error ≈ 1.85e-16,
+        // reproducing the report's ~1e-17 case). The OLD absolute `> 1e-300` guard
+        // divides the (real, ~0.08) interaction MS by that noise, yielding a
+        // spurious F ≈ 4.4e14 that renders as "very significant"; the relative
+        // degeneracy floor must instead report F/p as None.
+        let mut data = aiag_reference_data();
+        for part in data.iter_mut() {
+            for op in part.iter_mut() {
+                let first = op[0];
+                for trial in op.iter_mut() {
+                    *trial = first;
+                }
+            }
+        }
+        let input = GageRRInput {
+            measurements: data,
+            tolerance: None,
+        };
+        let result = gage_rr_anova(&input).expect("should compute");
+
+        for row in &result.anova_table.rows {
+            if let Some(f) = row.f_value {
+                assert!(
+                    f.is_finite() && f < 1e6,
+                    "degenerate denominator must not produce a divergent F for {}: {}",
+                    row.source,
+                    f
+                );
+            }
+        }
+        // Repeatability is ~0, so GRR-derived std devs must stay finite (no NaN).
+        assert!(result.ev.is_finite(), "EV must be finite, got {}", result.ev);
+        assert!(
+            result.percent_grr.is_finite(),
+            "%GRR must be finite, got {}",
+            result.percent_grr
+        );
     }
 
     #[test]
