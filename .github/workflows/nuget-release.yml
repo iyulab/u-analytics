@@ -28,8 +28,6 @@ jobs:
       should_publish: ${{ steps.decide.outputs.should_publish }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
 
       - name: Read version from csproj
         id: read
@@ -45,14 +43,15 @@ jobs:
             echo "should_publish=true" >> "$GITHUB_OUTPUT"
             echo "Manual trigger — will publish"
           else
-            OLD=$(git show HEAD~1:${{ env.CSPROJ_PATH }} 2>/dev/null | grep -oPm1 '(?<=<Version>)[^<]+' || echo "")
-            NEW=$(grep -oPm1 '(?<=<Version>)[^<]+' ${{ env.CSPROJ_PATH }})
-            if [ "$OLD" != "$NEW" ]; then
-              echo "should_publish=true" >> "$GITHUB_OUTPUT"
-              echo "Version changed: $OLD → $NEW"
-            else
+            VERSION="${{ steps.read.outputs.version }}"
+            PKG_LOWER=$(echo "${{ env.PACKAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+            HTTP=$(curl -s -o /dev/null -w '%{http_code}' "https://api.nuget.org/v3-flatcontainer/${PKG_LOWER}/${VERSION}/${PKG_LOWER}.nuspec")
+            if [ "$HTTP" = "200" ]; then
               echo "should_publish=false" >> "$GITHUB_OUTPUT"
-              echo "Version unchanged ($NEW) — skipping"
+              echo "${{ env.PACKAGE_NAME }} ${VERSION} already on nuget.org — skipping"
+            else
+              echo "should_publish=true" >> "$GITHUB_OUTPUT"
+              echo "${{ env.PACKAGE_NAME }} ${VERSION} not on nuget.org (HTTP ${HTTP}) — will publish"
             fi
           fi
 
