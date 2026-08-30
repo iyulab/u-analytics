@@ -8,6 +8,15 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Fixed
+
+- **`spc` module now re-exports `AttributeChartPoint`.** `PChart::points()`,
+  `NPChart::points()`, `CChart::points()`, and `UChart::points()` all already
+  returned `&[AttributeChartPoint]` publicly, but the type itself wasn't
+  re-exported — a consumer could get a slice of this type back but had no
+  way to name it (e.g. to write a function taking `&[AttributeChartPoint]`
+  as a parameter). Purely additive; no behavior change.
+
 ## [0.6.3] - 2026-07-15
 
 ### Fixed
