@@ -8,6 +8,8 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-07
+
 ### Fixed
 
 - **`spc` module now re-exports `AttributeChartPoint`.** `PChart::points()`,
@@ -16,6 +18,19 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   re-exported — a consumer could get a slice of this type back but had no
   way to name it (e.g. to write a function taking `&[AttributeChartPoint]`
   as a parameter). Purely additive; no behavior change.
+
+### Changed
+
+- **`rand` is now 0.10** and **`getrandom` 0.4** on WebAssembly targets. This
+  crate does not name `rand` types in its public signatures, so the change is
+  internal and the API is unaffected. The
+  `RUSTFLAGS --cfg getrandom_backend="wasm_js"` that `getrandom` 0.3 required is
+  no longer needed.
+- **`u-numflow` is now required at 0.4** (previously 0.3), following that crate's
+  own `rand` 0.10 break.
+- **The minimum supported Rust version is now declared as 1.85** and is verified
+  by building on that exact toolchain; 1.84 and below fail. The crate previously
+  declared no `rust-version` at all.
 
 ## [0.6.3] - 2026-07-15
 
