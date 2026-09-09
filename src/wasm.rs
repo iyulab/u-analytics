@@ -26,6 +26,11 @@ struct XbarRChartDto {
     r_cl: f64,
     r_ucl: f64,
     r_lcl: f64,
+    /// Short-term sigma implied by this chart (`R-bar / d2`). Feed it to
+    /// `process_capability` as `sigma_within` -- it is the quantity a
+    /// capability study needs and the one a flat measurement vector cannot
+    /// carry.
+    sigma_hat: Option<f64>,
     xbar_points: Vec<ChartPointDto>,
     r_points: Vec<ChartPointDto>,
     in_control: bool,
@@ -55,10 +60,37 @@ struct AttributeChartPointDto {
     out_of_control: bool,
 }
 
+/// Input for `process_capability`.
+///
+/// Every field except `data` is optional, but at least one of `usl`/`lsl` must
+/// be present -- a capability index without a specification limit is undefined.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CapabilityInputDto {
+    data: Vec<f64>,
+    #[serde(default)]
+    usl: Option<f64>,
+    #[serde(default)]
+    lsl: Option<f64>,
+    /// Short-term (within-subgroup) sigma, normally estimated from a control
+    /// chart as R-bar/d2 or S-bar/c4. It cannot be recovered from `data`: the
+    /// subgroup structure is not in a flat measurement vector.
+    #[serde(default)]
+    sigma_within: Option<f64>,
+    /// Process target for Cpm. Defaults to the specification midpoint.
+    #[serde(default)]
+    target: Option<f64>,
+}
+
 #[derive(Serialize)]
 struct CapabilityDto {
     mean: f64,
-    std_dev_within: f64,
+    /// `"within"` when `sigma_within` was supplied, `"overall"` otherwise.
+    /// Without it the short-term indices are not computed at all rather than
+    /// being filled with the long-term sigma -- a number under the wrong name
+    /// is harder to notice than a null.
+    sigma_source: &'static str,
+    std_dev_within: Option<f64>,
     std_dev_overall: f64,
     cp: Option<f64>,
     cpk: Option<f64>,
@@ -238,6 +270,7 @@ pub fn xbar_r_chart(data: JsValue) -> Result<JsValue, JsValue> {
         r_cl: r_limits.cl,
         r_ucl: r_limits.ucl,
         r_lcl: r_limits.lcl,
+        sigma_hat: chart.sigma_hat(),
         xbar_points,
         r_points,
         in_control: chart.is_in_control(),
@@ -293,44 +326,103 @@ pub fn p_chart(samples: JsValue) -> Result<JsValue, JsValue> {
 
 /// Compute process capability indices (Cp, Cpk, Pp, Ppk, Cpm).
 ///
-/// Uses overall sigma for both short-term and long-term estimates
-/// (`ProcessCapability::compute_overall`).
+/// # Input JSON
 ///
-/// # Parameters
+/// ```text
+/// { data: number[], usl?: number, lsl?: number,
+///   sigma_within?: number, target?: number }
+/// ```
 ///
-/// - `data`: slice of measurements
-/// - `usl`: upper specification limit
-/// - `lsl`: lower specification limit
+/// At least one of `usl`/`lsl` is required; supplying one gives a one-sided
+/// specification, which is routine for characteristics such as flatness,
+/// contamination or runout.
+///
+/// `sigma_within` is the short-term (within-subgroup) standard deviation,
+/// normally estimated from a control chart as R-bar/d2 or S-bar/c4. It is not
+/// derivable from `data`: a flat measurement vector no longer carries the
+/// subgroup structure. Omit it and the short-term indices are reported as
+/// `null` rather than being computed from the long-term sigma.
+///
+/// `target` sets the Cpm target. Omit it and the specification midpoint is
+/// used, which is what Cpm falls back to when no target is declared.
 ///
 /// # Output JSON
 ///
-/// Object with fields: `mean`, `std_dev_within`, `std_dev_overall`,
-/// `cp`, `cpk`, `cpu`, `cpl`, `pp`, `ppk`, `ppu`, `ppl`, `cpm`.
-/// One-sided indices will have `null` for inapplicable fields.
+/// Object with fields: `mean`, `sigma_source`, `std_dev_within`,
+/// `std_dev_overall`, `cp`, `cpk`, `cpu`, `cpl`, `pp`, `ppk`, `ppu`, `ppl`,
+/// `cpm`. Indices that the specification does not support are `null`
+/// (a one-sided specification has no `cp`, `pp` or `cpm`).
+///
+/// `sigma_source` is `"within"` when `sigma_within` was supplied and
+/// `"overall"` otherwise. In the `"overall"` case `std_dev_within`, `cp`,
+/// `cpk`, `cpu`, `cpl` and `cpm` are all `null`: the short-term indices are
+/// undefined without a short-term sigma, and reporting the long-term one in
+/// their place would make `cp` equal `pp` for every input.
 #[wasm_bindgen]
-pub fn process_capability(data: &[f64], usl: f64, lsl: f64) -> Result<JsValue, JsValue> {
+pub fn process_capability(input: JsValue) -> Result<JsValue, JsValue> {
     use crate::capability::ProcessCapability;
 
-    let spec = ProcessCapability::new(Some(usl), Some(lsl))
+    let input: CapabilityInputDto = from_js(input, "input")?;
+
+    let mut spec = ProcessCapability::new(input.usl, input.lsl)
         .map_err(|e| js_err(format!("invalid specification limits: {e}")))?;
+    if let Some(target) = input.target {
+        if !target.is_finite() {
+            return Err(js_err("target must be finite"));
+        }
+        spec = spec.with_target(target);
+    }
 
-    let indices = spec
-        .compute_overall(data)
-        .ok_or_else(|| js_err("insufficient or invalid data (need >= 2 finite values)"))?;
-
-    let dto = CapabilityDto {
-        mean: indices.mean,
-        std_dev_within: indices.std_dev_within,
-        std_dev_overall: indices.std_dev_overall,
-        cp: indices.cp,
-        cpk: indices.cpk,
-        cpu: indices.cpu,
-        cpl: indices.cpl,
-        pp: indices.pp,
-        ppk: indices.ppk,
-        ppu: indices.ppu,
-        ppl: indices.ppl,
-        cpm: indices.cpm,
+    let dto = match input.sigma_within {
+        Some(sigma_within) => {
+            if !sigma_within.is_finite() || sigma_within <= 0.0 {
+                return Err(js_err(
+                    "sigma_within must be a positive, finite number                      (R-bar/d2 or S-bar/c4 from the control chart)",
+                ));
+            }
+            let indices = spec
+                .compute(&input.data, sigma_within)
+                .ok_or_else(|| js_err("insufficient or invalid data (need >= 2 finite values)"))?;
+            CapabilityDto {
+                mean: indices.mean,
+                sigma_source: "within",
+                std_dev_within: Some(indices.std_dev_within),
+                std_dev_overall: indices.std_dev_overall,
+                cp: indices.cp,
+                cpk: indices.cpk,
+                cpu: indices.cpu,
+                cpl: indices.cpl,
+                pp: indices.pp,
+                ppk: indices.ppk,
+                ppu: indices.ppu,
+                ppl: indices.ppl,
+                cpm: indices.cpm,
+            }
+        }
+        None => {
+            // No short-term sigma: report the long-term indices only. The
+            // crate computes both from the same sigma in this mode, so
+            // carrying the short-term names through would publish Pp under the
+            // name Cp for every input.
+            let indices = spec
+                .compute_overall(&input.data)
+                .ok_or_else(|| js_err("insufficient or invalid data (need >= 2 finite values)"))?;
+            CapabilityDto {
+                mean: indices.mean,
+                sigma_source: "overall",
+                std_dev_within: None,
+                std_dev_overall: indices.std_dev_overall,
+                cp: None,
+                cpk: None,
+                cpu: None,
+                cpl: None,
+                pp: indices.pp,
+                ppk: indices.ppk,
+                ppu: indices.ppu,
+                ppl: indices.ppl,
+                cpm: None,
+            }
+        }
     };
     to_js(&dto)
 }

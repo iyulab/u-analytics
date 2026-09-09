@@ -150,10 +150,53 @@ anderson_darling_normality(new Float64Array([4.9, 5.1, 5.0, 5.2, 4.8, 5.05]));
 // → { statistic, statistic_modified, p_value }
 ```
 
+### `process_capability(input)`
+
+```ts
+process_capability({
+  data: number[],
+  usl?: number,          // at least one of usl / lsl is required
+  lsl?: number,
+  sigma_within?: number, // short-term sigma, e.g. R-bar / d2
+  target?: number,       // Cpm target; defaults to the specification midpoint
+}): {
+  mean: number,
+  sigma_source: "within" | "overall",
+  std_dev_within: number | null,
+  std_dev_overall: number,
+  cp: number | null, cpk: number | null, cpu: number | null, cpl: number | null,
+  pp: number | null, ppk: number | null, ppu: number | null, ppl: number | null,
+  cpm: number | null,
+}
+```
+
+**Short-term sigma has to be supplied.** Cp/Cpk are defined against the
+within-subgroup standard deviation, which is estimated from a control chart
+(R-bar/d2 or S-bar/c4) and is *not* recoverable from a flat measurement vector —
+the subgroup structure is gone. Omit `sigma_within` and `sigma_source` comes
+back as `"overall"` with `cp`, `cpk`, `cpu`, `cpl`, `cpm` and `std_dev_within`
+all `null`: only the long-term indices (Pp/Ppk) are reported. Filling the
+short-term names with the long-term sigma instead would make `cp` equal `pp`
+for every input.
+
+`xbar_r_chart` returns `sigma_hat` (`R-bar / d2`) for exactly this purpose, so
+the two compose:
+
+```js
+const chart = xbar_r_chart(subgroups);
+const cap = process_capability({
+  data: subgroups.flat(), usl: 11, lsl: 9, sigma_within: chart.sigma_hat,
+});
+// cap.sigma_source === "within", cap.cp !== cap.pp
+```
+
+One-sided specifications are supported: pass only `usl` or only `lsl`. The
+indices that need both limits (`cp`, `pp`, `cpm`) come back `null`.
+
 ## Test Status
 
 ```
-541 lib tests + 75 doc-tests = 616 total
+549 lib tests + 77 doc-tests = 626 total
 0 clippy warnings
 ```
 

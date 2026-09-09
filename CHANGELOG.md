@@ -8,6 +8,45 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.8.0]
+
+### Changed
+
+- **Breaking:** the WebAssembly `process_capability` binding takes an object
+  instead of three positional arguments:
+  `{ data, usl?, lsl?, sigma_within?, target? }`. The old signature
+  (`data, usl, lsl`) could not express three things the crate already supports.
+  - **`sigma_within` is now reachable.** The binding always called
+    `ProcessCapability::compute_overall`, which uses the long-term sigma for
+    both index families — so `cp === pp` and `cpk === ppk` held for every
+    input, and the returned `std_dev_within` field carried the *overall*
+    standard deviation. Short-term sigma is estimated from a control chart and
+    cannot be derived from a flat measurement vector, so no caller could
+    recover it. It is now an input, and the response carries `sigma_source`
+    (`"within"` | `"overall"`) saying which family was actually computed. When
+    it is omitted, `std_dev_within`, `cp`, `cpk`, `cpu`, `cpl` and `cpm` come
+    back `null` rather than repeating the long-term numbers under short-term
+    names.
+  - **One-sided specifications are now expressible.** `usl` and `lsl` are each
+    optional (at least one required), matching `ProcessCapability::new`. The
+    previous signature took two bare numbers, so "no lower limit" could not be
+    stated — while the doc comment already promised `null` for inapplicable
+    one-sided indices.
+  - **`target` is now reachable**, so Cpm is computed against a declared target
+    instead of always against the specification midpoint. Against the wrong
+    target Cpm is not a less precise index; it is a different quantity.
+- `xbar_r_chart` additionally returns `sigma_hat` (`R-bar / d2`). Feeding it
+  back as `process_capability`'s `sigma_within` is what makes the two bindings
+  compose instead of each being independently incomplete; without it a
+  JavaScript caller has to reimplement the d2 table.
+
+### Added
+
+- `spc::XBarRChart::sigma_hat` and `spc::XBarSChart::sigma_hat` — the
+  within-subgroup sigma implied by the chart (`R-bar / d2`, `S-bar / c4`). The
+  charts already held every input; the estimate was simply not exposed.
+
+
 ## [0.7.0] - 2026-09-07
 
 ### Fixed

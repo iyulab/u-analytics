@@ -173,6 +173,35 @@ impl XBarRChart {
         }
     }
 
+    /// Short-term (within-subgroup) sigma estimated from this chart:
+    /// `sigma-hat = R-bar / d2(n)`.
+    ///
+    /// This is the quantity a capability study needs for Cp/Cpk, and it cannot
+    /// be recovered from a flat measurement vector — it depends on the subgroup
+    /// structure the chart already holds. Returning it here is what lets a
+    /// caller feed [`crate::capability::ProcessCapability::compute`] without
+    /// reimplementing the d2 table.
+    ///
+    /// Returns `None` if there is not enough data for control limits.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::spc::{ControlChart, XBarRChart};
+    ///
+    /// let mut chart = XBarRChart::new(5);
+    /// for g in [[9.9, 10.1, 10.0, 9.8, 10.2], [10.3, 9.7, 10.0, 10.1, 9.9]] {
+    ///     chart.add_sample(&g);
+    /// }
+    /// let sigma = chart.sigma_hat().expect("limits available");
+    /// assert!(sigma > 0.0);
+    /// ```
+    pub fn sigma_hat(&self) -> Option<f64> {
+        let r_bar = self.r_limits.as_ref()?.cl;
+        let d2 = D2[self.subgroup_size - 2];
+        (d2 > 0.0).then(|| r_bar / d2)
+    }
+
     /// Get the R chart control limits, or `None` if insufficient data.
     pub fn r_limits(&self) -> Option<ControlLimits> {
         self.r_limits.clone()
@@ -356,6 +385,31 @@ impl XBarSChart {
             xbar_limits: None,
             s_limits: None,
         }
+    }
+
+    /// Short-term (within-subgroup) sigma estimated from this chart:
+    /// `sigma-hat = S-bar / c4(n)`.
+    ///
+    /// The S-chart counterpart of [`XBarRChart::sigma_hat`], and the estimator
+    /// preferred for larger subgroups. Returns `None` if there is not enough
+    /// data for control limits.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::spc::{ControlChart, XBarSChart};
+    ///
+    /// let mut chart = XBarSChart::new(5);
+    /// for g in [[9.9, 10.1, 10.0, 9.8, 10.2], [10.3, 9.7, 10.0, 10.1, 9.9]] {
+    ///     chart.add_sample(&g);
+    /// }
+    /// let sigma = chart.sigma_hat().expect("limits available");
+    /// assert!(sigma > 0.0);
+    /// ```
+    pub fn sigma_hat(&self) -> Option<f64> {
+        let s_bar = self.s_limits.as_ref()?.cl;
+        let c4 = C4[self.subgroup_size - 2];
+        (c4 > 0.0).then(|| s_bar / c4)
     }
 
     /// Get the S chart control limits, or `None` if insufficient data.
@@ -1028,5 +1082,84 @@ mod tests {
                 "c4(n={n}): expected {c4_ref}, got {c4}"
             );
         }
+    }
+
+    // --- sigma-hat from the chart (Cycle 266) --------------------------------
+    //
+    // Short-term sigma is what a capability study needs for Cp/Cpk, and it
+    // cannot be recovered from a flat measurement vector: it depends on the
+    // subgroup structure the chart holds. Without these the caller has to
+    // reimplement the d2/c4 tables.
+
+    #[test]
+    fn xbar_r_sigma_hat_is_r_bar_over_d2() {
+        let mut chart = XBarRChart::new(5);
+        let groups = [
+            [9.9, 10.1, 10.0, 9.8, 10.2],
+            [10.3, 9.7, 10.0, 10.1, 9.9],
+            [9.8, 10.2, 10.1, 9.9, 10.0],
+            [10.5, 9.5, 10.0, 10.2, 9.8],
+        ];
+        for g in &groups {
+            chart.add_sample(g);
+        }
+        let r_bar = chart.r_limits().expect("limits").cl;
+        let expected = r_bar / D2[5 - 2];
+        let sigma = chart.sigma_hat().expect("sigma-hat");
+        assert!(
+            (sigma - expected).abs() < 1e-12,
+            "sigma-hat must be R-bar/d2: got {sigma}, expected {expected}"
+        );
+        assert!(sigma > 0.0);
+    }
+
+    #[test]
+    fn xbar_s_sigma_hat_is_s_bar_over_c4() {
+        let mut chart = XBarSChart::new(5);
+        for g in &[
+            [9.9, 10.1, 10.0, 9.8, 10.2],
+            [10.3, 9.7, 10.0, 10.1, 9.9],
+            [9.8, 10.2, 10.1, 9.9, 10.0],
+        ] {
+            chart.add_sample(g);
+        }
+        let s_bar = chart.s_limits().expect("limits").cl;
+        let expected = s_bar / C4[5 - 2];
+        let sigma = chart.sigma_hat().expect("sigma-hat");
+        assert!((sigma - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn sigma_hat_is_none_without_limits() {
+        assert!(XBarRChart::new(5).sigma_hat().is_none());
+        assert!(XBarSChart::new(5).sigma_hat().is_none());
+    }
+
+    #[test]
+    fn short_term_sigma_differs_from_overall_when_subgroups_drift() {
+        use u_numflow::stats;
+
+        // Six subgroups of five with real between-subgroup drift: the whole
+        // point of a short-term estimate is that it is NOT the overall sigma.
+        let groups = [
+            [9.9, 10.1, 10.0, 9.8, 10.2],
+            [10.3, 9.7, 10.0, 10.1, 9.9],
+            [9.8, 10.2, 10.1, 9.9, 10.0],
+            [10.5, 9.5, 10.0, 10.2, 9.8],
+            [9.6, 10.4, 10.0, 9.9, 10.1],
+            [10.1, 9.9, 10.0, 10.3, 9.7],
+        ];
+        let mut chart = XBarRChart::new(5);
+        for g in &groups {
+            chart.add_sample(g);
+        }
+        let sigma_within = chart.sigma_hat().expect("sigma-hat");
+        let flat: Vec<f64> = groups.iter().flatten().copied().collect();
+        let sigma_overall = stats::std_dev(&flat).expect("overall sigma");
+
+        assert!(
+            (sigma_within - sigma_overall).abs() > 1e-6,
+            "short-term and long-term sigma must differ on drifting subgroups:              within={sigma_within}, overall={sigma_overall}"
+        );
     }
 }
