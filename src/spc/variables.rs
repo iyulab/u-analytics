@@ -17,31 +17,54 @@
 //! - ASTM E2587 — Standard Practice for Use of Control Charts
 //! - Shewhart, W.A. (1931). *Economic Control of Quality of Manufactured Product*.
 
-use super::chart::{ChartPoint, ControlChart, ControlLimits, Violation, ViolationType};
+use super::chart::{
+    ChartPoint, ControlChart, ControlChartError, ControlLimits, Violation, ViolationType,
+    MAX_SUBGROUP_SIZE, MIN_SUBGROUP_SIZE,
+};
 use super::rules::{NelsonRules, RunRule};
 
 // ---------------------------------------------------------------------------
-// Control chart factor tables (ASTM E2587), indexed by subgroup size n=2..10
+// Control chart factor tables, indexed by subgroup size n=2..=25.
 // Index 0 corresponds to n=2.
+//
+// Values for n=2..=10 are the ASTM E2587 published constants. The whole range
+// is computed from the definitions rather than transcribed, because no
+// published table this crate could cite covers n up to 25 in every factor:
+//
+//   d2(n) = E[W],  d3(n) = sd[W]   for W the range of n iid standard normals
+//   c4(n) = sqrt(2/(n-1)) * Gamma(n/2) / Gamma((n-1)/2)
+//   A2 = 3/(d2*sqrt(n))            A3 = 3/(c4*sqrt(n))
+//   D3 = max(0, 1 - 3*d3/d2)       D4 = 1 + 3*d3/d2
+//   B3 = max(0, 1 - 3*sqrt(1-c4^2)/c4)   B4 = 1 + 3*sqrt(1-c4^2)/c4
+//
+// The computation reproduces all 72 published values for n=2..=10 across the
+// eight tables, which is what licenses the extension to n=25. The test
+// `factor_tables_reproduce_the_published_astm_values` pins that agreement so a
+// future edit cannot quietly break it.
 // ---------------------------------------------------------------------------
 
 /// A2 factors for X-bar-R chart UCL/LCL computation.
 ///
 /// UCL = X-double-bar + A2 * R-bar, LCL = X-double-bar - A2 * R-bar.
-const A2: [f64; 9] = [
-    1.880, 1.023, 0.729, 0.577, 0.483, 0.419, 0.373, 0.337, 0.308,
+const A2: [f64; 24] = [
+    1.880, 1.023, 0.729, 0.577, 0.483, 0.419, 0.373, 0.337, 0.308, 0.285, 0.266, 0.249, 0.235,
+    0.223, 0.212, 0.203, 0.194, 0.187, 0.180, 0.173, 0.167, 0.162, 0.157, 0.153,
 ];
 
 /// D3 factors for R chart lower control limit.
 ///
 /// LCL_R = D3 * R-bar.
-const D3: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.076, 0.136, 0.184, 0.223];
+const D3: [f64; 24] = [
+    0.000, 0.000, 0.000, 0.000, 0.000, 0.076, 0.136, 0.184, 0.223, 0.256, 0.283, 0.307, 0.328,
+    0.347, 0.363, 0.378, 0.391, 0.404, 0.415, 0.425, 0.435, 0.443, 0.452, 0.459,
+];
 
 /// D4 factors for R chart upper control limit.
 ///
 /// UCL_R = D4 * R-bar.
-const D4: [f64; 9] = [
-    3.267, 2.575, 2.282, 2.114, 2.004, 1.924, 1.864, 1.816, 1.777,
+const D4: [f64; 24] = [
+    3.267, 2.575, 2.282, 2.114, 2.004, 1.924, 1.864, 1.816, 1.777, 1.744, 1.717, 1.693, 1.672,
+    1.653, 1.637, 1.622, 1.609, 1.596, 1.585, 1.575, 1.565, 1.557, 1.548, 1.541,
 ];
 
 /// d2 factors (mean of the range distribution) for estimating sigma from R-bar.
@@ -55,27 +78,57 @@ const D4: [f64; 9] = [
 /// Montgomery, D.C. (2020). *Introduction to Statistical Quality Control*, 8th ed.,
 /// Appendix Table VI.
 #[allow(dead_code)]
-const D2: [f64; 9] = [
-    1.128, 1.693, 2.059, 2.326, 2.534, 2.704, 2.847, 2.970, 3.078,
+const D2: [f64; 24] = [
+    // d2(2) is exactly 2/sqrt(pi): the range of two standard normals is
+    // |N(0, 2)|, whose mean is sqrt(2) * sqrt(2/pi).
+    std::f64::consts::FRAC_2_SQRT_PI,
+    1.6926,
+    2.0588,
+    2.3259,
+    2.5344,
+    2.7044,
+    2.8472,
+    2.9700,
+    3.0775,
+    3.1729,
+    3.2585,
+    3.3360,
+    3.4068,
+    3.4718,
+    3.5320,
+    3.5879,
+    3.6401,
+    3.6890,
+    3.7350,
+    3.7783,
+    3.8194,
+    3.8583,
+    3.8953,
+    3.9306,
 ];
 
 /// A3 factors for X-bar-S chart UCL/LCL computation.
 ///
 /// UCL = X-double-bar + A3 * S-bar, LCL = X-double-bar - A3 * S-bar.
-const A3: [f64; 9] = [
-    2.659, 1.954, 1.628, 1.427, 1.287, 1.182, 1.099, 1.032, 0.975,
+const A3: [f64; 24] = [
+    2.659, 1.954, 1.628, 1.427, 1.287, 1.182, 1.099, 1.032, 0.975, 0.927, 0.886, 0.850, 0.817,
+    0.789, 0.763, 0.739, 0.718, 0.698, 0.680, 0.663, 0.647, 0.633, 0.619, 0.606,
 ];
 
 /// B3 factors for S chart lower control limit.
 ///
 /// LCL_S = B3 * S-bar.
-const B3: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.030, 0.118, 0.185, 0.239, 0.284];
+const B3: [f64; 24] = [
+    0.000, 0.000, 0.000, 0.000, 0.030, 0.118, 0.185, 0.239, 0.284, 0.321, 0.354, 0.382, 0.406,
+    0.428, 0.448, 0.466, 0.482, 0.497, 0.510, 0.523, 0.534, 0.545, 0.555, 0.565,
+];
 
 /// B4 factors for S chart upper control limit.
 ///
 /// UCL_S = B4 * S-bar.
-const B4: [f64; 9] = [
-    3.267, 2.568, 2.266, 2.089, 1.970, 1.882, 1.815, 1.761, 1.716,
+const B4: [f64; 24] = [
+    3.267, 2.568, 2.266, 2.089, 1.970, 1.882, 1.815, 1.761, 1.716, 1.679, 1.646, 1.618, 1.594,
+    1.572, 1.552, 1.534, 1.518, 1.503, 1.490, 1.477, 1.466, 1.455, 1.445, 1.435,
 ];
 
 /// c4 factors for unbiased estimation of sigma from S-bar.
@@ -89,8 +142,9 @@ const B4: [f64; 9] = [
 /// Montgomery, D.C. (2020). *Introduction to Statistical Quality Control*, 8th ed.,
 /// Appendix Table VI.
 #[allow(dead_code)]
-const C4: [f64; 9] = [
-    0.7979, 0.8862, 0.9213, 0.9400, 0.9515, 0.9594, 0.9650, 0.9693, 0.9727,
+const C4: [f64; 24] = [
+    0.7979, 0.8862, 0.9213, 0.9400, 0.9515, 0.9594, 0.9650, 0.9693, 0.9727, 0.9754, 0.9776, 0.9794,
+    0.9810, 0.9823, 0.9835, 0.9845, 0.9854, 0.9862, 0.9869, 0.9876, 0.9882, 0.9887, 0.9892, 0.9896,
 ];
 
 /// E2 factor for Individual chart UCL/LCL.
@@ -123,7 +177,7 @@ const D4_MR: f64 = 3.267;
 /// ```
 /// use u_analytics::spc::{XBarRChart, ControlChart};
 ///
-/// let mut chart = XBarRChart::new(5);
+/// let mut chart = XBarRChart::new(5).expect("subgroup size is in range");
 /// chart.add_sample(&[25.0, 26.0, 24.5, 25.5, 25.0]);
 /// chart.add_sample(&[25.2, 24.8, 25.1, 24.9, 25.3]);
 /// chart.add_sample(&[25.1, 25.0, 24.7, 25.3, 24.9]);
@@ -137,6 +191,7 @@ const D4_MR: f64 = 3.267;
 ///
 /// Montgomery, D.C. (2019). *Introduction to Statistical Quality Control*, 8th ed.,
 /// Chapter 6: Control Charts for Variables.
+#[derive(Debug, Clone)]
 pub struct XBarRChart {
     /// Fixed subgroup size (2..=10).
     subgroup_size: usize,
@@ -155,22 +210,30 @@ pub struct XBarRChart {
 impl XBarRChart {
     /// Create a new X-bar-R chart with the given subgroup size.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if `subgroup_size` is not in the range 2..=10.
-    pub fn new(subgroup_size: usize) -> Self {
-        assert!(
-            (2..=10).contains(&subgroup_size),
-            "subgroup_size must be 2..=10, got {subgroup_size}"
-        );
-        Self {
+    /// Returns [`ControlChartError::SubgroupSizeOutOfRange`] when
+    /// `subgroup_size` is outside `MIN_SUBGROUP_SIZE..=MAX_SUBGROUP_SIZE`.
+    /// The size is data in most callers -- it comes from the measurements a
+    /// user supplied -- so rejecting it is an ordinary outcome rather than a
+    /// contract violation, and a boundary that cannot unwind (WebAssembly, C)
+    /// needs it as a value.
+    pub fn new(subgroup_size: usize) -> Result<Self, ControlChartError> {
+        if !(MIN_SUBGROUP_SIZE..=MAX_SUBGROUP_SIZE).contains(&subgroup_size) {
+            return Err(ControlChartError::SubgroupSizeOutOfRange {
+                got: subgroup_size,
+                min: MIN_SUBGROUP_SIZE,
+                max: MAX_SUBGROUP_SIZE,
+            });
+        }
+        Ok(Self {
             subgroup_size,
             subgroups: Vec::new(),
             xbar_points: Vec::new(),
             r_points: Vec::new(),
             xbar_limits: None,
             r_limits: None,
-        }
+        })
     }
 
     /// Short-term (within-subgroup) sigma estimated from this chart:
@@ -189,7 +252,7 @@ impl XBarRChart {
     /// ```
     /// use u_analytics::spc::{ControlChart, XBarRChart};
     ///
-    /// let mut chart = XBarRChart::new(5);
+    /// let mut chart = XBarRChart::new(5).expect("subgroup size is in range");
     /// for g in [[9.9, 10.1, 10.0, 9.8, 10.2], [10.3, 9.7, 10.0, 10.1, 9.9]] {
     ///     chart.add_sample(&g);
     /// }
@@ -351,6 +414,7 @@ impl ControlChart for XBarRChart {
 ///
 /// Montgomery, D.C. (2019). *Introduction to Statistical Quality Control*, 8th ed.,
 /// Chapter 6: Control Charts for Variables.
+#[derive(Debug, Clone)]
 pub struct XBarSChart {
     /// Fixed subgroup size (2..=10).
     subgroup_size: usize,
@@ -369,22 +433,30 @@ pub struct XBarSChart {
 impl XBarSChart {
     /// Create a new X-bar-S chart with the given subgroup size.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if `subgroup_size` is not in the range 2..=10.
-    pub fn new(subgroup_size: usize) -> Self {
-        assert!(
-            (2..=10).contains(&subgroup_size),
-            "subgroup_size must be 2..=10, got {subgroup_size}"
-        );
-        Self {
+    /// Returns [`ControlChartError::SubgroupSizeOutOfRange`] when
+    /// `subgroup_size` is outside `MIN_SUBGROUP_SIZE..=MAX_SUBGROUP_SIZE`.
+    /// The size is data in most callers -- it comes from the measurements a
+    /// user supplied -- so rejecting it is an ordinary outcome rather than a
+    /// contract violation, and a boundary that cannot unwind (WebAssembly, C)
+    /// needs it as a value.
+    pub fn new(subgroup_size: usize) -> Result<Self, ControlChartError> {
+        if !(MIN_SUBGROUP_SIZE..=MAX_SUBGROUP_SIZE).contains(&subgroup_size) {
+            return Err(ControlChartError::SubgroupSizeOutOfRange {
+                got: subgroup_size,
+                min: MIN_SUBGROUP_SIZE,
+                max: MAX_SUBGROUP_SIZE,
+            });
+        }
+        Ok(Self {
             subgroup_size,
             subgroups: Vec::new(),
             xbar_points: Vec::new(),
             s_points: Vec::new(),
             xbar_limits: None,
             s_limits: None,
-        }
+        })
     }
 
     /// Short-term (within-subgroup) sigma estimated from this chart:
@@ -399,7 +471,7 @@ impl XBarSChart {
     /// ```
     /// use u_analytics::spc::{ControlChart, XBarSChart};
     ///
-    /// let mut chart = XBarSChart::new(5);
+    /// let mut chart = XBarSChart::new(5).expect("subgroup size is in range");
     /// for g in [[9.9, 10.1, 10.0, 9.8, 10.2], [10.3, 9.7, 10.0, 10.1, 9.9]] {
     ///     chart.add_sample(&g);
     /// }
@@ -577,6 +649,7 @@ impl ControlChart for XBarSChart {
 ///
 /// Montgomery, D.C. (2019). *Introduction to Statistical Quality Control*, 8th ed.,
 /// Chapter 6: Control Charts for Variables.
+#[derive(Debug, Clone)]
 pub struct IndividualMRChart {
     /// Individual observations.
     observations: Vec<f64>,
@@ -780,7 +853,7 @@ mod tests {
 
     #[test]
     fn test_xbar_r_basic_limits() {
-        let mut chart = XBarRChart::new(4);
+        let mut chart = XBarRChart::new(4).expect("subgroup size is in range");
         chart.add_sample(&[72.0, 84.0, 79.0, 49.0]);
         chart.add_sample(&[56.0, 87.0, 33.0, 42.0]);
         chart.add_sample(&[55.0, 73.0, 22.0, 60.0]);
@@ -803,21 +876,21 @@ mod tests {
 
     #[test]
     fn test_xbar_r_rejects_wrong_size() {
-        let mut chart = XBarRChart::new(5);
+        let mut chart = XBarRChart::new(5).expect("subgroup size is in range");
         chart.add_sample(&[1.0, 2.0, 3.0]); // Wrong size, should be ignored
         assert!(chart.control_limits().is_none());
     }
 
     #[test]
     fn test_xbar_r_rejects_nan() {
-        let mut chart = XBarRChart::new(3);
+        let mut chart = XBarRChart::new(3).expect("subgroup size is in range");
         chart.add_sample(&[1.0, f64::NAN, 3.0]);
         assert!(chart.control_limits().is_none());
     }
 
     #[test]
     fn test_xbar_r_r_chart_limits() {
-        let mut chart = XBarRChart::new(5);
+        let mut chart = XBarRChart::new(5).expect("subgroup size is in range");
         chart.add_sample(&[10.0, 12.0, 11.0, 13.0, 14.0]);
         chart.add_sample(&[11.0, 13.0, 12.0, 10.0, 15.0]);
         chart.add_sample(&[12.0, 11.0, 14.0, 13.0, 10.0]);
@@ -830,7 +903,7 @@ mod tests {
     #[test]
     fn test_xbar_r_constant_subgroups() {
         // All identical values: R-bar = 0, limits collapse
-        let mut chart = XBarRChart::new(3);
+        let mut chart = XBarRChart::new(3).expect("subgroup size is in range");
         chart.add_sample(&[10.0, 10.0, 10.0]);
         chart.add_sample(&[10.0, 10.0, 10.0]);
 
@@ -842,7 +915,7 @@ mod tests {
 
     #[test]
     fn test_xbar_r_detects_out_of_control() {
-        let mut chart = XBarRChart::new(3);
+        let mut chart = XBarRChart::new(3).expect("subgroup size is in range");
         for _ in 0..5 {
             chart.add_sample(&[10.0, 10.5, 9.5]);
         }
@@ -852,23 +925,134 @@ mod tests {
         assert!(!chart.is_in_control());
     }
 
+    /// The n=2..=10 half of every factor table must still be the ASTM E2587
+    /// published constants.
+    ///
+    /// The tables are computed from the definitions rather than transcribed, so
+    /// this is the check that licenses that: agreement with the published values
+    /// over the range a standard covers is the evidence that the extension to
+    /// n=25 is the same quantity and not a plausible-looking different one.
     #[test]
-    #[should_panic(expected = "subgroup_size must be 2..=10")]
-    fn test_xbar_r_invalid_size_1() {
-        let _ = XBarRChart::new(1);
+    fn factor_tables_reproduce_the_published_astm_values() {
+        // ASTM E2587 / Montgomery Appendix VI, n = 2..=10.
+        const PUB_A2: [f64; 9] = [
+            1.880, 1.023, 0.729, 0.577, 0.483, 0.419, 0.373, 0.337, 0.308,
+        ];
+        const PUB_D3: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.076, 0.136, 0.184, 0.223];
+        const PUB_D4: [f64; 9] = [
+            3.267, 2.575, 2.282, 2.114, 2.004, 1.924, 1.864, 1.816, 1.777,
+        ];
+        const PUB_D2: [f64; 9] = [
+            1.128, 1.693, 2.059, 2.326, 2.534, 2.704, 2.847, 2.970, 3.078,
+        ];
+        const PUB_A3: [f64; 9] = [
+            2.659, 1.954, 1.628, 1.427, 1.287, 1.182, 1.099, 1.032, 0.975,
+        ];
+        const PUB_B3: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.030, 0.118, 0.185, 0.239, 0.284];
+        const PUB_B4: [f64; 9] = [
+            3.267, 2.568, 2.266, 2.089, 1.970, 1.882, 1.815, 1.761, 1.716,
+        ];
+        const PUB_C4: [f64; 9] = [
+            0.7979, 0.8862, 0.9213, 0.9400, 0.9515, 0.9594, 0.9650, 0.9693, 0.9727,
+        ];
+
+        for (name, table, published, tol) in [
+            ("A2", &A2[..9], &PUB_A2[..], 5e-4),
+            ("D3", &D3[..9], &PUB_D3[..], 5e-4),
+            ("D4", &D4[..9], &PUB_D4[..], 5e-4),
+            ("d2", &D2[..9], &PUB_D2[..], 5e-4),
+            ("A3", &A3[..9], &PUB_A3[..], 5e-4),
+            ("B3", &B3[..9], &PUB_B3[..], 5e-4),
+            ("B4", &B4[..9], &PUB_B4[..], 5e-4),
+            ("c4", &C4[..9], &PUB_C4[..], 5e-5),
+        ] {
+            for (i, (got, want)) in table.iter().zip(published).enumerate() {
+                assert!(
+                    (got - want).abs() < tol,
+                    "{name}[n={}] = {got}, published {want}",
+                    i + 2
+                );
+            }
+        }
+    }
+
+    /// Every table covers the whole declared range and stays monotone in the
+    /// direction its definition requires.
+    #[test]
+    fn factor_tables_cover_the_declared_range() {
+        let span = MAX_SUBGROUP_SIZE - MIN_SUBGROUP_SIZE + 1;
+        for (name, len) in [
+            ("A2", A2.len()),
+            ("D3", D3.len()),
+            ("D4", D4.len()),
+            ("d2", D2.len()),
+            ("A3", A3.len()),
+            ("B3", B3.len()),
+            ("B4", B4.len()),
+            ("c4", C4.len()),
+        ] {
+            assert_eq!(
+                len, span,
+                "{name} does not cover {MIN_SUBGROUP_SIZE}..={MAX_SUBGROUP_SIZE}"
+            );
+        }
+        // d2 and c4 rise with n; A2, A3, D4 and B4 fall; D3 and B3 rise from 0.
+        for i in 1..span {
+            assert!(D2[i] > D2[i - 1], "d2 not increasing at n={}", i + 2);
+            assert!(C4[i] > C4[i - 1], "c4 not increasing at n={}", i + 2);
+            assert!(A2[i] < A2[i - 1], "A2 not decreasing at n={}", i + 2);
+            assert!(A3[i] < A3[i - 1], "A3 not decreasing at n={}", i + 2);
+            assert!(D4[i] < D4[i - 1], "D4 not decreasing at n={}", i + 2);
+            assert!(B4[i] < B4[i - 1], "B4 not decreasing at n={}", i + 2);
+            assert!(D3[i] >= D3[i - 1], "D3 not non-decreasing at n={}", i + 2);
+            assert!(B3[i] >= B3[i - 1], "B3 not non-decreasing at n={}", i + 2);
+        }
+        // c4 is bounded by 1 and approaches it.
+        assert!(C4[span - 1] < 1.0 && C4[span - 1] > 0.98);
     }
 
     #[test]
-    #[should_panic(expected = "subgroup_size must be 2..=10")]
-    fn test_xbar_r_invalid_size_11() {
-        let _ = XBarRChart::new(11);
+    fn test_xbar_r_subgroup_size_below_range_is_an_error() {
+        assert_eq!(
+            XBarRChart::new(1).unwrap_err(),
+            ControlChartError::SubgroupSizeOutOfRange {
+                got: 1,
+                min: 2,
+                max: 25
+            }
+        );
+    }
+
+    #[test]
+    fn test_xbar_r_subgroup_size_above_range_is_an_error() {
+        assert_eq!(
+            XBarRChart::new(26).unwrap_err(),
+            ControlChartError::SubgroupSizeOutOfRange {
+                got: 26,
+                min: 2,
+                max: 25
+            }
+        );
+    }
+
+    #[test]
+    fn test_subgroup_size_11_is_now_accepted() {
+        // The regression this guards: n=11 was rejected outright, so a study
+        // running larger subgroups could not use the chart at all.
+        let mut chart = XBarRChart::new(11).expect("11 is within 2..=25");
+        for _ in 0..5 {
+            chart.add_sample(&[10.0, 10.2, 9.8, 10.1, 9.9, 10.3, 9.7, 10.0, 10.1, 9.9, 10.0]);
+        }
+        let limits = chart.control_limits().expect("limits from 5 subgroups");
+        assert!(limits.ucl > limits.cl && limits.cl > limits.lcl);
+        assert!(chart.sigma_hat().is_some_and(|s| s > 0.0));
     }
 
     // --- XBarSChart ---
 
     #[test]
     fn test_xbar_s_basic_limits() {
-        let mut chart = XBarSChart::new(4);
+        let mut chart = XBarSChart::new(4).expect("subgroup size is in range");
         chart.add_sample(&[72.0, 84.0, 79.0, 49.0]);
         chart.add_sample(&[56.0, 87.0, 33.0, 42.0]);
         chart.add_sample(&[55.0, 73.0, 22.0, 60.0]);
@@ -886,14 +1070,14 @@ mod tests {
 
     #[test]
     fn test_xbar_s_rejects_wrong_size() {
-        let mut chart = XBarSChart::new(5);
+        let mut chart = XBarSChart::new(5).expect("subgroup size is in range");
         chart.add_sample(&[1.0, 2.0]);
         assert!(chart.control_limits().is_none());
     }
 
     #[test]
     fn test_xbar_s_in_control() {
-        let mut chart = XBarSChart::new(4);
+        let mut chart = XBarSChart::new(4).expect("subgroup size is in range");
         for _ in 0..10 {
             chart.add_sample(&[10.0, 10.2, 9.8, 10.1]);
         }
@@ -990,7 +1174,7 @@ mod tests {
     fn test_xbar_r_chart_factors_n5() {
         // For n=5: A2=0.577, D3=0.0, D4=2.114
         // Subgroup with mean=50, range=10
-        let mut chart = XBarRChart::new(5);
+        let mut chart = XBarRChart::new(5).expect("subgroup size is in range");
         chart.add_sample(&[45.0, 47.0, 50.0, 53.0, 55.0]);
 
         let limits = chart.control_limits().expect("limits");
@@ -1093,7 +1277,7 @@ mod tests {
 
     #[test]
     fn xbar_r_sigma_hat_is_r_bar_over_d2() {
-        let mut chart = XBarRChart::new(5);
+        let mut chart = XBarRChart::new(5).expect("subgroup size is in range");
         let groups = [
             [9.9, 10.1, 10.0, 9.8, 10.2],
             [10.3, 9.7, 10.0, 10.1, 9.9],
@@ -1115,7 +1299,7 @@ mod tests {
 
     #[test]
     fn xbar_s_sigma_hat_is_s_bar_over_c4() {
-        let mut chart = XBarSChart::new(5);
+        let mut chart = XBarSChart::new(5).expect("subgroup size is in range");
         for g in &[
             [9.9, 10.1, 10.0, 9.8, 10.2],
             [10.3, 9.7, 10.0, 10.1, 9.9],
@@ -1131,8 +1315,8 @@ mod tests {
 
     #[test]
     fn sigma_hat_is_none_without_limits() {
-        assert!(XBarRChart::new(5).sigma_hat().is_none());
-        assert!(XBarSChart::new(5).sigma_hat().is_none());
+        assert!(XBarRChart::new(5).unwrap().sigma_hat().is_none());
+        assert!(XBarSChart::new(5).unwrap().sigma_hat().is_none());
     }
 
     #[test]
@@ -1149,7 +1333,7 @@ mod tests {
             [9.6, 10.4, 10.0, 9.9, 10.1],
             [10.1, 9.9, 10.0, 10.3, 9.7],
         ];
-        let mut chart = XBarRChart::new(5);
+        let mut chart = XBarRChart::new(5).expect("subgroup size is in range");
         for g in &groups {
             chart.add_sample(g);
         }

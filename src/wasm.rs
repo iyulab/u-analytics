@@ -212,7 +212,8 @@ fn violation_name(v: crate::spc::ViolationType) -> &'static str {
 /// # Input JSON
 ///
 /// Array of arrays: `[[x1, x2, ...], [x1, x2, ...], ...]`
-/// All subgroups must have the same length (2..=10).
+/// All subgroups must have the same length, within the range the crate's
+/// factor tables cover (see `MIN_SUBGROUP_SIZE`/`MAX_SUBGROUP_SIZE`).
 ///
 /// # Output JSON
 ///
@@ -232,14 +233,16 @@ pub fn xbar_r_chart(data: JsValue) -> Result<JsValue, JsValue> {
         return Err(js_err("at least one subgroup required"));
     }
     let n = subgroups[0].len();
-    if !(2..=10).contains(&n) {
-        return Err(js_err(format!("subgroup size must be 2..=10, got {n}")));
-    }
     if subgroups.iter().any(|g| g.len() != n) {
         return Err(js_err("all subgroups must have the same size"));
     }
 
-    let mut chart = XBarRChart::new(n);
+    // The supported subgroup range is not restated here. It used to be, as a
+    // literal `2..=10` alongside the same literal in the constructor, so
+    // widening the crate's factor tables left this binding rejecting sizes the
+    // crate had just learned to handle -- a disagreement no test in either
+    // crate could see, because each one was right about its own copy.
+    let mut chart = XBarRChart::new(n).map_err(|e| js_err(e.to_string()))?;
     for subgroup in &subgroups {
         chart.add_sample(subgroup);
     }
@@ -1091,7 +1094,7 @@ mod binding_contract_tests {
     /// quantity the flat vector cannot carry.
     fn sigma_within_from_chart() -> f64 {
         use crate::spc::{ControlChart, XBarRChart};
-        let mut chart = XBarRChart::new(5);
+        let mut chart = XBarRChart::new(5).expect("5 is within range");
         for g in SUBGROUPS {
             chart.add_sample(&g);
         }

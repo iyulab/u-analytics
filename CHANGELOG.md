@@ -8,6 +8,47 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** variables control charts accept subgroup sizes up to 25, not 10.
+  The factor tables (A2, A3, D3, D4, B3, B4, d2, c4) stopped at n=10, which is
+  the range a published table conventionally prints -- not a limit of the
+  method. A study running larger subgroups could not use the chart at all.
+
+  The whole range is now computed from the definitions rather than transcribed,
+  because no single published table covers n=25 in every factor:
+
+  ```
+  d2(n) = E[W],  d3(n) = sd[W]   for W the range of n iid standard normals
+  c4(n) = sqrt(2/(n-1)) * Gamma(n/2) / Gamma((n-1)/2)
+  A2 = 3/(d2*sqrt(n))                  A3 = 3/(c4*sqrt(n))
+  D3 = max(0, 1 - 3*d3/d2)             D4 = 1 + 3*d3/d2
+  B3 = max(0, 1 - 3*sqrt(1-c4^2)/c4)   B4 = 1 + 3*sqrt(1-c4^2)/c4
+  ```
+
+  The computation reproduces all 72 ASTM E2587 published values over n=2..=10
+  across the eight tables, and a test pins that agreement so a later edit to the
+  tables cannot quietly diverge from the standard.
+- **Breaking:** `XBarRChart::new` and `XBarSChart::new` return
+  `Result<Self, ControlChartError>` instead of panicking on an unsupported
+  subgroup size. The size usually comes from the measurements a caller was
+  handed, so rejecting it is an ordinary outcome rather than a contract
+  violation -- and a boundary that cannot unwind, such as the WebAssembly
+  entry points, needs it as a value.
+- The WebAssembly `xbar_r_chart` binding no longer states the supported
+  subgroup range itself. It carried a second copy of the same literal bound, so
+  widening the tables would have left the binding rejecting sizes the crate had
+  just learned to handle -- a disagreement neither side's tests could see,
+  because each was right about its own copy. It now reports whatever the
+  constructor rejects.
+
+### Added
+
+- `ControlChartError`, `MIN_SUBGROUP_SIZE` and `MAX_SUBGROUP_SIZE` are public,
+  so a caller can validate a subgroup size before building a chart and can match
+  on the rejection rather than parsing a message.
+- `Debug` and `Clone` on `XBarRChart`, `XBarSChart` and `IndividualMRChart`.
+
 ## [0.8.0] - 2026-09-10
 
 ### Changed

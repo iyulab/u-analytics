@@ -9,6 +9,8 @@
 //! - Montgomery, D.C. (2019). *Introduction to Statistical Quality Control*, 8th ed.
 //! - ASTM E2587 — Standard Practice for Use of Control Charts
 
+use std::fmt;
+
 /// Control limits for a chart.
 ///
 /// Represents the upper control limit (UCL), center line (CL), and lower
@@ -134,6 +136,45 @@ pub trait ControlChart {
     /// Get all chart points.
     fn points(&self) -> &[ChartPoint];
 }
+
+/// Smallest subgroup size the variables-chart factor tables cover.
+pub const MIN_SUBGROUP_SIZE: usize = 2;
+
+/// Largest subgroup size the variables-chart factor tables cover.
+///
+/// The factor tables (A2, A3, D3, D4, B3, B4, d2, c4) are indexed by subgroup
+/// size, so this is the highest `n` for which control limits can be computed.
+pub const MAX_SUBGROUP_SIZE: usize = 25;
+
+/// Errors returned when a control chart cannot be constructed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ControlChartError {
+    /// The requested subgroup size is outside the range the factor tables cover.
+    ///
+    /// Carries the rejected size so a caller can report it without re-deriving
+    /// it, and so a boundary that cannot unwind -- a WebAssembly or C entry
+    /// point -- can turn it into a value rather than a panic.
+    SubgroupSizeOutOfRange {
+        /// The size that was asked for.
+        got: usize,
+        /// Smallest supported size.
+        min: usize,
+        /// Largest supported size.
+        max: usize,
+    },
+}
+
+impl fmt::Display for ControlChartError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ControlChartError::SubgroupSizeOutOfRange { got, min, max } => {
+                write!(f, "subgroup size must be {min}..={max}, got {got}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ControlChartError {}
 
 #[cfg(test)]
 mod tests {

@@ -4,8 +4,8 @@
 //!
 //! # Variables Charts
 //!
-//! - [`XBarRChart`] — X-bar and Range chart for subgroup data (n=2..10)
-//! - [`XBarSChart`] — X-bar and Standard Deviation chart for subgroup data (n=2..10)
+//! - [`XBarRChart`] — X-bar and Range chart for subgroup data (n=2..=25)
+//! - [`XBarSChart`] — X-bar and Standard Deviation chart for subgroup data (n=2..=25)
 //! - [`IndividualMRChart`] — Individual and Moving Range chart for individual observations
 //!
 //! # Attributes Charts
@@ -37,6 +37,9 @@ pub use attributes::{
     GChartPoint, LaneyAttributePoint, LaneyPChart, LaneyUChart, NPChart, PChart, TChart,
     TChartPoint, UChart,
 };
-pub use chart::{ChartPoint, ControlChart, ControlLimits, Violation, ViolationType};
+pub use chart::{
+    ChartPoint, ControlChart, ControlChartError, ControlLimits, Violation, ViolationType,
+    MAX_SUBGROUP_SIZE, MIN_SUBGROUP_SIZE,
+};
 pub use rules::{NelsonRules, RunRule, WesternElectricRules};
 pub use variables::{IndividualMRChart, XBarRChart, XBarSChart};
