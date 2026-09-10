@@ -8,7 +8,7 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
-## [0.8.0]
+## [0.8.0] - 2026-09-10
 
 ### Changed
 
