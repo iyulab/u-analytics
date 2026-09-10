@@ -72,6 +72,63 @@ jobs:
           node -e "const m = require('$PKG_NAME'); if (!Object.keys(m).length) throw new Error('empty CJS exports')"
           node --input-type=module -e "import('$PKG_NAME').then(m => { if (!Object.keys(m).length) throw new Error('empty ESM exports') })"
 
+      # The step above proves the package loads. It cannot prove any binding
+      # works -- it would pass unchanged if every export threw. The host-target
+      # tests in `ci.yml` cover the wire contract, but they run on the pure core
+      # with no `JsValue` anywhere; what is only observable here is whether a
+      # real JS object survives the boundary and comes back with the documented
+      # shape. This is the last gate before `npm publish`.
+      - name: Node behaviour gate (bindings actually answer)
+        run: |
+          PKG_NAME=$(node -p "require('./pkg/package.json').name")
+          cd "$RUNNER_TEMP/smoke"
+          cat > gate.mjs <<'EOF'
+          const m = await import(process.env.PKG_NAME)
+          const ok = (c, msg) => { if (!c) throw new Error(msg) }
+
+          const subgroups = [
+            [9.9, 10.1, 10.0, 9.8, 10.2], [10.3, 9.7, 10.0, 10.1, 9.9],
+            [9.8, 10.2, 10.1, 9.9, 10.0], [10.5, 9.5, 10.0, 10.2, 9.8],
+            [9.6, 10.4, 10.0, 9.9, 10.1], [10.1, 9.9, 10.0, 10.3, 9.7],
+          ]
+          const data = subgroups.flat()
+
+          // A native JS object must cross the boundary and come back shaped as
+          // documented -- omitting sigma_within reports the long-term family
+          // only, with the short-term one null rather than borrowed.
+          const overall = m.process_capability({ data, usl: 11, lsl: 9 })
+          ok(overall.sigma_source === 'overall', `sigma_source=${overall.sigma_source}`)
+          ok(overall.cp === null || overall.cp === undefined, 'cp must be null without sigma_within')
+          ok(typeof overall.pp === 'number', 'pp must be present')
+
+          // sigma_hat is what makes the two bindings compose: the chart hands
+          // over the quantity a flat vector cannot carry.
+          const chart = m.xbar_r_chart(subgroups)
+          ok(typeof chart.sigma_hat === 'number', 'xbar_r_chart must expose sigma_hat')
+
+          const within = m.process_capability({ data, usl: 11, lsl: 9, sigma_within: chart.sigma_hat })
+          ok(within.sigma_source === 'within', `sigma_source=${within.sigma_source}`)
+          ok(within.cp !== within.pp, 'cp and pp must come from different sigmas')
+
+          // A one-sided specification is expressible.
+          const upper = m.process_capability({ data, usl: 11 })
+          ok(upper.pp === null || upper.pp === undefined, 'Pp needs both limits')
+          ok(typeof upper.ppu === 'number', 'an upper limit supports Ppu')
+
+          // The wire schema is strict, and a stringified payload is refused
+          // with an actionable message rather than a serde error.
+          let threw = false
+          try { m.process_capability({ data, usl: 11, sigmaWithin: 0.3 }) } catch { threw = true }
+          ok(threw, 'unknown key must be rejected')
+
+          threw = false
+          try { m.process_capability(JSON.stringify({ data, usl: 11 })) } catch { threw = true }
+          ok(threw, 'a JSON string must be rejected, not parsed')
+
+          console.log('binding behaviour gate: ok')
+          EOF
+          PKG_NAME="$PKG_NAME" node gate.mjs
+
       - name: Publish to npm
         run: |
           cd pkg

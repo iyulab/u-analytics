@@ -82,7 +82,7 @@ struct CapabilityInputDto {
     target: Option<f64>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 struct CapabilityDto {
     mean: f64,
     /// `"within"` when `sigma_within` was supplied, `"overall"` otherwise.
@@ -175,7 +175,18 @@ fn from_js<T: serde::de::DeserializeOwned>(value: JsValue, param: &str) -> Resul
     // through serde_json::Value so the strict wire schema is enforced.
     let json: serde_json::Value =
         serde_wasm_bindgen::from_value(value).map_err(|e| js_err(format!("{param}: {e}")))?;
-    serde_json::from_value(json).map_err(|e| js_err(format!("{param}: {e}")))
+    from_json(json, param).map_err(js_err)
+}
+
+/// The half of [`from_js`] that enforces the wire schema, split out so it can
+/// be exercised without a `JsValue` -- which cannot be constructed off
+/// `wasm32`. Tests calling this walk the same deserialization path a JS caller
+/// does, rather than a parallel one that could drift from it.
+fn from_json<T: serde::de::DeserializeOwned>(
+    json: serde_json::Value,
+    param: &str,
+) -> Result<T, String> {
+    serde_json::from_value(json).map_err(|e| format!("{param}: {e}"))
 }
 
 fn violation_name(v: crate::spc::ViolationType) -> &'static str {
@@ -206,7 +217,11 @@ fn violation_name(v: crate::spc::ViolationType) -> &'static str {
 /// # Output JSON
 ///
 /// Object with fields: `xbar_cl`, `xbar_ucl`, `xbar_lcl`, `r_cl`, `r_ucl`,
-/// `r_lcl`, `xbar_points`, `r_points`, `in_control`.
+/// `r_lcl`, `sigma_hat`, `xbar_points`, `r_points`, `in_control`.
+///
+/// `sigma_hat` is `R-bar / d2` -- the short-term sigma a capability study
+/// needs. Pass it to [`process_capability`] as `sigma_within`; it is `null`
+/// when there is not enough data for control limits.
 #[wasm_bindgen]
 pub fn xbar_r_chart(data: JsValue) -> Result<JsValue, JsValue> {
     use crate::spc::{ControlChart, XBarRChart};
@@ -360,15 +375,27 @@ pub fn p_chart(samples: JsValue) -> Result<JsValue, JsValue> {
 /// their place would make `cp` equal `pp` for every input.
 #[wasm_bindgen]
 pub fn process_capability(input: JsValue) -> Result<JsValue, JsValue> {
+    let input: CapabilityInputDto = from_js(input, "input")?;
+    to_js(&capability_dto(input).map_err(js_err)?)
+}
+
+/// Pure core of [`process_capability`]: the specification, sigma-source and
+/// null-handling contract, with no `JsValue` in sight.
+///
+/// The binding above is a two-line adapter over this. The split is what makes
+/// the contract testable at all on a host without a WebAssembly runner --
+/// `JsValue` cannot be constructed off `wasm32`, so a monolithic binding is
+/// only reachable from a browser or Node. Everything this function decides
+/// (which index family is computed, which fields come back `null`, which
+/// specification shapes are legal) is the part a consumer actually observes.
+fn capability_dto(input: CapabilityInputDto) -> Result<CapabilityDto, String> {
     use crate::capability::ProcessCapability;
 
-    let input: CapabilityInputDto = from_js(input, "input")?;
-
     let mut spec = ProcessCapability::new(input.usl, input.lsl)
-        .map_err(|e| js_err(format!("invalid specification limits: {e}")))?;
+        .map_err(|e| format!("invalid specification limits: {e}"))?;
     if let Some(target) = input.target {
         if !target.is_finite() {
-            return Err(js_err("target must be finite"));
+            return Err("target must be finite".to_string());
         }
         spec = spec.with_target(target);
     }
@@ -376,13 +403,13 @@ pub fn process_capability(input: JsValue) -> Result<JsValue, JsValue> {
     let dto = match input.sigma_within {
         Some(sigma_within) => {
             if !sigma_within.is_finite() || sigma_within <= 0.0 {
-                return Err(js_err(
-                    "sigma_within must be a positive, finite number                      (R-bar/d2 or S-bar/c4 from the control chart)",
-                ));
+                return Err("sigma_within must be a positive, finite number \
+                     (R-bar/d2 or S-bar/c4 from the control chart)"
+                    .to_string());
             }
             let indices = spec
                 .compute(&input.data, sigma_within)
-                .ok_or_else(|| js_err("insufficient or invalid data (need >= 2 finite values)"))?;
+                .ok_or("insufficient or invalid data (need >= 2 finite values)")?;
             CapabilityDto {
                 mean: indices.mean,
                 sigma_source: "within",
@@ -406,7 +433,7 @@ pub fn process_capability(input: JsValue) -> Result<JsValue, JsValue> {
             // name Cp for every input.
             let indices = spec
                 .compute_overall(&input.data)
-                .ok_or_else(|| js_err("insufficient or invalid data (need >= 2 finite values)"))?;
+                .ok_or("insufficient or invalid data (need >= 2 finite values)")?;
             CapabilityDto {
                 mean: indices.mean,
                 sigma_source: "overall",
@@ -424,7 +451,7 @@ pub fn process_capability(input: JsValue) -> Result<JsValue, JsValue> {
             }
         }
     };
-    to_js(&dto)
+    Ok(dto)
 }
 
 /// Anderson-Darling normality test (Stephens 1974).
@@ -979,10 +1006,17 @@ mod dto_strictness_tests {
     use serde_json::json;
 
     fn assert_rejects_unknown<T: serde::de::DeserializeOwned>(v: serde_json::Value) {
-        match serde_json::from_value::<T>(v) {
+        match super::from_json::<T>(v, "input") {
             Ok(_) => panic!("unknown key must be rejected"),
-            Err(e) => assert!(e.to_string().contains("unknown field"), "{e}"),
+            Err(e) => assert!(e.contains("unknown field"), "{e}"),
         }
+    }
+
+    #[test]
+    fn capability_input_rejects_unknown_keys() {
+        assert_rejects_unknown::<super::CapabilityInputDto>(
+            json!({ "data": [1.0, 2.0], "usl": 3.0, "sigmaWithin": 0.5 }),
+        );
     }
 
     #[test]
@@ -1011,5 +1045,194 @@ mod dto_strictness_tests {
         assert_rejects_unknown::<super::PercentileCapabilityInputDto>(
             json!({ "data": [1.0, 2.0], "target": 1.5 }),
         );
+    }
+}
+
+// ── Binding-contract tests ───────────────────────────────────────────
+//
+// These pin what a JavaScript caller observes, not what the underlying
+// statistics compute -- the crate's own modules already cover the latter. The
+// distinction matters: the defect these exist to prevent was never in
+// `ProcessCapability`, which was correct throughout. It was in the binding,
+// which called the long-term entry point and then labelled the result with
+// short-term field names, so `cp == pp` held for every input while every unit
+// test in the crate stayed green.
+//
+// They run under `cargo test --features wasm` on any host. `JsValue` is absent
+// from every assertion below by design; the adapter that wraps it is two lines
+// and has nothing left to get wrong.
+
+#[cfg(test)]
+mod binding_contract_tests {
+    use super::{capability_dto, from_json, CapabilityInputDto};
+    use serde_json::json;
+
+    /// The reporter's fixture (docket #219): six subgroups of five, with real
+    /// between-subgroup drift, so the short-term and long-term families are
+    /// genuinely different numbers.
+    const SUBGROUPS: [[f64; 5]; 6] = [
+        [9.9, 10.1, 10.0, 9.8, 10.2],
+        [10.3, 9.7, 10.0, 10.1, 9.9],
+        [9.8, 10.2, 10.1, 9.9, 10.0],
+        [10.5, 9.5, 10.0, 10.2, 9.8],
+        [9.6, 10.4, 10.0, 9.9, 10.1],
+        [10.1, 9.9, 10.0, 10.3, 9.7],
+    ];
+
+    fn flat() -> Vec<f64> {
+        SUBGROUPS.iter().flatten().copied().collect()
+    }
+
+    fn dto(v: serde_json::Value) -> Result<super::CapabilityDto, String> {
+        capability_dto(from_json::<CapabilityInputDto>(v, "input")?)
+    }
+
+    /// `sigma_hat` from the chart the measurements actually came from -- the
+    /// quantity the flat vector cannot carry.
+    fn sigma_within_from_chart() -> f64 {
+        use crate::spc::{ControlChart, XBarRChart};
+        let mut chart = XBarRChart::new(5);
+        for g in SUBGROUPS {
+            chart.add_sample(&g);
+        }
+        chart.sigma_hat().expect("limits available for 6 subgroups")
+    }
+
+    #[test]
+    fn omitting_sigma_within_yields_nulls_not_long_term_numbers_under_short_term_names() {
+        let d = dto(json!({ "data": flat(), "usl": 11.0, "lsl": 9.0 })).expect("valid input");
+
+        assert_eq!(d.sigma_source, "overall");
+        // The whole short-term family is absent rather than borrowed. A reader
+        // can ignore a label; it cannot ignore a null.
+        assert!(d.std_dev_within.is_none());
+        assert!(d.cp.is_none());
+        assert!(d.cpk.is_none());
+        assert!(d.cpu.is_none());
+        assert!(d.cpl.is_none());
+        assert!(d.cpm.is_none());
+        // The long-term family is what this input can support, so it is present.
+        assert!(d.pp.is_some());
+        assert!(d.ppk.is_some());
+    }
+
+    #[test]
+    fn supplying_sigma_within_separates_the_two_index_families() {
+        let sigma_within = sigma_within_from_chart();
+        let d = dto(json!({
+            "data": flat(), "usl": 11.0, "lsl": 9.0, "sigma_within": sigma_within,
+        }))
+        .expect("valid input");
+
+        assert_eq!(d.sigma_source, "within");
+        assert_eq!(d.std_dev_within, Some(sigma_within));
+
+        let (cp, pp) = (d.cp.expect("cp"), d.pp.expect("pp"));
+        let (cpk, ppk) = (d.cpk.expect("cpk"), d.ppk.expect("ppk"));
+
+        // This is the shipped regression, stated as an assertion: the binding
+        // used to make these pairs equal for every input by construction.
+        assert!(
+            (cp - pp).abs() > 1e-9,
+            "cp and pp must come from different sigmas: cp={cp} pp={pp}"
+        );
+        assert!(
+            (cpk - ppk).abs() > 1e-9,
+            "cpk and ppk must come from different sigmas: cpk={cpk} ppk={ppk}"
+        );
+        // Stronger than "they differ": each family must be tied to *its own*
+        // sigma. Cp = (USL-LSL)/(6*sigma), so the ratio of the two indices is
+        // the inverse ratio of the two sigmas -- an identity that only holds
+        // if the binding fed the short-term sigma to the short-term family and
+        // the long-term sigma to the long-term one. The old binding satisfied
+        // "they differ" trivially by never differing; it could not satisfy
+        // this.
+        let sigma_overall = d.std_dev_overall;
+        assert!(
+            (cp / pp - sigma_overall / sigma_within).abs() < 1e-12,
+            "cp/pp must equal sigma_overall/sigma_within: \
+             cp={cp} pp={pp} sigma_within={sigma_within} sigma_overall={sigma_overall}"
+        );
+
+        // Which of the two is larger is a property of the data, not of the
+        // binding: this fixture's subgroup means sit close together, so the
+        // range-based within estimate exceeds the pooled overall one.
+        assert!(sigma_within > sigma_overall);
+    }
+
+    #[test]
+    fn one_sided_specification_drops_only_the_indices_it_cannot_support() {
+        let upper = dto(json!({ "data": flat(), "usl": 11.0 })).expect("usl-only is legal");
+        assert!(upper.ppu.is_some(), "an upper limit supports Ppu");
+        assert!(upper.ppl.is_none(), "no lower limit, no Ppl");
+        assert!(upper.pp.is_none(), "Pp needs both limits");
+        assert!(upper.cpm.is_none(), "Cpm needs both limits");
+
+        let lower = dto(json!({ "data": flat(), "lsl": 9.0 })).expect("lsl-only is legal");
+        assert!(lower.ppl.is_some());
+        assert!(lower.ppu.is_none());
+        assert!(lower.pp.is_none());
+    }
+
+    #[test]
+    fn a_specification_with_no_limit_at_all_is_rejected() {
+        let e = dto(json!({ "data": flat() })).expect_err("no limit is not a specification");
+        assert!(e.contains("specification"), "{e}");
+    }
+
+    #[test]
+    fn target_reaches_cpm_instead_of_the_midpoint() {
+        let base = json!({ "data": flat(), "usl": 11.0, "lsl": 9.0, "sigma_within": 0.2 });
+        let midpoint = dto(base.clone()).expect("valid").cpm.expect("cpm");
+
+        let mut shifted = base.clone();
+        shifted["target"] = json!(10.4);
+        let against_target = dto(shifted).expect("valid").cpm.expect("cpm");
+
+        assert!(
+            (midpoint - against_target).abs() > 1e-9,
+            "Cpm against a declared target is a different quantity, not a rounder one"
+        );
+
+        // Stating the midpoint explicitly must reproduce the default exactly:
+        // the fallback is the midpoint, not something near it.
+        let mut explicit = base;
+        explicit["target"] = json!(10.0);
+        assert_eq!(dto(explicit).expect("valid").cpm, Some(midpoint));
+    }
+
+    #[test]
+    fn sigma_within_must_be_a_usable_standard_deviation() {
+        // Representable on the wire: JSON carries these, so a JS caller can
+        // actually send them.
+        for bad in [0.0, -1.0] {
+            let v = json!({ "data": flat(), "usl": 11.0, "lsl": 9.0, "sigma_within": bad });
+            let e = dto(v).expect_err("a non-positive sigma is not a standard deviation");
+            assert!(e.contains("sigma_within"), "{bad} -> {e}");
+        }
+
+        // NaN and infinity are *not* representable in JSON, so the wire cannot
+        // deliver them however hard a caller tries -- `json!(f64::NAN)` is
+        // `null`, which reads back as "omitted". The guard in the core is
+        // therefore about direct Rust callers, and this is the only way to
+        // reach it. Asserting it here documents which layer stops what.
+        for bad in [f64::NAN, f64::INFINITY] {
+            let input = CapabilityInputDto {
+                data: flat(),
+                usl: Some(11.0),
+                lsl: Some(9.0),
+                sigma_within: Some(bad),
+                target: None,
+            };
+            let e = capability_dto(input).expect_err("non-finite sigma must be refused");
+            assert!(e.contains("sigma_within"), "{bad} -> {e}");
+        }
+    }
+
+    #[test]
+    fn too_little_data_is_an_error_not_a_nan() {
+        let e = dto(json!({ "data": [1.0], "usl": 11.0, "lsl": 9.0 }))
+            .expect_err("one point has no dispersion");
+        assert!(e.contains("insufficient"), "{e}");
     }
 }

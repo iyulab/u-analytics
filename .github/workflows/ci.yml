@@ -142,3 +142,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Changelog has an entry for the version in Cargo.toml
         run: bash scripts/check-changelog-entry.sh
+
+  wasm:
+    name: WASM Binding
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: stable
+          components: clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # `src/wasm.rs` is behind the `wasm` feature, so every job above compiles
+      # the crate without it -- the bindings, and the tests that pin their wire
+      # contract, are invisible to all of them. This job is the only place the
+      # binding is built at all outside a release.
+      - name: Binding contract tests (host target)
+        run: cargo test --features wasm --lib
+      - run: cargo clippy --features wasm --all-targets -- -D warnings
+      - name: Compile the binding for its real target
+        run: cargo check --features wasm --target wasm32-unknown-unknown
