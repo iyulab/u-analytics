@@ -207,6 +207,55 @@ fn violation_name(v: crate::spc::ViolationType) -> &'static str {
 // WASM exports
 // ---------------------------------------------------------------------------
 
+/// Parse an optional `{ rules: [...] }` options object into a rule set.
+///
+/// Absent, `undefined`, `null` or an object without `rules` all mean "the
+/// default set", so a caller that never passes options keeps the behaviour it
+/// had. Split out from the binding so it can be exercised without a `JsValue`.
+fn rules_from_json(options: Option<serde_json::Value>) -> Result<crate::spc::RuleSet, String> {
+    use crate::spc::{RuleSet, ViolationType};
+
+    let Some(value) = options else {
+        return Ok(RuleSet::default());
+    };
+    if value.is_null() {
+        return Ok(RuleSet::default());
+    }
+    let Some(names) = value.get("rules") else {
+        return Ok(RuleSet::default());
+    };
+    if names.is_null() {
+        return Ok(RuleSet::default());
+    }
+    let names = names
+        .as_array()
+        .ok_or_else(|| "rules: expected an array of rule names".to_string())?;
+
+    let mut set = RuleSet::none();
+    for name in names {
+        let name = name
+            .as_str()
+            .ok_or_else(|| "rules: expected an array of rule names".to_string())?;
+        let rule = match name {
+            "BeyondLimits" => ViolationType::BeyondLimits,
+            "NineOneSide" => ViolationType::NineOneSide,
+            "SixTrend" => ViolationType::SixTrend,
+            "FourteenAlternating" => ViolationType::FourteenAlternating,
+            "TwoOfThreeBeyond2Sigma" => ViolationType::TwoOfThreeBeyond2Sigma,
+            "FourOfFiveBeyond1Sigma" => ViolationType::FourOfFiveBeyond1Sigma,
+            "FifteenWithin1Sigma" => ViolationType::FifteenWithin1Sigma,
+            "EightBeyond1Sigma" => ViolationType::EightBeyond1Sigma,
+            other => {
+                return Err(format!(
+                    "rules: unknown rule {other:?} -- the names are the values                      `violations` reports"
+                ))
+            }
+        };
+        set = set.with(rule);
+    }
+    Ok(set)
+}
+
 /// Compute an X-bar R chart from subgroups.
 ///
 /// # Input JSON
@@ -223,8 +272,21 @@ fn violation_name(v: crate::spc::ViolationType) -> &'static str {
 /// `sigma_hat` is `R-bar / d2` -- the short-term sigma a capability study
 /// needs. Pass it to [`process_capability`] as `sigma_within`; it is `null`
 /// when there is not enough data for control limits.
+///
+/// # Options (optional second argument)
+///
+/// `{ rules?: string[] }` -- which run tests to apply. Names are the same
+/// values that appear in each point's `violations`, so the set is written in
+/// the vocabulary the output already uses:
+/// `BeyondLimits`, `NineOneSide`, `SixTrend`, `FourteenAlternating`,
+/// `TwoOfThreeBeyond2Sigma`, `FourOfFiveBeyond1Sigma`, `FifteenWithin1Sigma`,
+/// `EightBeyond1Sigma`.
+///
+/// Omitted, `undefined`, `null`, or an object without `rules` all mean all
+/// eight (Nelson), which is what this binding did before the option existed.
+/// `{ rules: [] }` applies none, leaving control limits only.
 #[wasm_bindgen]
-pub fn xbar_r_chart(data: JsValue) -> Result<JsValue, JsValue> {
+pub fn xbar_r_chart(data: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
     use crate::spc::{ControlChart, XBarRChart};
 
     let subgroups: Vec<Vec<f64>> = from_js(data, "data")?;
@@ -242,7 +304,16 @@ pub fn xbar_r_chart(data: JsValue) -> Result<JsValue, JsValue> {
     // widening the crate's factor tables left this binding rejecting sizes the
     // crate had just learned to handle -- a disagreement no test in either
     // crate could see, because each one was right about its own copy.
-    let mut chart = XBarRChart::new(n).map_err(|e| js_err(e.to_string()))?;
+    let rules = match options {
+        Some(o) if !o.is_undefined() && !o.is_null() => {
+            rules_from_json(Some(from_js(o, "options")?)).map_err(js_err)?
+        }
+        _ => crate::spc::RuleSet::default(),
+    };
+
+    let mut chart = XBarRChart::new(n)
+        .map_err(|e| js_err(e.to_string()))?
+        .with_rules(rules);
     for subgroup in &subgroups {
         chart.add_sample(subgroup);
     }
@@ -1067,6 +1138,58 @@ mod dto_strictness_tests {
 
 #[cfg(test)]
 mod binding_contract_tests {
+    use super::*;
+
+    // --- rules option on xbar_r_chart ---
+
+    /// Every way of not asking for a rule set must mean the set the binding
+    /// applied before the option existed. A caller that never passes options is
+    /// the common case, and it must not have changed.
+    #[test]
+    fn rules_option_absent_means_the_default_set() {
+        use crate::spc::RuleSet;
+        for absent in [
+            None,
+            Some(serde_json::Value::Null),
+            Some(serde_json::json!({})),
+            Some(serde_json::json!({ "rules": null })),
+        ] {
+            assert_eq!(rules_from_json(absent).unwrap(), RuleSet::default());
+        }
+    }
+
+    #[test]
+    fn rules_option_selects_exactly_what_it_names() {
+        use crate::spc::{RuleSet, ViolationType};
+        let set = rules_from_json(Some(serde_json::json!({
+            "rules": ["BeyondLimits", "SixTrend"]
+        })))
+        .unwrap();
+        assert_eq!(
+            set,
+            RuleSet::from_iter([ViolationType::BeyondLimits, ViolationType::SixTrend])
+        );
+        assert!(!set.contains(ViolationType::NineOneSide));
+    }
+
+    #[test]
+    fn rules_option_empty_array_applies_no_test() {
+        use crate::spc::RuleSet;
+        assert_eq!(
+            rules_from_json(Some(serde_json::json!({ "rules": [] }))).unwrap(),
+            RuleSet::none()
+        );
+    }
+
+    #[test]
+    fn rules_option_rejects_a_name_that_is_not_a_rule() {
+        let err = rules_from_json(Some(serde_json::json!({ "rules": ["Rule1"] }))).unwrap_err();
+        assert!(err.contains("Rule1"), "{err}");
+        let err =
+            rules_from_json(Some(serde_json::json!({ "rules": "BeyondLimits" }))).unwrap_err();
+        assert!(err.contains("array"), "{err}");
+    }
+
     use super::{capability_dto, from_json, CapabilityInputDto};
     use serde_json::json;
 

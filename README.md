@@ -13,7 +13,7 @@ hypothesis testing for industrial quality engineering.
 
 | Module | Description |
 |--------|-------------|
-| `spc` | Control charts (X̄-R, X̄-S, I-MR, P, NP, C, U, Laney P'/U', G, T) with Nelson/WE run rules |
+| `spc` | Control charts (X̄-R, X̄-S, I-MR, P, NP, C, U, Laney P'/U', G, T) with selectable run tests (`RuleSet`; Nelson/WE presets), subgroups n=2..=25 |
 | `capability` | Process capability indices (Cp, Cpk, Pp, Ppk, Cpm), sigma level, and Box-Cox non-normal capability |
 | `weibull` | Weibull parameter estimation (MLE, MRR) and reliability analysis (R(t), MTBF, B-life) |
 | `detection` | Change-point detection (CUSUM, EWMA) |
@@ -192,6 +192,33 @@ const cap = process_capability({
 
 One-sided specifications are supported: pass only `usl` or only `lsl`. The
 indices that need both limits (`cp`, `pp`, `cpm`) come back `null`.
+
+### Choosing which run tests apply
+
+All eight Nelson tests run by default. A process that is known to trip one of
+them for a benign reason -- a deliberately drifting tool, a bimodal fixture --
+otherwise has to have that signal filtered out downstream, after it has already
+been counted as out of control. `xbar_r_chart` takes an optional second
+argument naming the tests to apply:
+
+```js
+// Western Electric only
+xbar_r_chart(subgroups, { rules: [
+  "BeyondLimits", "NineOneSide", "TwoOfThreeBeyond2Sigma", "FourOfFiveBeyond1Sigma",
+]});
+
+// Control limits and nothing else
+xbar_r_chart(subgroups, { rules: [] });
+```
+
+The names are the same values each point's `violations` reports, so the set is
+written in the vocabulary the output already uses: `BeyondLimits`,
+`NineOneSide`, `SixTrend`, `FourteenAlternating`, `TwoOfThreeBeyond2Sigma`,
+`FourOfFiveBeyond1Sigma`, `FifteenWithin1Sigma`, `EightBeyond1Sigma`.
+
+Omitting the argument -- or passing `undefined`, `null`, or an object without
+`rules` -- applies all eight, so existing calls are unaffected. In Rust the same
+choice is `RuleSet`, passed to a chart with `with_rules`.
 
 ## Test Status
 

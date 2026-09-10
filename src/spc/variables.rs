@@ -21,7 +21,7 @@ use super::chart::{
     ChartPoint, ControlChart, ControlChartError, ControlLimits, Violation, ViolationType,
     MAX_SUBGROUP_SIZE, MIN_SUBGROUP_SIZE,
 };
-use super::rules::{NelsonRules, RunRule};
+use super::rules::{RuleSet, RunRule};
 
 // ---------------------------------------------------------------------------
 // Control chart factor tables, indexed by subgroup size n=2..=25.
@@ -205,9 +205,36 @@ pub struct XBarRChart {
     xbar_limits: Option<ControlLimits>,
     /// R chart control limits.
     r_limits: Option<ControlLimits>,
+    /// Run tests applied when limits are computed.
+    rules: RuleSet,
 }
 
 impl XBarRChart {
+    /// Apply only the given run tests when computing limits.
+    ///
+    /// Defaults to [`RuleSet::nelson`], so a chart built without calling this
+    /// behaves exactly as before. Existing points are re-evaluated, so the
+    /// call may be made at any time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::spc::{XBarRChart, ControlChart, RuleSet, ViolationType};
+    ///
+    /// let chart = XBarRChart::new(5).expect("5 is within range")
+    ///     .with_rules(RuleSet::western_electric().without(ViolationType::NineOneSide));
+    /// ```
+    #[must_use]
+    pub fn with_rules(mut self, rules: RuleSet) -> Self {
+        self.rules = rules;
+        self.recompute();
+        self
+    }
+
+    /// The run tests this chart applies.
+    pub fn rules(&self) -> RuleSet {
+        self.rules
+    }
     /// Create a new X-bar-R chart with the given subgroup size.
     ///
     /// # Errors
@@ -233,6 +260,7 @@ impl XBarRChart {
             r_points: Vec::new(),
             xbar_limits: None,
             r_limits: None,
+            rules: RuleSet::default(),
         })
     }
 
@@ -345,15 +373,13 @@ impl XBarRChart {
 
         // Apply Nelson rules to X-bar chart
         if let Some(ref limits) = self.xbar_limits {
-            let nelson = NelsonRules;
-            let violations = nelson.check(&self.xbar_points, limits);
+            let violations = self.rules.check(&self.xbar_points, limits);
             apply_violations(&mut self.xbar_points, &violations);
         }
 
         // Apply Nelson rules to R chart
         if let Some(ref limits) = self.r_limits {
-            let nelson = NelsonRules;
-            let violations = nelson.check(&self.r_points, limits);
+            let violations = self.rules.check(&self.r_points, limits);
             apply_violations(&mut self.r_points, &violations);
         }
     }
@@ -428,9 +454,36 @@ pub struct XBarSChart {
     xbar_limits: Option<ControlLimits>,
     /// S chart control limits.
     s_limits: Option<ControlLimits>,
+    /// Run tests applied when limits are computed.
+    rules: RuleSet,
 }
 
 impl XBarSChart {
+    /// Apply only the given run tests when computing limits.
+    ///
+    /// Defaults to [`RuleSet::nelson`], so a chart built without calling this
+    /// behaves exactly as before. Existing points are re-evaluated, so the
+    /// call may be made at any time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::spc::{XBarSChart, ControlChart, RuleSet, ViolationType};
+    ///
+    /// let chart = XBarSChart::new(5).expect("5 is within range")
+    ///     .with_rules(RuleSet::western_electric().without(ViolationType::NineOneSide));
+    /// ```
+    #[must_use]
+    pub fn with_rules(mut self, rules: RuleSet) -> Self {
+        self.rules = rules;
+        self.recompute();
+        self
+    }
+
+    /// The run tests this chart applies.
+    pub fn rules(&self) -> RuleSet {
+        self.rules
+    }
     /// Create a new X-bar-S chart with the given subgroup size.
     ///
     /// # Errors
@@ -456,6 +509,7 @@ impl XBarSChart {
             s_points: Vec::new(),
             xbar_limits: None,
             s_limits: None,
+            rules: RuleSet::default(),
         })
     }
 
@@ -565,15 +619,13 @@ impl XBarSChart {
 
         // Apply Nelson rules to X-bar chart
         if let Some(ref limits) = self.xbar_limits {
-            let nelson = NelsonRules;
-            let violations = nelson.check(&self.xbar_points, limits);
+            let violations = self.rules.check(&self.xbar_points, limits);
             apply_violations(&mut self.xbar_points, &violations);
         }
 
         // Apply Nelson rules to S chart
         if let Some(ref limits) = self.s_limits {
-            let nelson = NelsonRules;
-            let violations = nelson.check(&self.s_points, limits);
+            let violations = self.rules.check(&self.s_points, limits);
             apply_violations(&mut self.s_points, &violations);
         }
     }
@@ -661,9 +713,36 @@ pub struct IndividualMRChart {
     i_limits: Option<ControlLimits>,
     /// MR chart control limits.
     mr_limits: Option<ControlLimits>,
+    /// Run tests applied when limits are computed.
+    rules: RuleSet,
 }
 
 impl IndividualMRChart {
+    /// Apply only the given run tests when computing limits.
+    ///
+    /// Defaults to [`RuleSet::nelson`], so a chart built without calling this
+    /// behaves exactly as before. Existing points are re-evaluated, so the
+    /// call may be made at any time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::spc::{IndividualMRChart, ControlChart, RuleSet, ViolationType};
+    ///
+    /// let chart = IndividualMRChart::new()
+    ///     .with_rules(RuleSet::western_electric().without(ViolationType::NineOneSide));
+    /// ```
+    #[must_use]
+    pub fn with_rules(mut self, rules: RuleSet) -> Self {
+        self.rules = rules;
+        self.recompute();
+        self
+    }
+
+    /// The run tests this chart applies.
+    pub fn rules(&self) -> RuleSet {
+        self.rules
+    }
     /// Create a new Individual-MR chart.
     pub fn new() -> Self {
         Self {
@@ -672,6 +751,7 @@ impl IndividualMRChart {
             mr_points: Vec::new(),
             i_limits: None,
             mr_limits: None,
+            rules: RuleSet::default(),
         }
     }
 
@@ -747,15 +827,13 @@ impl IndividualMRChart {
 
         // Apply Nelson rules to I chart
         if let Some(ref limits) = self.i_limits {
-            let nelson = NelsonRules;
-            let violations = nelson.check(&self.i_points, limits);
+            let violations = self.rules.check(&self.i_points, limits);
             apply_violations(&mut self.i_points, &violations);
         }
 
         // Apply Nelson rules to MR chart
         if let Some(ref limits) = self.mr_limits {
-            let nelson = NelsonRules;
-            let violations = nelson.check(&self.mr_points, limits);
+            let violations = self.rules.check(&self.mr_points, limits);
             apply_violations(&mut self.mr_points, &violations);
         }
     }

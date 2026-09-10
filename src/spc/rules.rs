@@ -325,6 +325,168 @@ fn check_rule8(points: &[ChartPoint], limits: &ControlLimits) -> Vec<(usize, Vio
 }
 
 // ---------------------------------------------------------------------------
+// Selectable rule sets
+// ---------------------------------------------------------------------------
+
+/// A chosen subset of the eight run tests.
+///
+/// Each test reports exactly one [`ViolationType`], so a rule is named by what
+/// it would report rather than by a parallel enum that would have to be kept in
+/// step with this one.
+///
+/// [`nelson`](RuleSet::nelson) and [`western_electric`](RuleSet::western_electric)
+/// are the two named sets in the literature; any other combination is built from
+/// the tests a process actually warrants. A rule that a process is known to
+/// trigger for a benign reason -- a deliberately drifting tool, a bimodal
+/// fixture -- otherwise has to be filtered out downstream, after it has already
+/// been counted as an out-of-control signal.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::spc::{RuleSet, RunRule, ChartPoint, ControlLimits, ViolationType};
+///
+/// // Only the 3-sigma test, and nothing else.
+/// let rules = RuleSet::from_iter([ViolationType::BeyondLimits]);
+///
+/// let limits = ControlLimits { ucl: 28.0, cl: 25.0, lcl: 22.0 };
+/// let points: Vec<ChartPoint> = (0..12)
+///     .map(|i| ChartPoint { value: 26.0, index: i, violations: vec![] })
+///     .collect();
+///
+/// // Twelve points above the centre line would trip Nelson rule 2, but that
+/// // test is not in this set.
+/// assert!(rules.check(&points, &limits).is_empty());
+/// assert!(RuleSet::nelson().check(&points, &limits).len() > 0);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuleSet {
+    mask: u8,
+}
+
+/// The eight tests, in Nelson's numbering.
+const ALL_RULES: [ViolationType; 8] = [
+    ViolationType::BeyondLimits,
+    ViolationType::NineOneSide,
+    ViolationType::SixTrend,
+    ViolationType::FourteenAlternating,
+    ViolationType::TwoOfThreeBeyond2Sigma,
+    ViolationType::FourOfFiveBeyond1Sigma,
+    ViolationType::FifteenWithin1Sigma,
+    ViolationType::EightBeyond1Sigma,
+];
+
+fn bit_of(v: ViolationType) -> u8 {
+    match v {
+        ViolationType::BeyondLimits => 1 << 0,
+        ViolationType::NineOneSide => 1 << 1,
+        ViolationType::SixTrend => 1 << 2,
+        ViolationType::FourteenAlternating => 1 << 3,
+        ViolationType::TwoOfThreeBeyond2Sigma => 1 << 4,
+        ViolationType::FourOfFiveBeyond1Sigma => 1 << 5,
+        ViolationType::FifteenWithin1Sigma => 1 << 6,
+        ViolationType::EightBeyond1Sigma => 1 << 7,
+    }
+}
+
+impl RuleSet {
+    /// All eight tests -- Nelson (1984). This is what every chart applies unless
+    /// told otherwise, so the default behaviour is unchanged.
+    pub fn nelson() -> Self {
+        Self { mask: u8::MAX }
+    }
+
+    /// The four Western Electric tests: Nelson rules 1, 2, 5 and 6.
+    pub fn western_electric() -> Self {
+        Self::from_iter([
+            ViolationType::BeyondLimits,
+            ViolationType::NineOneSide,
+            ViolationType::TwoOfThreeBeyond2Sigma,
+            ViolationType::FourOfFiveBeyond1Sigma,
+        ])
+    }
+
+    /// The empty set: no run test is applied.
+    ///
+    /// Useful as a base to add to, and as the honest way to say "limits only".
+    pub fn none() -> Self {
+        Self { mask: 0 }
+    }
+
+    /// Whether this set applies the test that reports `rule`.
+    pub fn contains(&self, rule: ViolationType) -> bool {
+        self.mask & bit_of(rule) != 0
+    }
+
+    /// This set with `rule` added.
+    #[must_use]
+    pub fn with(mut self, rule: ViolationType) -> Self {
+        self.mask |= bit_of(rule);
+        self
+    }
+
+    /// This set with `rule` removed.
+    #[must_use]
+    pub fn without(mut self, rule: ViolationType) -> Self {
+        self.mask &= !bit_of(rule);
+        self
+    }
+
+    /// The tests in this set, in Nelson's numbering.
+    pub fn iter(&self) -> impl Iterator<Item = ViolationType> + '_ {
+        ALL_RULES.into_iter().filter(|&r| self.contains(r))
+    }
+
+    /// How many tests this set applies.
+    pub fn len(&self) -> usize {
+        self.mask.count_ones() as usize
+    }
+
+    /// Whether no test is applied.
+    pub fn is_empty(&self) -> bool {
+        self.mask == 0
+    }
+}
+
+impl Default for RuleSet {
+    /// [`RuleSet::nelson`] -- the behaviour every chart had before rule
+    /// selection existed.
+    fn default() -> Self {
+        Self::nelson()
+    }
+}
+
+impl FromIterator<ViolationType> for RuleSet {
+    fn from_iter<I: IntoIterator<Item = ViolationType>>(iter: I) -> Self {
+        let mut mask = 0u8;
+        for v in iter {
+            mask |= bit_of(v);
+        }
+        Self { mask }
+    }
+}
+
+impl RunRule for RuleSet {
+    fn check(&self, points: &[ChartPoint], limits: &ControlLimits) -> Vec<(usize, ViolationType)> {
+        let mut results = Vec::new();
+        for rule in self.iter() {
+            results.extend(match rule {
+                ViolationType::BeyondLimits => check_rule1(points, limits),
+                ViolationType::NineOneSide => check_rule2(points, limits),
+                ViolationType::SixTrend => check_rule3(points, limits),
+                ViolationType::FourteenAlternating => check_rule4(points, limits),
+                ViolationType::TwoOfThreeBeyond2Sigma => check_rule5(points, limits),
+                ViolationType::FourOfFiveBeyond1Sigma => check_rule6(points, limits),
+                ViolationType::FifteenWithin1Sigma => check_rule7(points, limits),
+                ViolationType::EightBeyond1Sigma => check_rule8(points, limits),
+            });
+        }
+        results.sort_by_key(|&(idx, _)| idx);
+        results
+    }
+}
+
+// ---------------------------------------------------------------------------
 // RunRule implementations
 // ---------------------------------------------------------------------------
 
@@ -333,36 +495,112 @@ impl RunRule for WesternElectricRules {
     ///
     /// These correspond to Nelson Rules 1, 2, 5, and 6.
     fn check(&self, points: &[ChartPoint], limits: &ControlLimits) -> Vec<(usize, ViolationType)> {
-        let mut results = Vec::new();
-        results.extend(check_rule1(points, limits));
-        results.extend(check_rule2(points, limits));
-        results.extend(check_rule5(points, limits));
-        results.extend(check_rule6(points, limits));
-        results.sort_by_key(|&(idx, _)| idx);
-        results
+        RuleSet::western_electric().check(points, limits)
     }
 }
 
 impl RunRule for NelsonRules {
     /// Apply all 8 Nelson run rules.
     fn check(&self, points: &[ChartPoint], limits: &ControlLimits) -> Vec<(usize, ViolationType)> {
-        let mut results = Vec::new();
-        results.extend(check_rule1(points, limits));
-        results.extend(check_rule2(points, limits));
-        results.extend(check_rule3(points, limits));
-        results.extend(check_rule4(points, limits));
-        results.extend(check_rule5(points, limits));
-        results.extend(check_rule6(points, limits));
-        results.extend(check_rule7(points, limits));
-        results.extend(check_rule8(points, limits));
-        results.sort_by_key(|&(idx, _)| idx);
-        results
+        RuleSet::nelson().check(points, limits)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- RuleSet ---
+
+    /// Twelve points above the centre line: rule 2 fires, rule 1 does not.
+    /// The distinguishing case for "did the selection actually take effect".
+    fn nine_on_one_side() -> (Vec<ChartPoint>, ControlLimits) {
+        let limits = ControlLimits {
+            ucl: 28.0,
+            cl: 25.0,
+            lcl: 22.0,
+        };
+        let points = (0..12)
+            .map(|i| ChartPoint {
+                value: 26.0,
+                index: i,
+                violations: vec![],
+            })
+            .collect();
+        (points, limits)
+    }
+
+    #[test]
+    fn ruleset_applies_only_the_tests_it_holds() {
+        let (points, limits) = nine_on_one_side();
+
+        // Nelson catches the run; a set without that test does not.
+        assert!(!RuleSet::nelson().check(&points, &limits).is_empty());
+        assert!(RuleSet::nelson()
+            .without(ViolationType::NineOneSide)
+            .check(&points, &limits)
+            .is_empty());
+
+        // And a set holding only that test still catches it -- so the empty
+        // result above is the selection working, not the data failing to trip.
+        assert!(!RuleSet::from_iter([ViolationType::NineOneSide])
+            .check(&points, &limits)
+            .is_empty());
+    }
+
+    #[test]
+    fn ruleset_empty_reports_nothing_even_beyond_limits() {
+        let limits = ControlLimits {
+            ucl: 28.0,
+            cl: 25.0,
+            lcl: 22.0,
+        };
+        let points = vec![ChartPoint {
+            value: 99.0,
+            index: 0,
+            violations: vec![],
+        }];
+        assert!(!RuleSet::nelson().check(&points, &limits).is_empty());
+        assert!(RuleSet::none().check(&points, &limits).is_empty());
+    }
+
+    #[test]
+    fn named_sets_match_their_definitions() {
+        assert_eq!(RuleSet::nelson().len(), 8);
+        assert_eq!(RuleSet::western_electric().len(), 4);
+        for r in [
+            ViolationType::BeyondLimits,
+            ViolationType::NineOneSide,
+            ViolationType::TwoOfThreeBeyond2Sigma,
+            ViolationType::FourOfFiveBeyond1Sigma,
+        ] {
+            assert!(RuleSet::western_electric().contains(r), "{r:?} missing");
+        }
+        for r in [
+            ViolationType::SixTrend,
+            ViolationType::FourteenAlternating,
+            ViolationType::FifteenWithin1Sigma,
+            ViolationType::EightBeyond1Sigma,
+        ] {
+            assert!(!RuleSet::western_electric().contains(r), "{r:?} present");
+        }
+        assert!(RuleSet::none().is_empty());
+    }
+
+    /// The named unit structs delegate to `RuleSet`, so they must still agree
+    /// with it -- otherwise the delegation quietly changed public behaviour.
+    #[test]
+    fn named_unit_structs_agree_with_their_rule_sets() {
+        let (points, limits) = nine_on_one_side();
+        assert_eq!(
+            NelsonRules.check(&points, &limits),
+            RuleSet::nelson().check(&points, &limits)
+        );
+        assert_eq!(
+            WesternElectricRules.check(&points, &limits),
+            RuleSet::western_electric().check(&points, &limits)
+        );
+    }
 
     /// Helper: create chart points from a slice of values.
     fn make_points(values: &[f64]) -> Vec<ChartPoint> {

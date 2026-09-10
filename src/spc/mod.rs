@@ -17,7 +17,8 @@
 //!
 //! # Run Rules
 //!
-//! - [`WesternElectricRules`] — 4 classic run rules
+//! - [`RuleSet`] — any subset of the eight tests; [`RuleSet::nelson`] is the default
+//! - [`WesternElectricRules`] — the 4 classic run rules
 //! - [`NelsonRules`] — 8 rules (superset of Western Electric)
 //!
 //! # References
@@ -41,5 +42,5 @@ pub use chart::{
     ChartPoint, ControlChart, ControlChartError, ControlLimits, Violation, ViolationType,
     MAX_SUBGROUP_SIZE, MIN_SUBGROUP_SIZE,
 };
-pub use rules::{NelsonRules, RunRule, WesternElectricRules};
+pub use rules::{NelsonRules, RuleSet, RunRule, WesternElectricRules};
 pub use variables::{IndividualMRChart, XBarRChart, XBarSChart};

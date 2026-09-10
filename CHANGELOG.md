@@ -44,6 +44,21 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Added
 
+- `RuleSet` selects which of the eight run tests a chart applies, and
+  `XBarRChart`, `XBarSChart` and `IndividualMRChart` take one through
+  `with_rules`. `RuleSet::nelson()` -- all eight -- stays the default, so a
+  chart built without it behaves as before. A process that trips a test for a
+  benign reason previously had to have that signal filtered out downstream,
+  after it had already been counted as out of control.
+
+  A rule is named by the `ViolationType` it reports rather than by a parallel
+  enum, because the two are one-to-one and a second list would have to be kept
+  in step with the first.
+- The WebAssembly `xbar_r_chart` binding takes an optional second argument,
+  `{ rules?: string[] }`, naming the tests to apply. Omitted, `undefined`,
+  `null`, or an object without `rules` all mean all eight, so existing calls
+  are unchanged; `{ rules: [] }` leaves control limits only.
+
 - `ControlChartError`, `MIN_SUBGROUP_SIZE` and `MAX_SUBGROUP_SIZE` are public,
   so a caller can validate a subgroup size before building a chart and can match
   on the rejection rather than parsing a message.
