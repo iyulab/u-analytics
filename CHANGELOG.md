@@ -8,6 +8,8 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.9.0]
+
 ### Changed
 
 - **Breaking:** variables control charts accept subgroup sizes up to 25, not 10.

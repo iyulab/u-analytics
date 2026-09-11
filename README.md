@@ -302,7 +302,7 @@ the wrong row.
 ## Test Status
 
 ```text
-556 lib tests (567 with `ffi`, 572 with `wasm`) + 88 doc-tests
+557 lib tests (568 with `ffi`, 589 with `wasm`) + 88 doc-tests
 0 clippy warnings
 ```
 
