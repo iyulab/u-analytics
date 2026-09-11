@@ -65,6 +65,12 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 - `Debug` and `Clone` on `XBarRChart`, `XBarSChart` and `IndividualMRChart`.
 - `IndividualMRChart::sigma_hat` -- `MR-bar / d2(2)`, the within sigma for
   individual observations. The subgroup charts already had theirs.
+- WebAssembly `xbar_s_chart` and `imr_chart`, with the same `{ rules? }` option
+  and `sigma_hat` as `xbar_r_chart`. Both charts existed in the crate and could
+  not be reached from JavaScript.
+- WebAssembly `run_rules(values, limits, options?)` -- the run-test engine on
+  its own, against caller-supplied limits. Given a chart's points and limits it
+  reports exactly what the chart reported.
 - C FFI `uanalytics_xbar_r_chart` returns `sigma_hat`, and
   `uanalytics_process_capability` accepts `sigma_within` and reports
   `sigma_source` (`"within"` or `"moving_range"`).

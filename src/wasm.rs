@@ -18,7 +18,7 @@ use wasm_bindgen::prelude::*;
 // Serializable DTO types
 // ---------------------------------------------------------------------------
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 struct XbarRChartDto {
     xbar_cl: f64,
     xbar_ucl: f64,
@@ -36,11 +36,52 @@ struct XbarRChartDto {
     in_control: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 struct ChartPointDto {
     index: usize,
     value: f64,
     violations: Vec<String>,
+}
+
+#[derive(Serialize, Debug)]
+struct XbarSChartDto {
+    xbar_cl: f64,
+    xbar_ucl: f64,
+    xbar_lcl: f64,
+    s_cl: f64,
+    s_ucl: f64,
+    s_lcl: f64,
+    /// Short-term sigma implied by this chart (`S-bar / c4`), for
+    /// `process_capability`'s `sigma_within`.
+    sigma_hat: Option<f64>,
+    xbar_points: Vec<ChartPointDto>,
+    s_points: Vec<ChartPointDto>,
+    in_control: bool,
+}
+
+#[derive(Serialize, Debug)]
+struct ImrChartDto {
+    i_cl: f64,
+    i_ucl: f64,
+    i_lcl: f64,
+    mr_cl: f64,
+    mr_ucl: f64,
+    mr_lcl: f64,
+    /// Short-term sigma implied by this chart (`MR-bar / d2(2)`).
+    sigma_hat: Option<f64>,
+    i_points: Vec<ChartPointDto>,
+    /// Starts at index 1: the first value has no moving range.
+    mr_points: Vec<ChartPointDto>,
+    in_control: bool,
+}
+
+/// Control limits a caller supplies to `run_rules`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LimitsInputDto {
+    ucl: f64,
+    cl: f64,
+    lcl: f64,
 }
 
 #[derive(Serialize)]
@@ -287,86 +328,273 @@ fn rules_from_json(options: Option<serde_json::Value>) -> Result<crate::spc::Rul
 /// `{ rules: [] }` applies none, leaving control limits only.
 #[wasm_bindgen]
 pub fn xbar_r_chart(data: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
+    let subgroups: Vec<Vec<f64>> = from_js(data, "data")?;
+    let rules = rules_option(options)?;
+    to_js(&xbar_r_dto(subgroups, rules).map_err(js_err)?)
+}
+
+/// Compute an X-bar S chart from subgroups.
+///
+/// # Input JSON
+///
+/// Array of arrays, as for [`xbar_r_chart`]. The standard deviation uses
+/// every value in a subgroup rather than only the extremes, which is why this
+/// chart is the usual choice once subgroups exceed about ten.
+///
+/// # Output JSON
+///
+/// Object with fields: `xbar_cl`, `xbar_ucl`, `xbar_lcl`, `s_cl`, `s_ucl`,
+/// `s_lcl`, `sigma_hat` (`S-bar / c4`), `xbar_points`, `s_points`,
+/// `in_control`.
+///
+/// # Options (optional second argument)
+///
+/// `{ rules?: string[] }`, exactly as for [`xbar_r_chart`].
+#[wasm_bindgen]
+pub fn xbar_s_chart(data: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
+    let subgroups: Vec<Vec<f64>> = from_js(data, "data")?;
+    let rules = rules_option(options)?;
+    to_js(&xbar_s_dto(subgroups, rules).map_err(js_err)?)
+}
+
+/// Compute an Individual and Moving Range (I-MR) chart.
+///
+/// # Input JSON
+///
+/// Array of individual observations in time order: `[x1, x2, ...]` (need >= 2).
+///
+/// # Output JSON
+///
+/// Object with fields: `i_cl`, `i_ucl`, `i_lcl`, `mr_cl`, `mr_ucl`, `mr_lcl`,
+/// `sigma_hat` (`MR-bar / d2(2)`), `i_points`, `mr_points`, `in_control`.
+/// `mr_points` starts at index 1: the first observation has no moving range.
+///
+/// # Options (optional second argument)
+///
+/// `{ rules?: string[] }`, exactly as for [`xbar_r_chart`].
+#[wasm_bindgen]
+pub fn imr_chart(values: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
+    let values: Vec<f64> = from_js(values, "values")?;
+    let rules = rules_option(options)?;
+    to_js(&imr_dto(values, rules).map_err(js_err)?)
+}
+
+/// Apply run tests to a series against control limits the caller supplies.
+///
+/// The same engine the charts use, reachable on its own: for a statistic the
+/// crate does not chart, or limits fixed from an earlier phase-I study.
+///
+/// # Input JSON
+///
+/// - `values`: `[x1, x2, ...]`
+/// - `limits`: `{ ucl, cl, lcl }` with `lcl <= cl <= ucl`
+/// - `options` (optional): `{ rules?: string[] }`, as for [`xbar_r_chart`]
+///
+/// # Output JSON
+///
+/// One `{ index, value, violations }` per input value, in input order.
+#[wasm_bindgen]
+pub fn run_rules(
+    values: JsValue,
+    limits: JsValue,
+    options: Option<JsValue>,
+) -> Result<JsValue, JsValue> {
+    let values: Vec<f64> = from_js(values, "values")?;
+    let limits: LimitsInputDto = from_js(limits, "limits")?;
+    let rules = rules_option(options)?;
+    to_js(&run_rules_dto(values, limits, rules).map_err(js_err)?)
+}
+
+// ---------------------------------------------------------------------------
+// Pure cores of the variables-chart bindings
+// ---------------------------------------------------------------------------
+//
+// Each binding above is a thin adapter over one of these, so the contract a
+// JavaScript caller observes can be tested on a host with no WebAssembly
+// runner.
+
+/// The optional `{ rules?: [...] }` argument the variables charts and
+/// `run_rules` share.
+fn rules_option(options: Option<JsValue>) -> Result<crate::spc::RuleSet, JsValue> {
+    match options {
+        Some(o) if !o.is_undefined() && !o.is_null() => {
+            rules_from_json(Some(from_js(o, "options")?)).map_err(js_err)
+        }
+        _ => Ok(crate::spc::RuleSet::default()),
+    }
+}
+
+fn point_dtos(points: &[crate::spc::ChartPoint]) -> Vec<ChartPointDto> {
+    points
+        .iter()
+        .map(|p| ChartPointDto {
+            index: p.index,
+            value: p.value,
+            violations: p
+                .violations
+                .iter()
+                .map(|&v| violation_name(v).to_owned())
+                .collect(),
+        })
+        .collect()
+}
+
+/// Checks the matrix a subgroup chart takes and returns its subgroup size.
+///
+/// A ragged subgroup is refused by its row: the chart would skip it, and every
+/// later point would then carry an index one short of the row it came from.
+///
+/// The supported subgroup range is not restated here. It used to be, as a
+/// literal `2..=10` alongside the same literal in the constructor, so widening
+/// the crate's factor tables left the binding rejecting sizes the crate had
+/// just learned to handle -- a disagreement no test in either crate could see,
+/// because each one was right about its own copy.
+fn subgroup_size(subgroups: &[Vec<f64>]) -> Result<usize, String> {
+    let n = subgroups
+        .first()
+        .map(Vec::len)
+        .ok_or("at least one subgroup required")?;
+    if let Some(i) = subgroups.iter().position(|g| g.len() != n) {
+        return Err(format!(
+            "subgroup {i} has {} values; subgroup 0 has {n} -- all subgroups must have the same size",
+            subgroups[i].len()
+        ));
+    }
+    Ok(n)
+}
+
+fn xbar_r_dto(
+    subgroups: Vec<Vec<f64>>,
+    rules: crate::spc::RuleSet,
+) -> Result<XbarRChartDto, String> {
     use crate::spc::{ControlChart, XBarRChart};
 
-    let subgroups: Vec<Vec<f64>> = from_js(data, "data")?;
-
-    if subgroups.is_empty() {
-        return Err(js_err("at least one subgroup required"));
-    }
-    let n = subgroups[0].len();
-    if subgroups.iter().any(|g| g.len() != n) {
-        return Err(js_err("all subgroups must have the same size"));
-    }
-
-    // The supported subgroup range is not restated here. It used to be, as a
-    // literal `2..=10` alongside the same literal in the constructor, so
-    // widening the crate's factor tables left this binding rejecting sizes the
-    // crate had just learned to handle -- a disagreement no test in either
-    // crate could see, because each one was right about its own copy.
-    let rules = match options {
-        Some(o) if !o.is_undefined() && !o.is_null() => {
-            rules_from_json(Some(from_js(o, "options")?)).map_err(js_err)?
-        }
-        _ => crate::spc::RuleSet::default(),
-    };
-
+    let n = subgroup_size(&subgroups)?;
     let mut chart = XBarRChart::new(n)
-        .map_err(|e| js_err(e.to_string()))?
+        .map_err(|e| e.to_string())?
         .with_rules(rules);
     for subgroup in &subgroups {
         chart.add_sample(subgroup);
     }
-
-    let xbar_limits = chart
+    let x = chart
         .control_limits()
-        .ok_or_else(|| js_err("insufficient data for control limits"))?;
-    let r_limits = chart
+        .ok_or("insufficient data for control limits")?;
+    let r = chart
         .r_limits()
-        .ok_or_else(|| js_err("insufficient data for R chart limits"))?;
-
-    let xbar_points = chart
-        .points()
-        .iter()
-        .map(|p| ChartPointDto {
-            index: p.index,
-            value: p.value,
-            violations: p
-                .violations
-                .iter()
-                .map(|&v| violation_name(v).to_owned())
-                .collect(),
-        })
-        .collect();
-    let r_points = chart
-        .r_points()
-        .iter()
-        .map(|p| ChartPointDto {
-            index: p.index,
-            value: p.value,
-            violations: p
-                .violations
-                .iter()
-                .map(|&v| violation_name(v).to_owned())
-                .collect(),
-        })
-        .collect();
-
-    let dto = XbarRChartDto {
-        xbar_cl: xbar_limits.cl,
-        xbar_ucl: xbar_limits.ucl,
-        xbar_lcl: xbar_limits.lcl,
-        r_cl: r_limits.cl,
-        r_ucl: r_limits.ucl,
-        r_lcl: r_limits.lcl,
+        .ok_or("insufficient data for R chart limits")?;
+    Ok(XbarRChartDto {
+        xbar_cl: x.cl,
+        xbar_ucl: x.ucl,
+        xbar_lcl: x.lcl,
+        r_cl: r.cl,
+        r_ucl: r.ucl,
+        r_lcl: r.lcl,
         sigma_hat: chart.sigma_hat(),
-        xbar_points,
-        r_points,
+        xbar_points: point_dtos(chart.points()),
+        r_points: point_dtos(chart.r_points()),
         in_control: chart.is_in_control(),
-    };
-    to_js(&dto)
+    })
 }
 
+fn xbar_s_dto(
+    subgroups: Vec<Vec<f64>>,
+    rules: crate::spc::RuleSet,
+) -> Result<XbarSChartDto, String> {
+    use crate::spc::{ControlChart, XBarSChart};
+
+    let n = subgroup_size(&subgroups)?;
+    let mut chart = XBarSChart::new(n)
+        .map_err(|e| e.to_string())?
+        .with_rules(rules);
+    for subgroup in &subgroups {
+        chart.add_sample(subgroup);
+    }
+    let x = chart
+        .control_limits()
+        .ok_or("insufficient data for control limits")?;
+    let s = chart
+        .s_limits()
+        .ok_or("insufficient data for S chart limits")?;
+    Ok(XbarSChartDto {
+        xbar_cl: x.cl,
+        xbar_ucl: x.ucl,
+        xbar_lcl: x.lcl,
+        s_cl: s.cl,
+        s_ucl: s.ucl,
+        s_lcl: s.lcl,
+        sigma_hat: chart.sigma_hat(),
+        xbar_points: point_dtos(chart.points()),
+        s_points: point_dtos(chart.s_points()),
+        in_control: chart.is_in_control(),
+    })
+}
+
+fn imr_dto(values: Vec<f64>, rules: crate::spc::RuleSet) -> Result<ImrChartDto, String> {
+    use crate::spc::{ControlChart, IndividualMRChart};
+
+    // Unreachable over the wire -- JSON has no NaN or infinity -- but the
+    // chart would skip such a value and renumber everything after it.
+    if let Some(i) = values.iter().position(|x| !x.is_finite()) {
+        return Err(format!("values[{i}] is not a finite number"));
+    }
+    let mut chart = IndividualMRChart::new().with_rules(rules);
+    for &x in &values {
+        chart.add_sample(&[x]);
+    }
+    let i = chart
+        .control_limits()
+        .ok_or("at least two values are needed for control limits")?;
+    let mr = chart
+        .mr_limits()
+        .ok_or("at least two values are needed for control limits")?;
+    Ok(ImrChartDto {
+        i_cl: i.cl,
+        i_ucl: i.ucl,
+        i_lcl: i.lcl,
+        mr_cl: mr.cl,
+        mr_ucl: mr.ucl,
+        mr_lcl: mr.lcl,
+        sigma_hat: chart.sigma_hat(),
+        i_points: point_dtos(chart.points()),
+        mr_points: point_dtos(chart.mr_points()),
+        in_control: chart.is_in_control(),
+    })
+}
+
+fn run_rules_dto(
+    values: Vec<f64>,
+    limits: LimitsInputDto,
+    rules: crate::spc::RuleSet,
+) -> Result<Vec<ChartPointDto>, String> {
+    use crate::spc::{ChartPoint, ControlLimits, RunRule};
+
+    let LimitsInputDto { ucl, cl, lcl } = limits;
+    // Written so that a NaN fails it too.
+    if !(lcl <= cl && cl <= ucl) {
+        return Err(format!(
+            "limits: need lcl <= cl <= ucl, got lcl={lcl} cl={cl} ucl={ucl}"
+        ));
+    }
+    if let Some(i) = values.iter().position(|x| !x.is_finite()) {
+        return Err(format!("values[{i}] is not a finite number"));
+    }
+
+    let mut points: Vec<ChartPoint> = values
+        .iter()
+        .enumerate()
+        .map(|(index, &value)| ChartPoint {
+            value,
+            index,
+            violations: Vec::new(),
+        })
+        .collect();
+    for (index, rule) in rules.check(&points, &ControlLimits { ucl, cl, lcl }) {
+        if let Some(point) = points.get_mut(index) {
+            point.violations.push(rule);
+        }
+    }
+    Ok(point_dtos(&points))
+}
 /// Compute a P chart from (defectives, sample_size) pairs.
 ///
 /// # Input JSON
@@ -1360,5 +1588,175 @@ mod binding_contract_tests {
         let e = dto(json!({ "data": [1.0], "usl": 11.0, "lsl": 9.0 }))
             .expect_err("one point has no dispersion");
         assert!(e.contains("insufficient"), "{e}");
+    }
+
+    // --- #220: X-bar-S, I-MR and the standalone rule engine ---
+
+    /// Twenty subgroups whose mean steps up halfway, so the run tests have
+    /// something to find. Every subgroup holds the same five offsets, so its
+    /// mean is exactly 10.0 or 10.6.
+    fn shifted_subgroups() -> Vec<Vec<f64>> {
+        (0..20)
+            .map(|g| {
+                let shift = if g >= 10 { 0.6 } else { 0.0 };
+                (0..5)
+                    .map(|i| 10.0 + shift + 0.1 * (((g * 3 + i * 7) % 5) as f64 - 2.0))
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn xbar_s_chart_reports_the_crate_chart() {
+        use crate::spc::{ControlChart, RuleSet, XBarSChart};
+        let subgroups = shifted_subgroups();
+        let d = xbar_s_dto(subgroups.clone(), RuleSet::default()).expect("valid input");
+
+        let mut chart = XBarSChart::new(5).expect("5 is in range");
+        for g in &subgroups {
+            chart.add_sample(g);
+        }
+        let x = chart.control_limits().expect("limits");
+        let s = chart.s_limits().expect("limits");
+        assert_eq!((d.xbar_ucl, d.xbar_cl, d.xbar_lcl), (x.ucl, x.cl, x.lcl));
+        assert_eq!((d.s_ucl, d.s_cl, d.s_lcl), (s.ucl, s.cl, s.lcl));
+        assert_eq!(d.sigma_hat, chart.sigma_hat());
+        assert_eq!(d.xbar_points.len(), 20);
+        assert_eq!(d.s_points.len(), 20);
+        assert_eq!(d.in_control, chart.is_in_control());
+    }
+
+    #[test]
+    fn a_ragged_subgroup_is_rejected_by_its_row_not_skipped() {
+        // The chart would skip it and number every later point one short.
+        use crate::spc::RuleSet;
+        let mut subgroups = shifted_subgroups();
+        subgroups[7].pop();
+        for result in [
+            xbar_s_dto(subgroups.clone(), RuleSet::default()).map(|_| ()),
+            xbar_r_dto(subgroups, RuleSet::default()).map(|_| ()),
+        ] {
+            let e = result.expect_err("ragged subgroup");
+            assert!(e.contains("subgroup 7"), "{e}");
+        }
+    }
+
+    #[test]
+    fn imr_chart_reports_the_crate_chart() {
+        use crate::spc::{ControlChart, IndividualMRChart, RuleSet};
+        let values: Vec<f64> = shifted_subgroups().iter().map(|g| g[0]).collect();
+        let d = imr_dto(values.clone(), RuleSet::default()).expect("valid input");
+
+        let mut chart = IndividualMRChart::new();
+        for &x in &values {
+            chart.add_sample(&[x]);
+        }
+        let i = chart.control_limits().expect("limits");
+        let mr = chart.mr_limits().expect("limits");
+        assert_eq!((d.i_ucl, d.i_cl, d.i_lcl), (i.ucl, i.cl, i.lcl));
+        assert_eq!((d.mr_ucl, d.mr_cl, d.mr_lcl), (mr.ucl, mr.cl, mr.lcl));
+        assert_eq!(d.sigma_hat, chart.sigma_hat());
+        assert_eq!(d.i_points.len(), values.len());
+        // MR_0 is undefined: the moving-range series starts at the second value.
+        assert_eq!(d.mr_points.len(), values.len() - 1);
+        assert_eq!(d.mr_points[0].index, 1);
+    }
+
+    #[test]
+    fn imr_chart_needs_two_values() {
+        use crate::spc::RuleSet;
+        let e = imr_dto(vec![1.0], RuleSet::default()).expect_err("one value has no range");
+        assert!(e.contains("two"), "{e}");
+    }
+
+    /// The standalone engine must be the engine the charts use: fed a chart's
+    /// own points and limits, it has to find exactly what the chart found.
+    #[test]
+    fn run_rules_finds_what_the_chart_found() {
+        use crate::spc::RuleSet;
+        let chart = xbar_r_dto(shifted_subgroups(), RuleSet::default()).expect("valid");
+        let flagged = chart
+            .xbar_points
+            .iter()
+            .filter(|p| !p.violations.is_empty())
+            .count();
+        assert!(
+            flagged > 0,
+            "the fixture must give the rules something to find"
+        );
+
+        let values = chart.xbar_points.iter().map(|p| p.value).collect();
+        let limits = LimitsInputDto {
+            ucl: chart.xbar_ucl,
+            cl: chart.xbar_cl,
+            lcl: chart.xbar_lcl,
+        };
+        let standalone = run_rules_dto(values, limits, RuleSet::default()).expect("valid");
+
+        assert_eq!(standalone.len(), chart.xbar_points.len());
+        for (a, b) in standalone.iter().zip(&chart.xbar_points) {
+            assert_eq!(a.index, b.index);
+            assert_eq!(a.violations, b.violations, "point {}", a.index);
+        }
+    }
+
+    #[test]
+    fn run_rules_applies_only_the_rules_it_is_given() {
+        use crate::spc::{RuleSet, ViolationType};
+        // One point far outside, the rest on the centre line.
+        let mut values = vec![0.0; 10];
+        values[4] = 5.0;
+        let limits = || LimitsInputDto {
+            ucl: 3.0,
+            cl: 0.0,
+            lcl: -3.0,
+        };
+
+        let all = run_rules_dto(values.clone(), limits(), RuleSet::default()).expect("valid");
+        assert!(all[4].violations.contains(&"BeyondLimits".to_owned()));
+
+        let none = run_rules_dto(values.clone(), limits(), RuleSet::none()).expect("valid");
+        assert!(none.iter().all(|p| p.violations.is_empty()));
+
+        let only_trend = RuleSet::none().with(ViolationType::SixTrend);
+        let trend = run_rules_dto(values, limits(), only_trend).expect("valid");
+        assert!(trend[4].violations.is_empty());
+    }
+
+    #[test]
+    fn run_rules_reports_every_value_in_order() {
+        use crate::spc::RuleSet;
+        let limits = LimitsInputDto {
+            ucl: 5.0,
+            cl: 2.0,
+            lcl: -1.0,
+        };
+        let out = run_rules_dto(vec![1.0, 2.0, 3.0], limits, RuleSet::default()).expect("valid");
+        let indices: Vec<usize> = out.iter().map(|p| p.index).collect();
+        assert_eq!(indices, vec![0, 1, 2]);
+        assert_eq!(out[2].value, 3.0);
+    }
+
+    #[test]
+    fn run_rules_rejects_limits_out_of_order() {
+        use crate::spc::RuleSet;
+        let limits = LimitsInputDto {
+            ucl: 1.0,
+            cl: 2.0,
+            lcl: 0.0,
+        };
+        let e = run_rules_dto(vec![1.0], limits, RuleSet::default()).expect_err("cl above ucl");
+        assert!(e.contains("lcl <= cl <= ucl"), "{e}");
+    }
+
+    #[test]
+    fn limits_input_rejects_unknown_keys() {
+        let e = from_json::<LimitsInputDto>(
+            json!({ "ucl": 1.0, "cl": 0.0, "lcl": -1.0, "usl": 2.0 }),
+            "limits",
+        )
+        .err()
+        .expect("unknown key");
+        assert!(e.contains("unknown field"), "{e}");
     }
 }

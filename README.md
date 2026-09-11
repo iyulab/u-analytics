@@ -220,6 +220,60 @@ Omitting the argument -- or passing `undefined`, `null`, or an object without
 `rules` -- applies all eight, so existing calls are unaffected. In Rust the same
 choice is `RuleSet`, passed to a chart with `with_rules`.
 
+### X-bar-S and Individual-MR charts
+
+```ts
+type RuleName = "BeyondLimits" | "NineOneSide" | "SixTrend" | "FourteenAlternating"
+              | "TwoOfThreeBeyond2Sigma" | "FourOfFiveBeyond1Sigma"
+              | "FifteenWithin1Sigma" | "EightBeyond1Sigma";
+type Point = { index: number, value: number, violations: RuleName[] };
+
+xbar_s_chart(subgroups: number[][], options?: { rules?: RuleName[] }): {
+  xbar_cl: number, xbar_ucl: number, xbar_lcl: number,
+  s_cl: number, s_ucl: number, s_lcl: number,
+  sigma_hat: number | null,      // S-bar / c4
+  xbar_points: Point[], s_points: Point[], in_control: boolean,
+}
+
+imr_chart(values: number[], options?: { rules?: RuleName[] }): {
+  i_cl: number, i_ucl: number, i_lcl: number,
+  mr_cl: number, mr_ucl: number, mr_lcl: number,
+  sigma_hat: number | null,      // MR-bar / d2(2)
+  i_points: Point[],
+  mr_points: Point[],            // starts at index 1: the first value has no moving range
+  in_control: boolean,
+}
+```
+
+`xbar_s_chart` takes the same subgroup matrix as `xbar_r_chart`; above about ten
+values per subgroup the standard deviation is the better estimate of spread,
+because the range uses only the two extremes. Both return `sigma_hat` for
+`process_capability`'s `sigma_within`, like `xbar_r_chart`. Subgroups must all
+have the same size; a ragged one is reported by its row rather than skipped,
+since skipping it would shift the index of every point after it.
+
+### Applying run tests to your own series
+
+```ts
+run_rules(
+  values: number[],
+  limits: { ucl: number, cl: number, lcl: number },   // lcl <= cl <= ucl
+  options?: { rules?: RuleName[] },
+): Point[]   // one entry per value, in input order
+```
+
+The same engine the charts use, on its own -- for a statistic the crate does not
+chart, or for limits fixed from an earlier study:
+
+```js
+run_rules([10.1, 10.4, 9.8, 12.9], { ucl: 12, cl: 10, lcl: 8 });
+// → [{ index: 0, value: 10.1, violations: [] }, ...,
+//    { index: 3, value: 12.9, violations: ["BeyondLimits"] }]
+```
+
+Given a chart's own points and limits, it finds exactly the violations the chart
+reported.
+
 ## Test Status
 
 ```text
