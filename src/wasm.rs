@@ -477,13 +477,20 @@ fn subgroup_size(subgroups: &[Vec<f64>]) -> Result<usize, String> {
         .first()
         .map(Vec::len)
         .ok_or("at least one subgroup required")?;
-    if let Some(i) = subgroups.iter().position(|g| g.len() != n) {
-        return Err(format!(
-            "subgroup {i} has {} values; subgroup 0 has {n} -- all subgroups must have the same size",
-            subgroups[i].len()
-        ));
-    }
     Ok(n)
+}
+
+/// Feeds rows to a chart, naming the row a rejection came from. The chart
+/// knows why a sample is unusable but not where it sat in the caller's input.
+fn add_rows<T>(
+    rows: impl IntoIterator<Item = T>,
+    label: &str,
+    mut add: impl FnMut(T) -> Result<(), crate::spc::ControlChartError>,
+) -> Result<(), String> {
+    for (i, row) in rows.into_iter().enumerate() {
+        add(row).map_err(|e| format!("{label}[{i}]: {e}"))?;
+    }
+    Ok(())
 }
 
 fn xbar_r_dto(
@@ -496,9 +503,7 @@ fn xbar_r_dto(
     let mut chart = XBarRChart::new(n)
         .map_err(|e| e.to_string())?
         .with_rules(rules);
-    for subgroup in &subgroups {
-        chart.add_sample(subgroup);
-    }
+    add_rows(&subgroups, "subgroups", |g| chart.add_sample(g))?;
     let x = chart
         .control_limits()
         .ok_or("insufficient data for control limits")?;
@@ -529,9 +534,7 @@ fn xbar_s_dto(
     let mut chart = XBarSChart::new(n)
         .map_err(|e| e.to_string())?
         .with_rules(rules);
-    for subgroup in &subgroups {
-        chart.add_sample(subgroup);
-    }
+    add_rows(&subgroups, "subgroups", |g| chart.add_sample(g))?;
     let x = chart
         .control_limits()
         .ok_or("insufficient data for control limits")?;
@@ -555,15 +558,10 @@ fn xbar_s_dto(
 fn imr_dto(values: Vec<f64>, rules: crate::spc::RuleSet) -> Result<ImrChartDto, String> {
     use crate::spc::{ControlChart, IndividualMRChart};
 
-    // Unreachable over the wire -- JSON has no NaN or infinity -- but the
-    // chart would skip such a value and renumber everything after it.
-    if let Some(i) = values.iter().position(|x| !x.is_finite()) {
-        return Err(format!("values[{i}] is not a finite number"));
-    }
     let mut chart = IndividualMRChart::new().with_rules(rules);
-    for &x in &values {
-        chart.add_sample(&[x]);
-    }
+    add_rows(&values, "values", |x| {
+        chart.add_sample(std::slice::from_ref(x))
+    })?;
     let i = chart
         .control_limits()
         .ok_or("at least two values are needed for control limits")?;
@@ -931,9 +929,7 @@ fn p_chart_dto(raw: &[[u64; 2]]) -> Result<PChartDto, String> {
 
     let samples = proportion_samples(raw)?;
     let mut chart = PChart::new();
-    for &(d, n) in &samples {
-        chart.add_sample(d, n);
-    }
+    add_rows(&samples, "samples", |&(d, n)| chart.add_sample(d, n))?;
     let p_bar = chart.p_bar().ok_or("no samples provided")?;
     Ok(PChartDto {
         p_bar,
@@ -956,15 +952,7 @@ fn np_chart_dto(defectives: &[u64], sample_size: u64) -> Result<FixedLimitChartD
     use crate::spc::NPChart;
 
     let mut chart = NPChart::new(sample_size).map_err(|e| e.to_string())?;
-    if let Some(i) = defectives.iter().position(|&d| d > sample_size) {
-        return Err(format!(
-            "defectives[{i}] is {}, more than sample_size {sample_size}",
-            defectives[i]
-        ));
-    }
-    for &d in defectives {
-        chart.add_sample(d);
-    }
+    add_rows(defectives, "defectives", |&d| chart.add_sample(d))?;
     let (ucl, cl, lcl) = chart
         .control_limits()
         .ok_or("defectives must not be empty")?;
@@ -997,11 +985,8 @@ fn c_chart_dto(defects: &[u64]) -> Result<FixedLimitChartDto, String> {
 fn u_chart_dto(raw: &[(u64, f64)]) -> Result<UChartDto, String> {
     use crate::spc::UChart;
 
-    check_rate_samples(raw)?;
     let mut chart = UChart::new();
-    for &(d, u) in raw {
-        chart.add_sample(d, u);
-    }
+    add_rows(raw, "samples", |&(d, u)| chart.add_sample(d, u))?;
     let u_bar = chart.u_bar().ok_or("samples must not be empty")?;
     Ok(UChartDto {
         u_bar,
@@ -1643,7 +1628,7 @@ mod binding_contract_tests {
         use crate::spc::{ControlChart, XBarRChart};
         let mut chart = XBarRChart::new(5).expect("5 is within range");
         for g in SUBGROUPS {
-            chart.add_sample(&g);
+            chart.add_sample(&g).unwrap();
         }
         chart.sigma_hat().expect("limits available for 6 subgroups")
     }
@@ -1746,7 +1731,10 @@ mod binding_contract_tests {
         within["target"] = json!(10.4);
         overall["target"] = json!(10.4);
         let a = dto(within).expect("valid").cpm.expect("cpm with a target");
-        let b = dto(overall).expect("valid").cpm.expect("cpm without sigma_within");
+        let b = dto(overall)
+            .expect("valid")
+            .cpm
+            .expect("cpm without sigma_within");
         assert_eq!(a, b);
     }
 
@@ -1809,7 +1797,7 @@ mod binding_contract_tests {
 
         let mut chart = XBarSChart::new(5).expect("5 is in range");
         for g in &subgroups {
-            chart.add_sample(g);
+            chart.add_sample(g).unwrap();
         }
         let x = chart.control_limits().expect("limits");
         let s = chart.s_limits().expect("limits");
@@ -1832,7 +1820,7 @@ mod binding_contract_tests {
             xbar_r_dto(subgroups, RuleSet::default()).map(|_| ()),
         ] {
             let e = result.expect_err("ragged subgroup");
-            assert!(e.contains("subgroup 7"), "{e}");
+            assert!(e.contains("subgroups[7]"), "{e}");
         }
     }
 
@@ -1844,7 +1832,7 @@ mod binding_contract_tests {
 
         let mut chart = IndividualMRChart::new();
         for &x in &values {
-            chart.add_sample(&[x]);
+            chart.add_sample(&[x]).unwrap();
         }
         let i = chart.control_limits().expect("limits");
         let mr = chart.mr_limits().expect("limits");
@@ -1964,7 +1952,7 @@ mod binding_contract_tests {
         let d = np_chart_dto(&defectives, 100).expect("valid");
         let mut chart = NPChart::new(100).expect("valid size");
         for &x in &defectives {
-            chart.add_sample(x);
+            chart.add_sample(x).unwrap();
         }
         let (ucl, cl, lcl) = chart.control_limits().expect("limits");
         assert_eq!((d.ucl, d.cl, d.lcl), (ucl, cl, lcl));
@@ -2002,7 +1990,7 @@ mod binding_contract_tests {
         let d = u_chart_dto(&samples).expect("valid");
         let mut chart = UChart::new();
         for &(x, u) in &samples {
-            chart.add_sample(x, u);
+            chart.add_sample(x, u).unwrap();
         }
         assert_eq!(Some(d.u_bar), chart.u_bar());
         assert_eq!(d.points.len(), samples.len());

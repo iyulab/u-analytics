@@ -60,10 +60,10 @@ pub struct AttributeChartPoint {
 /// use u_analytics::spc::PChart;
 ///
 /// let mut chart = PChart::new();
-/// chart.add_sample(3, 100);  // 3 defectives out of 100
-/// chart.add_sample(5, 100);
-/// chart.add_sample(2, 100);
-/// chart.add_sample(4, 100);
+/// chart.add_sample(3, 100).unwrap();  // 3 defectives out of 100
+/// chart.add_sample(5, 100).unwrap();
+/// chart.add_sample(2, 100).unwrap();
+/// chart.add_sample(4, 100).unwrap();
 ///
 /// let p_bar = chart.p_bar().expect("should have p_bar after adding samples");
 /// assert!(p_bar > 0.0);
@@ -94,13 +94,31 @@ impl PChart {
 
     /// Add a sample with the number of defective items and the total sample size.
     ///
-    /// Ignores samples where `defectives > sample_size` or `sample_size == 0`.
-    pub fn add_sample(&mut self, defectives: u64, sample_size: u64) {
-        if sample_size == 0 || defectives > sample_size {
-            return;
+    /// # Errors
+    ///
+    /// [`ControlChartError::ZeroSampleSize`](crate::spc::ControlChartError::ZeroSampleSize)
+    /// if `sample_size` is 0, or
+    /// [`ControlChartError::DefectivesExceedSampleSize`](crate::spc::ControlChartError::DefectivesExceedSampleSize)
+    /// if `defectives > sample_size`. The chart is left unchanged; such a
+    /// sample used to be dropped silently, shifting every later point.
+    pub fn add_sample(
+        &mut self,
+        defectives: u64,
+        sample_size: u64,
+    ) -> Result<(), super::chart::ControlChartError> {
+        use super::chart::ControlChartError;
+        if sample_size == 0 {
+            return Err(ControlChartError::ZeroSampleSize);
+        }
+        if defectives > sample_size {
+            return Err(ControlChartError::DefectivesExceedSampleSize {
+                defectives,
+                sample_size,
+            });
         }
         self.samples.push((defectives, sample_size));
         self.recompute();
+        Ok(())
     }
 
     /// Get the overall proportion defective (p-bar), or `None` if no data.
@@ -214,13 +232,23 @@ impl NPChart {
 
     /// Add a defective count for one subgroup.
     ///
-    /// Ignores values where `defectives > sample_size`.
-    pub fn add_sample(&mut self, defectives: u64) {
+    /// # Errors
+    ///
+    /// [`ControlChartError::DefectivesExceedSampleSize`](crate::spc::ControlChartError::DefectivesExceedSampleSize)
+    /// if `defectives` exceeds the chart's sample size. The chart is left
+    /// unchanged.
+    pub fn add_sample(&mut self, defectives: u64) -> Result<(), super::chart::ControlChartError> {
         if defectives > self.sample_size {
-            return;
+            return Err(
+                super::chart::ControlChartError::DefectivesExceedSampleSize {
+                    defectives,
+                    sample_size: self.sample_size,
+                },
+            );
         }
         self.defective_counts.push(defectives);
         self.recompute();
+        Ok(())
     }
 
     /// Get the control limits as `(ucl, cl, lcl)`, or `None` if no data.
@@ -419,13 +447,23 @@ impl UChart {
     /// Add a sample with the number of defects and the number of units inspected.
     ///
     /// The `units_inspected` can be fractional (e.g., area or length).
-    /// Ignores samples where `units_inspected <= 0` or is not finite.
-    pub fn add_sample(&mut self, defects: u64, units_inspected: f64) {
+    ///
+    /// # Errors
+    ///
+    /// [`ControlChartError::NonPositiveUnits`](crate::spc::ControlChartError::NonPositiveUnits)
+    /// if `units_inspected` is not a positive, finite number. The chart is left
+    /// unchanged.
+    pub fn add_sample(
+        &mut self,
+        defects: u64,
+        units_inspected: f64,
+    ) -> Result<(), super::chart::ControlChartError> {
         if !units_inspected.is_finite() || units_inspected <= 0.0 {
-            return;
+            return Err(super::chart::ControlChartError::NonPositiveUnits);
         }
         self.samples.push((defects, units_inspected));
         self.recompute();
+        Ok(())
     }
 
     /// Get the overall defect rate (u-bar), or `None` if no data.
@@ -977,7 +1015,7 @@ mod tests {
         let mut chart = PChart::new();
         let defectives = [5, 8, 3, 6, 4, 7, 2, 9, 5, 6];
         for &d in &defectives {
-            chart.add_sample(d, 100);
+            chart.add_sample(d, 100).unwrap();
         }
 
         let p_bar = chart.p_bar().expect("should have p_bar");
@@ -1003,7 +1041,7 @@ mod tests {
         // sigma = sqrt(0.1 * 0.9 / 100) = 0.03
         // UCL = 0.10 + 0.09 = 0.19
         // LCL = 0.10 - 0.09 = 0.01
-        chart.add_sample(10, 100);
+        chart.add_sample(10, 100).unwrap();
 
         let pt = &chart.points()[0];
         assert!((pt.cl - 0.1).abs() < 1e-10);
@@ -1014,9 +1052,9 @@ mod tests {
     #[test]
     fn test_p_chart_variable_sample_sizes() {
         let mut chart = PChart::new();
-        chart.add_sample(5, 100);
-        chart.add_sample(10, 200);
-        chart.add_sample(3, 50);
+        chart.add_sample(5, 100).unwrap();
+        chart.add_sample(10, 200).unwrap();
+        chart.add_sample(3, 50).unwrap();
 
         // p-bar = 18/350
         let p_bar = chart.p_bar().expect("p_bar");
@@ -1030,11 +1068,19 @@ mod tests {
 
     #[test]
     fn test_p_chart_rejects_invalid() {
+        use crate::spc::ControlChartError;
         let mut chart = PChart::new();
-        chart.add_sample(5, 0); // Zero sample size
-        assert!(chart.p_bar().is_none());
-
-        chart.add_sample(10, 5); // Defectives > sample size
+        assert_eq!(
+            chart.add_sample(5, 0),
+            Err(ControlChartError::ZeroSampleSize)
+        );
+        assert_eq!(
+            chart.add_sample(10, 5),
+            Err(ControlChartError::DefectivesExceedSampleSize {
+                defectives: 10,
+                sample_size: 5
+            })
+        );
         assert!(chart.p_bar().is_none());
     }
 
@@ -1042,7 +1088,7 @@ mod tests {
     fn test_p_chart_lcl_clamped_to_zero() {
         let mut chart = PChart::new();
         // Very small p with small n → LCL would be negative
-        chart.add_sample(1, 10);
+        chart.add_sample(1, 10).unwrap();
         let pt = &chart.points()[0];
         assert!(pt.lcl >= 0.0);
     }
@@ -1052,10 +1098,10 @@ mod tests {
         let mut chart = PChart::new();
         // Establish baseline with many normal samples
         for _ in 0..20 {
-            chart.add_sample(5, 100);
+            chart.add_sample(5, 100).unwrap();
         }
         // Add an outlier
-        chart.add_sample(30, 100);
+        chart.add_sample(30, 100).unwrap();
 
         assert!(!chart.is_in_control());
         let last = chart.points().last().expect("should have points");
@@ -1076,7 +1122,7 @@ mod tests {
         let mut chart = NPChart::new(100).expect("100 is a valid sample size");
         let defectives = [5, 8, 3, 6, 4, 7, 2, 9, 5, 6];
         for &d in &defectives {
-            chart.add_sample(d);
+            chart.add_sample(d).unwrap();
         }
 
         let (ucl, cl, lcl) = chart.control_limits().expect("should have limits");
@@ -1090,7 +1136,13 @@ mod tests {
     #[test]
     fn test_np_chart_rejects_invalid() {
         let mut chart = NPChart::new(100).expect("100 is a valid sample size");
-        chart.add_sample(101); // More defectives than sample size
+        assert_eq!(
+            chart.add_sample(101),
+            Err(crate::spc::ControlChartError::DefectivesExceedSampleSize {
+                defectives: 101,
+                sample_size: 100
+            })
+        );
         assert!(chart.control_limits().is_none());
     }
 
@@ -1106,9 +1158,9 @@ mod tests {
     fn test_np_chart_out_of_control() {
         let mut chart = NPChart::new(100).expect("100 is a valid sample size");
         for _ in 0..20 {
-            chart.add_sample(5);
+            chart.add_sample(5).unwrap();
         }
-        chart.add_sample(30);
+        chart.add_sample(30).unwrap();
 
         assert!(!chart.is_in_control());
     }
@@ -1121,7 +1173,7 @@ mod tests {
         // LCL = 10 - 3*3.082 = 0.754
         let mut chart = NPChart::new(200).expect("200 is a valid sample size");
         for _ in 0..10 {
-            chart.add_sample(10);
+            chart.add_sample(10).unwrap();
         }
 
         let (ucl, cl, lcl) = chart.control_limits().expect("limits");
@@ -1193,11 +1245,11 @@ mod tests {
     fn test_u_chart_basic() {
         let mut chart = UChart::new();
         // 5 samples, each inspecting 10 units
-        chart.add_sample(3, 10.0);
-        chart.add_sample(5, 10.0);
-        chart.add_sample(4, 10.0);
-        chart.add_sample(6, 10.0);
-        chart.add_sample(2, 10.0);
+        chart.add_sample(3, 10.0).unwrap();
+        chart.add_sample(5, 10.0).unwrap();
+        chart.add_sample(4, 10.0).unwrap();
+        chart.add_sample(6, 10.0).unwrap();
+        chart.add_sample(2, 10.0).unwrap();
 
         let u_bar = chart.u_bar().expect("should have u_bar");
         // u-bar = 20/50 = 0.4
@@ -1209,9 +1261,9 @@ mod tests {
     #[test]
     fn test_u_chart_variable_units() {
         let mut chart = UChart::new();
-        chart.add_sample(10, 5.0); // u = 2.0
-        chart.add_sample(20, 10.0); // u = 2.0
-        chart.add_sample(5, 2.5); // u = 2.0
+        chart.add_sample(10, 5.0).unwrap(); // u = 2.0
+        chart.add_sample(20, 10.0).unwrap(); // u = 2.0
+        chart.add_sample(5, 2.5).unwrap(); // u = 2.0
 
         let u_bar = chart.u_bar().expect("u_bar");
         // u-bar = 35/17.5 = 2.0
@@ -1227,16 +1279,13 @@ mod tests {
     #[test]
     fn test_u_chart_rejects_invalid() {
         let mut chart = UChart::new();
-        chart.add_sample(5, 0.0); // Zero units
-        assert!(chart.u_bar().is_none());
-
-        chart.add_sample(5, -1.0); // Negative units
-        assert!(chart.u_bar().is_none());
-
-        chart.add_sample(5, f64::NAN); // NaN units
-        assert!(chart.u_bar().is_none());
-
-        chart.add_sample(5, f64::INFINITY); // Infinite units
+        for units in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                chart.add_sample(5, units),
+                Err(crate::spc::ControlChartError::NonPositiveUnits),
+                "units = {units}"
+            );
+        }
         assert!(chart.u_bar().is_none());
     }
 
@@ -1244,9 +1293,9 @@ mod tests {
     fn test_u_chart_out_of_control() {
         let mut chart = UChart::new();
         for _ in 0..20 {
-            chart.add_sample(4, 10.0);
+            chart.add_sample(4, 10.0).unwrap();
         }
-        chart.add_sample(50, 10.0); // Far outlier
+        chart.add_sample(50, 10.0).unwrap(); // Far outlier
 
         assert!(!chart.is_in_control());
     }
@@ -1255,7 +1304,7 @@ mod tests {
     fn test_u_chart_lcl_clamped() {
         let mut chart = UChart::new();
         // Small u-bar with small n → LCL would be negative
-        chart.add_sample(1, 1.0);
+        chart.add_sample(1, 1.0).unwrap();
         let pt = &chart.points()[0];
         assert!(pt.lcl >= 0.0);
     }
@@ -1274,7 +1323,7 @@ mod tests {
         // UCL = 2.0 + 3*0.7071 = 4.1213
         // LCL = max(0, 2.0 - 2.1213) = 0.0 (clamped)
         let mut chart = UChart::new();
-        chart.add_sample(8, 4.0);
+        chart.add_sample(8, 4.0).unwrap();
 
         let pt = &chart.points()[0];
         assert!((pt.cl - 2.0).abs() < 1e-10);
@@ -1292,8 +1341,8 @@ mod tests {
 
         let defectives = [5, 8, 3, 6, 4];
         for &d in &defectives {
-            p_chart.add_sample(d, 100);
-            np_chart.add_sample(d);
+            p_chart.add_sample(d, 100).unwrap();
+            np_chart.add_sample(d).unwrap();
         }
 
         let p_bar = p_chart.p_bar().expect("p_bar");
@@ -1315,7 +1364,7 @@ mod tests {
         let defects = [3, 5, 4, 6, 2];
         for &d in &defects {
             c_chart.add_sample(d);
-            u_chart.add_sample(d, 1.0);
+            u_chart.add_sample(d, 1.0).unwrap();
         }
 
         let (c_ucl, c_cl, c_lcl) = c_chart.control_limits().expect("C limits");
@@ -1409,9 +1458,9 @@ mod tests {
         // Spread as [10, 10, 10, ..., 10, 8] so sum = 19*10 + 8 = 198.
         let mut chart = PChart::new();
         for _ in 0..19 {
-            chart.add_sample(10, 100);
+            chart.add_sample(10, 100).unwrap();
         }
-        chart.add_sample(8, 100);
+        chart.add_sample(8, 100).unwrap();
 
         let p_bar = chart.p_bar().expect("p_bar");
         assert!(
@@ -1452,9 +1501,9 @@ mod tests {
         // 20 samples of n=100, total defectives=198 → p̄=0.099, np̄=9.9
         let mut chart = NPChart::new(100).expect("100 is a valid sample size");
         for _ in 0..19 {
-            chart.add_sample(10);
+            chart.add_sample(10).unwrap();
         }
-        chart.add_sample(8);
+        chart.add_sample(8).unwrap();
 
         let (ucl, cl, lcl) = chart.control_limits().expect("limits");
         // np̄ = 9.9
@@ -1513,7 +1562,7 @@ mod tests {
         // 20 samples each inspecting 10 units, defects arranged so u=2.0
         let mut chart = UChart::new();
         for _ in 0..20 {
-            chart.add_sample(20, 10.0); // u = 20/10 = 2.0
+            chart.add_sample(20, 10.0).unwrap(); // u = 20/10 = 2.0
         }
 
         let u_bar = chart.u_bar().expect("u_bar");

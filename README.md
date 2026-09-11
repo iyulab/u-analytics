@@ -39,9 +39,9 @@ Control charts for monitoring process stability:
 use u_analytics::spc::{XBarRChart, ControlChart};
 
 let mut chart = XBarRChart::new(5).expect("5 is a supported subgroup size");
-chart.add_sample(&[25.0, 26.0, 24.5, 25.5, 25.0]);
-chart.add_sample(&[25.2, 24.8, 25.1, 24.9, 25.3]);
-chart.add_sample(&[25.1, 25.0, 24.7, 25.3, 24.9]);
+chart.add_sample(&[25.0, 26.0, 24.5, 25.5, 25.0]).unwrap();
+chart.add_sample(&[25.2, 24.8, 25.1, 24.9, 25.3]).unwrap();
+chart.add_sample(&[25.1, 25.0, 24.7, 25.3, 24.9]).unwrap();
 
 if chart.is_in_control() {
     println!("Process is stable");

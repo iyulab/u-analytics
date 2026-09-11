@@ -42,6 +42,15 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   subgroup charts: the size comes from data. `ControlChartError` gains
   `ZeroSampleSize` and is now `#[non_exhaustive]`, so a later variant is not a
   breaking change.
+- **Breaking:** `add_sample` on the X-bar-R, X-bar-S, Individual-MR, P, NP and
+  U charts returns `Result<(), ControlChartError>` and rejects a sample it
+  cannot use -- the wrong length, a non-finite value, a sample size of zero,
+  more defectives than items, units that are not positive -- instead of
+  dropping it. A dropped sample left every later point one position off the
+  input it came from, and nothing told the caller. `ControlChartError` gains
+  `SampleLengthMismatch`, `NonFiniteValue`, `DefectivesExceedSampleSize` and
+  `NonPositiveUnits`. `CChart::add_sample` accepts any count and still returns
+  nothing.
 - The WebAssembly `xbar_r_chart` binding no longer states the supported
   subgroup range itself. It carried a second copy of the same literal bound, so
   widening the tables would have left the binding rejecting sizes the crate had

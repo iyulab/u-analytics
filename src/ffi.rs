@@ -150,37 +150,16 @@ pub unsafe extern "C" fn uanalytics_xbar_r_chart(
         let Some(n) = req.subgroups.first().map(Vec::len) else {
             return write_error(result_ptr, ERR_COMPUTE, "subgroups must not be empty");
         };
-        // The chart skips a ragged or non-finite subgroup. `x_bars` and
-        // `ranges` carry no index, so a skipped subgroup would slide every
-        // later value onto the wrong input row -- refuse the request instead.
-        if let Some(i) = req.subgroups.iter().position(|g| g.len() != n) {
-            return write_error(
-                result_ptr,
-                ERR_COMPUTE,
-                &format!(
-                    "subgroup {i} has {} values; subgroup 0 has {n}",
-                    req.subgroups[i].len()
-                ),
-            );
-        }
-        if let Some(i) = req
-            .subgroups
-            .iter()
-            .position(|g| g.iter().any(|x| !x.is_finite()))
-        {
-            return write_error(
-                result_ptr,
-                ERR_COMPUTE,
-                &format!("subgroup {i} contains a non-finite value"),
-            );
-        }
-
         let mut chart = match XBarRChart::new(n) {
             Ok(chart) => chart,
             Err(e) => return write_error(result_ptr, ERR_COMPUTE, &e.to_string()),
         };
-        for subgroup in &req.subgroups {
-            chart.add_sample(subgroup);
+        // `x_bars` and `ranges` carry no index, so a ragged or non-finite
+        // subgroup is refused by its row rather than left out.
+        for (i, subgroup) in req.subgroups.iter().enumerate() {
+            if let Err(e) = chart.add_sample(subgroup) {
+                return write_error(result_ptr, ERR_COMPUTE, &format!("subgroup {i}: {e}"));
+            }
         }
 
         let (Some(x), Some(r)) = (chart.control_limits(), chart.r_limits()) else {
@@ -273,8 +252,10 @@ pub unsafe extern "C" fn uanalytics_p_chart(
         }
 
         let mut chart = PChart::new();
-        for &(inspected, defective) in &req.samples {
-            chart.add_sample(defective, inspected);
+        for (i, &(inspected, defective)) in req.samples.iter().enumerate() {
+            if let Err(e) = chart.add_sample(defective, inspected) {
+                return write_error(result_ptr, ERR_COMPUTE, &format!("sample {i}: {e}"));
+            }
         }
         let Some(p_bar) = chart.p_bar() else {
             return write_error(result_ptr, ERR_COMPUTE, "samples must not be empty");
@@ -420,8 +401,10 @@ pub unsafe extern "C" fn uanalytics_process_capability(
             }
             None => {
                 let mut imr = IndividualMRChart::new();
-                for &x in &req.data {
-                    imr.add_sample(&[x]);
+                for (i, &x) in req.data.iter().enumerate() {
+                    if let Err(e) = imr.add_sample(&[x]) {
+                        return write_error(result_ptr, ERR_COMPUTE, &format!("data[{i}]: {e}"));
+                    }
                 }
                 match imr.sigma_hat() {
                     Some(s) if s > 0.0 => (s, "moving_range"),
@@ -1013,7 +996,7 @@ mod tests {
         let parsed: SpcChartRequest = serde_json::from_str(&request).expect("request parses");
         let mut chart = XBarRChart::new(12).expect("12 is in range");
         for g in &parsed.subgroups {
-            chart.add_sample(g);
+            chart.add_sample(g).unwrap();
         }
         let x = chart.control_limits().expect("limits");
         let r = chart.r_limits().expect("limits");
@@ -1053,7 +1036,7 @@ mod tests {
         assert_eq!(code, 0, "{body}");
         let mut chart = PChart::new();
         for (n, d) in [(100, 3), (120, 5), (80, 2), (100, 4)] {
-            chart.add_sample(d, n);
+            chart.add_sample(d, n).unwrap();
         }
         assert_eq!(body["p_bar"].as_f64(), chart.p_bar());
         let ucls: Vec<f64> = chart.points().iter().map(|p| p.ucl).collect();
@@ -1105,7 +1088,7 @@ mod tests {
         assert_eq!(body["sigma_source"], "moving_range");
         let mut imr = IndividualMRChart::new();
         for x in data {
-            imr.add_sample(&[x]);
+            imr.add_sample(&[x]).unwrap();
         }
         assert_eq!(body["std_dev_within"].as_f64(), imr.sigma_hat());
 

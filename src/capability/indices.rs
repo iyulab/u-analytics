@@ -565,7 +565,11 @@ mod tests {
 
         // A target outside the specification.
         for t in [199.0, 221.0, f64::NAN] {
-            let cpm = two_sided().with_target(t).compute_overall(&data).unwrap().cpm;
+            let cpm = two_sided()
+                .with_target(t)
+                .compute_overall(&data)
+                .unwrap()
+                .cpm;
             assert!(cpm.is_none(), "T={t}");
         }
         // Every observation on the target: no spread to divide by.

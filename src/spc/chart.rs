@@ -118,9 +118,16 @@ pub trait ControlChart {
     /// For subgroup charts (X-bar-R, X-bar-S), the slice contains the
     /// individual measurements within one subgroup.
     ///
-    /// For individual charts (I-MR), the slice should contain exactly
-    /// one element.
-    fn add_sample(&mut self, sample: &[f64]);
+    /// For individual charts (I-MR), the slice contains exactly one element.
+    ///
+    /// # Errors
+    ///
+    /// [`ControlChartError::SampleLengthMismatch`] if the slice is not the
+    /// chart's sample length, or [`ControlChartError::NonFiniteValue`] if it
+    /// holds a NaN or infinity. The chart is left unchanged. A rejected sample
+    /// used to be dropped without a word, so every later point sat one
+    /// position off the input it came from.
+    fn add_sample(&mut self, sample: &[f64]) -> Result<(), ControlChartError>;
 
     /// Get the computed control limits, or `None` if insufficient data.
     fn control_limits(&self) -> Option<ControlLimits>;
@@ -146,10 +153,30 @@ pub const MIN_SUBGROUP_SIZE: usize = 2;
 /// size, so this is the highest `n` for which control limits can be computed.
 pub const MAX_SUBGROUP_SIZE: usize = 25;
 
-/// Errors returned when a control chart cannot be constructed.
+/// Errors returned when a control chart cannot be constructed or cannot take
+/// a sample.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ControlChartError {
+    /// A sample is not the length the chart takes: a subgroup of another size,
+    /// or more than one value for an individuals chart.
+    SampleLengthMismatch {
+        /// The chart's sample length.
+        expected: usize,
+        /// The length that was given.
+        got: usize,
+    },
+    /// A sample holds a NaN or an infinity.
+    NonFiniteValue,
+    /// A sample reports more defectives than it has items.
+    DefectivesExceedSampleSize {
+        /// Defectives reported.
+        defectives: u64,
+        /// Items in the sample.
+        sample_size: u64,
+    },
+    /// Units inspected that is not a positive, finite number.
+    NonPositiveUnits,
     /// The requested subgroup size is outside the range the factor tables cover.
     ///
     /// Carries the rejected size so a caller can report it without re-deriving
@@ -174,6 +201,22 @@ impl fmt::Display for ControlChartError {
                 write!(f, "subgroup size must be {min}..={max}, got {got}")
             }
             ControlChartError::ZeroSampleSize => write!(f, "sample size must be at least 1"),
+            ControlChartError::SampleLengthMismatch { expected, got } => {
+                write!(f, "sample has {got} values, expected {expected}")
+            }
+            ControlChartError::NonFiniteValue => {
+                write!(f, "sample contains a value that is not a finite number")
+            }
+            ControlChartError::DefectivesExceedSampleSize {
+                defectives,
+                sample_size,
+            } => write!(
+                f,
+                "{defectives} defectives out of a sample of {sample_size}"
+            ),
+            ControlChartError::NonPositiveUnits => {
+                write!(f, "units inspected must be a positive, finite number")
+            }
         }
     }
 }

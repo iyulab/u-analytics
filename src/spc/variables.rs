@@ -179,9 +179,9 @@ const D4_MR: f64 = 3.267;
 /// use u_analytics::spc::{XBarRChart, ControlChart};
 ///
 /// let mut chart = XBarRChart::new(5).expect("subgroup size is in range");
-/// chart.add_sample(&[25.0, 26.0, 24.5, 25.5, 25.0]);
-/// chart.add_sample(&[25.2, 24.8, 25.1, 24.9, 25.3]);
-/// chart.add_sample(&[25.1, 25.0, 24.7, 25.3, 24.9]);
+/// chart.add_sample(&[25.0, 26.0, 24.5, 25.5, 25.0]).unwrap();
+/// chart.add_sample(&[25.2, 24.8, 25.1, 24.9, 25.3]).unwrap();
+/// chart.add_sample(&[25.1, 25.0, 24.7, 25.3, 24.9]).unwrap();
 ///
 /// let limits = chart.control_limits().expect("should have limits after 3 samples");
 /// assert!(limits.ucl > limits.cl);
@@ -283,7 +283,7 @@ impl XBarRChart {
     ///
     /// let mut chart = XBarRChart::new(5).expect("subgroup size is in range");
     /// for g in [[9.9, 10.1, 10.0, 9.8, 10.2], [10.3, 9.7, 10.0, 10.1, 9.9]] {
-    ///     chart.add_sample(&g);
+    ///     chart.add_sample(&g).unwrap();
     /// }
     /// let sigma = chart.sigma_hat().expect("limits available");
     /// assert!(sigma > 0.0);
@@ -386,17 +386,27 @@ impl XBarRChart {
     }
 }
 
+/// The check every variables chart applies to a sample before taking it.
+fn check_sample(sample: &[f64], expected: usize) -> Result<(), ControlChartError> {
+    if sample.len() != expected {
+        return Err(ControlChartError::SampleLengthMismatch {
+            expected,
+            got: sample.len(),
+        });
+    }
+    if !sample.iter().all(|x| x.is_finite()) {
+        return Err(ControlChartError::NonFiniteValue);
+    }
+    Ok(())
+}
+
 impl ControlChart for XBarRChart {
     /// Add a subgroup sample. The sample length must equal the chart's subgroup size.
-    fn add_sample(&mut self, sample: &[f64]) {
-        if sample.len() != self.subgroup_size {
-            return;
-        }
-        if !sample.iter().all(|x| x.is_finite()) {
-            return;
-        }
+    fn add_sample(&mut self, sample: &[f64]) -> Result<(), ControlChartError> {
+        check_sample(sample, self.subgroup_size)?;
         self.subgroups.push(sample.to_vec());
         self.recompute();
+        Ok(())
     }
 
     fn control_limits(&self) -> Option<ControlLimits> {
@@ -528,7 +538,7 @@ impl XBarSChart {
     ///
     /// let mut chart = XBarSChart::new(5).expect("subgroup size is in range");
     /// for g in [[9.9, 10.1, 10.0, 9.8, 10.2], [10.3, 9.7, 10.0, 10.1, 9.9]] {
-    ///     chart.add_sample(&g);
+    ///     chart.add_sample(&g).unwrap();
     /// }
     /// let sigma = chart.sigma_hat().expect("limits available");
     /// assert!(sigma > 0.0);
@@ -634,15 +644,11 @@ impl XBarSChart {
 
 impl ControlChart for XBarSChart {
     /// Add a subgroup sample. The sample length must equal the chart's subgroup size.
-    fn add_sample(&mut self, sample: &[f64]) {
-        if sample.len() != self.subgroup_size {
-            return;
-        }
-        if !sample.iter().all(|x| x.is_finite()) {
-            return;
-        }
+    fn add_sample(&mut self, sample: &[f64]) -> Result<(), ControlChartError> {
+        check_sample(sample, self.subgroup_size)?;
         self.subgroups.push(sample.to_vec());
         self.recompute();
+        Ok(())
     }
 
     fn control_limits(&self) -> Option<ControlLimits> {
@@ -690,7 +696,7 @@ impl ControlChart for XBarSChart {
 ///
 /// let mut chart = IndividualMRChart::new();
 /// for &x in &[25.0, 25.2, 24.8, 25.1, 24.9, 25.3, 25.0, 24.7] {
-///     chart.add_sample(&[x]);
+///     chart.add_sample(&[x]).unwrap();
 /// }
 ///
 /// let limits = chart.control_limits().expect("should have limits after 2+ observations");
@@ -773,7 +779,7 @@ impl IndividualMRChart {
     ///
     /// let mut chart = IndividualMRChart::new();
     /// for x in [1.0, 3.0, 2.0] {
-    ///     chart.add_sample(&[x]);
+    ///     chart.add_sample(&[x]).unwrap();
     /// }
     /// // MR-bar = (2 + 1) / 2 = 1.5
     /// let sigma = chart.sigma_hat().expect("limits available");
@@ -876,15 +882,11 @@ impl Default for IndividualMRChart {
 
 impl ControlChart for IndividualMRChart {
     /// Add a single observation. The sample slice must contain exactly one element.
-    fn add_sample(&mut self, sample: &[f64]) {
-        if sample.len() != 1 {
-            return;
-        }
-        if !sample[0].is_finite() {
-            return;
-        }
+    fn add_sample(&mut self, sample: &[f64]) -> Result<(), ControlChartError> {
+        check_sample(sample, 1)?;
         self.observations.push(sample[0]);
         self.recompute();
+        Ok(())
     }
 
     fn control_limits(&self) -> Option<ControlLimits> {
@@ -961,11 +963,11 @@ mod tests {
     #[test]
     fn test_xbar_r_basic_limits() {
         let mut chart = XBarRChart::new(4).expect("subgroup size is in range");
-        chart.add_sample(&[72.0, 84.0, 79.0, 49.0]);
-        chart.add_sample(&[56.0, 87.0, 33.0, 42.0]);
-        chart.add_sample(&[55.0, 73.0, 22.0, 60.0]);
-        chart.add_sample(&[44.0, 80.0, 54.0, 74.0]);
-        chart.add_sample(&[97.0, 26.0, 48.0, 58.0]);
+        chart.add_sample(&[72.0, 84.0, 79.0, 49.0]).unwrap();
+        chart.add_sample(&[56.0, 87.0, 33.0, 42.0]).unwrap();
+        chart.add_sample(&[55.0, 73.0, 22.0, 60.0]).unwrap();
+        chart.add_sample(&[44.0, 80.0, 54.0, 74.0]).unwrap();
+        chart.add_sample(&[97.0, 26.0, 48.0, 58.0]).unwrap();
 
         let limits = chart.control_limits().expect("should have limits");
         // Subgroup means: 71.0, 54.5, 52.5, 63.0, 57.25
@@ -984,23 +986,32 @@ mod tests {
     #[test]
     fn test_xbar_r_rejects_wrong_size() {
         let mut chart = XBarRChart::new(5).expect("subgroup size is in range");
-        chart.add_sample(&[1.0, 2.0, 3.0]); // Wrong size, should be ignored
+        assert_eq!(
+            chart.add_sample(&[1.0, 2.0, 3.0]),
+            Err(ControlChartError::SampleLengthMismatch {
+                expected: 5,
+                got: 3
+            })
+        );
         assert!(chart.control_limits().is_none());
     }
 
     #[test]
     fn test_xbar_r_rejects_nan() {
         let mut chart = XBarRChart::new(3).expect("subgroup size is in range");
-        chart.add_sample(&[1.0, f64::NAN, 3.0]);
+        assert_eq!(
+            chart.add_sample(&[1.0, f64::NAN, 3.0]),
+            Err(ControlChartError::NonFiniteValue)
+        );
         assert!(chart.control_limits().is_none());
     }
 
     #[test]
     fn test_xbar_r_r_chart_limits() {
         let mut chart = XBarRChart::new(5).expect("subgroup size is in range");
-        chart.add_sample(&[10.0, 12.0, 11.0, 13.0, 14.0]);
-        chart.add_sample(&[11.0, 13.0, 12.0, 10.0, 15.0]);
-        chart.add_sample(&[12.0, 11.0, 14.0, 13.0, 10.0]);
+        chart.add_sample(&[10.0, 12.0, 11.0, 13.0, 14.0]).unwrap();
+        chart.add_sample(&[11.0, 13.0, 12.0, 10.0, 15.0]).unwrap();
+        chart.add_sample(&[12.0, 11.0, 14.0, 13.0, 10.0]).unwrap();
 
         let r_limits = chart.r_limits().expect("should have R limits");
         assert!(r_limits.ucl > r_limits.cl);
@@ -1011,8 +1022,8 @@ mod tests {
     fn test_xbar_r_constant_subgroups() {
         // All identical values: R-bar = 0, limits collapse
         let mut chart = XBarRChart::new(3).expect("subgroup size is in range");
-        chart.add_sample(&[10.0, 10.0, 10.0]);
-        chart.add_sample(&[10.0, 10.0, 10.0]);
+        chart.add_sample(&[10.0, 10.0, 10.0]).unwrap();
+        chart.add_sample(&[10.0, 10.0, 10.0]).unwrap();
 
         let limits = chart.control_limits().expect("should have limits");
         assert!((limits.cl - 10.0).abs() < f64::EPSILON);
@@ -1024,10 +1035,10 @@ mod tests {
     fn test_xbar_r_detects_out_of_control() {
         let mut chart = XBarRChart::new(3).expect("subgroup size is in range");
         for _ in 0..5 {
-            chart.add_sample(&[10.0, 10.5, 9.5]);
+            chart.add_sample(&[10.0, 10.5, 9.5]).unwrap();
         }
         // Add an outlier subgroup
-        chart.add_sample(&[50.0, 51.0, 49.0]);
+        chart.add_sample(&[50.0, 51.0, 49.0]).unwrap();
 
         assert!(!chart.is_in_control());
     }
@@ -1148,7 +1159,9 @@ mod tests {
         // running larger subgroups could not use the chart at all.
         let mut chart = XBarRChart::new(11).expect("11 is within 2..=25");
         for _ in 0..5 {
-            chart.add_sample(&[10.0, 10.2, 9.8, 10.1, 9.9, 10.3, 9.7, 10.0, 10.1, 9.9, 10.0]);
+            chart
+                .add_sample(&[10.0, 10.2, 9.8, 10.1, 9.9, 10.3, 9.7, 10.0, 10.1, 9.9, 10.0])
+                .unwrap();
         }
         let limits = chart.control_limits().expect("limits from 5 subgroups");
         assert!(limits.ucl > limits.cl && limits.cl > limits.lcl);
@@ -1160,11 +1173,11 @@ mod tests {
     #[test]
     fn test_xbar_s_basic_limits() {
         let mut chart = XBarSChart::new(4).expect("subgroup size is in range");
-        chart.add_sample(&[72.0, 84.0, 79.0, 49.0]);
-        chart.add_sample(&[56.0, 87.0, 33.0, 42.0]);
-        chart.add_sample(&[55.0, 73.0, 22.0, 60.0]);
-        chart.add_sample(&[44.0, 80.0, 54.0, 74.0]);
-        chart.add_sample(&[97.0, 26.0, 48.0, 58.0]);
+        chart.add_sample(&[72.0, 84.0, 79.0, 49.0]).unwrap();
+        chart.add_sample(&[56.0, 87.0, 33.0, 42.0]).unwrap();
+        chart.add_sample(&[55.0, 73.0, 22.0, 60.0]).unwrap();
+        chart.add_sample(&[44.0, 80.0, 54.0, 74.0]).unwrap();
+        chart.add_sample(&[97.0, 26.0, 48.0, 58.0]).unwrap();
 
         let limits = chart.control_limits().expect("should have limits");
         assert!(limits.ucl > limits.cl);
@@ -1178,7 +1191,13 @@ mod tests {
     #[test]
     fn test_xbar_s_rejects_wrong_size() {
         let mut chart = XBarSChart::new(5).expect("subgroup size is in range");
-        chart.add_sample(&[1.0, 2.0]);
+        assert_eq!(
+            chart.add_sample(&[1.0, 2.0]),
+            Err(ControlChartError::SampleLengthMismatch {
+                expected: 5,
+                got: 2
+            })
+        );
         assert!(chart.control_limits().is_none());
     }
 
@@ -1186,7 +1205,7 @@ mod tests {
     fn test_xbar_s_in_control() {
         let mut chart = XBarSChart::new(4).expect("subgroup size is in range");
         for _ in 0..10 {
-            chart.add_sample(&[10.0, 10.2, 9.8, 10.1]);
+            chart.add_sample(&[10.0, 10.2, 9.8, 10.1]).unwrap();
         }
         assert!(chart.is_in_control());
     }
@@ -1198,7 +1217,7 @@ mod tests {
         let mut chart = IndividualMRChart::new();
         let data = [10.0, 12.0, 11.0, 13.0, 10.0, 14.0, 11.0, 12.0, 13.0, 10.0];
         for &x in &data {
-            chart.add_sample(&[x]);
+            chart.add_sample(&[x]).unwrap();
         }
 
         let limits = chart.control_limits().expect("should have limits");
@@ -1213,7 +1232,7 @@ mod tests {
     #[test]
     fn test_imr_needs_two_points() {
         let mut chart = IndividualMRChart::new();
-        chart.add_sample(&[10.0]);
+        chart.add_sample(&[10.0]).unwrap();
         assert!(chart.control_limits().is_none());
     }
 
@@ -1222,7 +1241,7 @@ mod tests {
         let mut chart = IndividualMRChart::new();
         let data = [5.0, 10.0, 15.0, 20.0, 25.0];
         for &x in &data {
-            chart.add_sample(&[x]);
+            chart.add_sample(&[x]).unwrap();
         }
         let limits = chart.control_limits().expect("should have limits");
         assert!((limits.cl - 15.0).abs() < f64::EPSILON);
@@ -1233,7 +1252,7 @@ mod tests {
         let mut chart = IndividualMRChart::new();
         let data = [10.0, 12.0, 9.0];
         for &x in &data {
-            chart.add_sample(&[x]);
+            chart.add_sample(&[x]).unwrap();
         }
         // MR values: |12-10| = 2, |9-12| = 3
         let mr_pts = chart.mr_points();
@@ -1245,7 +1264,13 @@ mod tests {
     #[test]
     fn test_imr_rejects_multi_element_sample() {
         let mut chart = IndividualMRChart::new();
-        chart.add_sample(&[1.0, 2.0]);
+        assert_eq!(
+            chart.add_sample(&[1.0, 2.0]),
+            Err(ControlChartError::SampleLengthMismatch {
+                expected: 1,
+                got: 2
+            })
+        );
         assert!(chart.points().is_empty());
     }
 
@@ -1253,10 +1278,10 @@ mod tests {
     fn test_imr_detects_out_of_control() {
         let mut chart = IndividualMRChart::new();
         for i in 0..10 {
-            chart.add_sample(&[50.0 + (i as f64 % 3.0) * 0.5]);
+            chart.add_sample(&[50.0 + (i as f64 % 3.0) * 0.5]).unwrap();
         }
         // Add a far outlier
-        chart.add_sample(&[100.0]);
+        chart.add_sample(&[100.0]).unwrap();
 
         assert!(!chart.is_in_control());
     }
@@ -1282,7 +1307,7 @@ mod tests {
         // For n=5: A2=0.577, D3=0.0, D4=2.114
         // Subgroup with mean=50, range=10
         let mut chart = XBarRChart::new(5).expect("subgroup size is in range");
-        chart.add_sample(&[45.0, 47.0, 50.0, 53.0, 55.0]);
+        chart.add_sample(&[45.0, 47.0, 50.0, 53.0, 55.0]).unwrap();
 
         let limits = chart.control_limits().expect("limits");
         assert!((limits.cl - 50.0).abs() < f64::EPSILON);
@@ -1303,8 +1328,8 @@ mod tests {
         // E2 = 2.660
         // Two points with X-bar = 100, MR = |105-95| = 10
         let mut chart = IndividualMRChart::new();
-        chart.add_sample(&[95.0]);
-        chart.add_sample(&[105.0]);
+        chart.add_sample(&[95.0]).unwrap();
+        chart.add_sample(&[105.0]).unwrap();
 
         let limits = chart.control_limits().expect("limits");
         // X-bar = 100
@@ -1392,7 +1417,7 @@ mod tests {
             [10.5, 9.5, 10.0, 10.2, 9.8],
         ];
         for g in &groups {
-            chart.add_sample(g);
+            chart.add_sample(g).unwrap();
         }
         let r_bar = chart.r_limits().expect("limits").cl;
         let expected = r_bar / D2[5 - 2];
@@ -1412,7 +1437,7 @@ mod tests {
             [10.3, 9.7, 10.0, 10.1, 9.9],
             [9.8, 10.2, 10.1, 9.9, 10.0],
         ] {
-            chart.add_sample(g);
+            chart.add_sample(g).unwrap();
         }
         let s_bar = chart.s_limits().expect("limits").cl;
         let expected = s_bar / C4[5 - 2];
@@ -1442,7 +1467,7 @@ mod tests {
         ];
         let mut chart = XBarRChart::new(5).expect("subgroup size is in range");
         for g in &groups {
-            chart.add_sample(g);
+            chart.add_sample(g).unwrap();
         }
         let sigma_within = chart.sigma_hat().expect("sigma-hat");
         let flat: Vec<f64> = groups.iter().flatten().copied().collect();
