@@ -84,14 +84,14 @@ struct LimitsInputDto {
     lcl: f64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 struct PChartDto {
     p_bar: f64,
     points: Vec<AttributeChartPointDto>,
     in_control: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 struct AttributeChartPointDto {
     index: usize,
     value: f64,
@@ -151,13 +151,36 @@ struct AdNormalityDto {
     p_value: f64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 struct LaneyPChartDto {
     p_bar: f64,
     phi: f64,
     points: Vec<AttributeChartPointDto>,
 }
 
+/// NP and C charts: one set of limits for every point.
+#[derive(Serialize, Debug)]
+struct FixedLimitChartDto {
+    cl: f64,
+    ucl: f64,
+    lcl: f64,
+    points: Vec<AttributeChartPointDto>,
+    in_control: bool,
+}
+
+#[derive(Serialize, Debug)]
+struct UChartDto {
+    u_bar: f64,
+    points: Vec<AttributeChartPointDto>,
+    in_control: bool,
+}
+
+#[derive(Serialize, Debug)]
+struct LaneyUChartDto {
+    u_bar: f64,
+    phi: f64,
+    points: Vec<AttributeChartPointDto>,
+}
 #[derive(Serialize)]
 struct GChartDto {
     g_bar: f64,
@@ -600,47 +623,17 @@ fn run_rules_dto(
 /// # Input JSON
 ///
 /// Array of `[defectives, sample_size]` pairs (as integers):
-/// `[[3, 100], [5, 100], ...]`
+/// `[[3, 100], [5, 100], ...]`. A pair with `sample_size == 0`, or with more
+/// defectives than `sample_size`, is rejected with its index.
 ///
 /// # Output JSON
 ///
 /// Object with fields: `p_bar`, `points` (array), `in_control`.
 #[wasm_bindgen]
 pub fn p_chart(samples: JsValue) -> Result<JsValue, JsValue> {
-    use crate::spc::PChart;
-
     let raw: Vec<[u64; 2]> = from_js(samples, "samples (expected [[defectives, size], ...])")?;
-
-    let mut chart = PChart::new();
-    for pair in &raw {
-        chart.add_sample(pair[0], pair[1]);
-    }
-
-    let p_bar = chart
-        .p_bar()
-        .ok_or_else(|| js_err("no valid samples provided"))?;
-
-    let points = chart
-        .points()
-        .iter()
-        .map(|p| AttributeChartPointDto {
-            index: p.index,
-            value: p.value,
-            ucl: p.ucl,
-            cl: p.cl,
-            lcl: p.lcl,
-            out_of_control: p.out_of_control,
-        })
-        .collect();
-
-    let dto = PChartDto {
-        p_bar,
-        points,
-        in_control: chart.is_in_control(),
-    };
-    to_js(&dto)
+    to_js(&p_chart_dto(&raw).map_err(js_err)?)
 }
-
 /// Compute process capability indices (Cp, Cpk, Pp, Ppk, Cpm).
 ///
 /// # Input JSON
@@ -788,7 +781,9 @@ pub fn anderson_darling_normality(data: &[f64]) -> Result<JsValue, JsValue> {
 /// # Input JSON
 ///
 /// Array of `[defectives, sample_size]` pairs:
-/// `[[3, 100], [5, 100], ...]` (need >= 3 subgroups)
+/// `[[3, 100], [5, 100], ...]` (need >= 3 subgroups). A pair with
+/// `sample_size == 0`, or with more defectives than `sample_size`, is rejected
+/// with its index.
 ///
 /// # Output JSON
 ///
@@ -796,14 +791,81 @@ pub fn anderson_darling_normality(data: &[f64]) -> Result<JsValue, JsValue> {
 #[wasm_bindgen]
 pub fn laney_p_chart(samples: JsValue) -> Result<JsValue, JsValue> {
     let raw: Vec<[u64; 2]> = from_js(samples, "samples (expected [[defectives, size], ...])")?;
+    to_js(&laney_p_dto(&raw).map_err(js_err)?)
+}
 
-    let samples: Vec<(u64, u64)> = raw.into_iter().map(|p| (p[0], p[1])).collect();
+/// Compute an NP chart: the count of defectives in samples of one size.
+///
+/// # Input
+///
+/// - `defectives`: `[d1, d2, ...]`, each at most `sample_size`
+/// - `sample_size`: the constant sample size, above 0
+///
+/// # Output JSON
+///
+/// Object with fields: `cl`, `ucl`, `lcl`, `points` (array), `in_control`.
+#[wasm_bindgen]
+pub fn np_chart(defectives: JsValue, sample_size: JsValue) -> Result<JsValue, JsValue> {
+    let defectives: Vec<u64> = from_js(defectives, "defectives")?;
+    let sample_size: u64 = from_js(sample_size, "sample_size")?;
+    to_js(&np_chart_dto(&defectives, sample_size).map_err(js_err)?)
+}
 
-    let chart = crate::spc::laney_p_chart(&samples)
-        .ok_or_else(|| js_err("insufficient data (need >= 3 subgroups) or degenerate p_bar"))?;
+/// Compute a C chart: the count of defects per inspection unit of one size.
+///
+/// # Input JSON
+///
+/// `[c1, c2, ...]` (need >= 1).
+///
+/// # Output JSON
+///
+/// Object with fields: `cl`, `ucl`, `lcl`, `points` (array), `in_control`.
+#[wasm_bindgen]
+pub fn c_chart(defects: JsValue) -> Result<JsValue, JsValue> {
+    let defects: Vec<u64> = from_js(defects, "defects")?;
+    to_js(&c_chart_dto(&defects).map_err(js_err)?)
+}
 
-    let points = chart
-        .points
+/// Compute a U chart: defects per unit when the quantity inspected varies.
+///
+/// # Input JSON
+///
+/// Array of `[defects, units]` pairs. `units` may be fractional (an area, a
+/// length) and must be positive; a pair whose `units` are not is rejected with
+/// its index.
+///
+/// # Output JSON
+///
+/// Object with fields: `u_bar`, `points` (array), `in_control`.
+#[wasm_bindgen]
+pub fn u_chart(samples: JsValue) -> Result<JsValue, JsValue> {
+    let raw: Vec<(u64, f64)> = from_js(samples, "samples (expected [[defects, units], ...])")?;
+    to_js(&u_chart_dto(&raw).map_err(js_err)?)
+}
+
+/// Compute the Laney U' chart from `[defects, units]` pairs (need >= 3).
+///
+/// Adjusts the U chart's limits for overdispersion via a φ correction factor.
+///
+/// # Output JSON
+///
+/// Object with fields: `u_bar`, `phi`, `points` (array).
+#[wasm_bindgen]
+pub fn laney_u_chart(samples: JsValue) -> Result<JsValue, JsValue> {
+    let raw: Vec<(u64, f64)> = from_js(samples, "samples (expected [[defects, units], ...])")?;
+    to_js(&laney_u_dto(&raw).map_err(js_err)?)
+}
+
+// ---------------------------------------------------------------------------
+// Pure cores of the attributes-chart bindings
+// ---------------------------------------------------------------------------
+//
+// Every attributes chart drops a row it cannot use, and every later point then
+// carries the index of the wrong row. The cores refuse such a row by its index
+// before the chart sees it.
+
+fn attribute_point_dtos(points: &[crate::spc::AttributeChartPoint]) -> Vec<AttributeChartPointDto> {
+    points
         .iter()
         .map(|p| AttributeChartPointDto {
             index: p.index,
@@ -813,16 +875,145 @@ pub fn laney_p_chart(samples: JsValue) -> Result<JsValue, JsValue> {
             lcl: p.lcl,
             out_of_control: p.out_of_control,
         })
-        .collect();
-
-    let dto = LaneyPChartDto {
-        p_bar: chart.p_bar,
-        phi: chart.phi,
-        points,
-    };
-    to_js(&dto)
+        .collect()
 }
 
+fn laney_point_dtos(points: &[crate::spc::LaneyAttributePoint]) -> Vec<AttributeChartPointDto> {
+    points
+        .iter()
+        .map(|p| AttributeChartPointDto {
+            index: p.index,
+            value: p.value,
+            ucl: p.ucl,
+            cl: p.cl,
+            lcl: p.lcl,
+            out_of_control: p.out_of_control,
+        })
+        .collect()
+}
+
+/// `[defectives, sample_size]` pairs as `(defectives, sample_size)`, refusing
+/// a pair that has no proportion.
+fn proportion_samples(raw: &[[u64; 2]]) -> Result<Vec<(u64, u64)>, String> {
+    raw.iter()
+        .enumerate()
+        .map(|(i, &[d, n])| {
+            if n == 0 || d > n {
+                Err(format!(
+                    "samples[{i}]: {d} defectives out of {n} -- each sample needs a size \
+                     above 0 and at most that many defectives"
+                ))
+            } else {
+                Ok((d, n))
+            }
+        })
+        .collect()
+}
+
+/// Refuses a `[defects, units]` pair whose units are not a positive number.
+fn check_rate_samples(raw: &[(u64, f64)]) -> Result<(), String> {
+    match raw.iter().position(|&(_, u)| !(u.is_finite() && u > 0.0)) {
+        Some(i) => Err(format!(
+            "samples[{i}]: units must be a positive number, got {}",
+            raw[i].1
+        )),
+        None => Ok(()),
+    }
+}
+
+fn p_chart_dto(raw: &[[u64; 2]]) -> Result<PChartDto, String> {
+    use crate::spc::PChart;
+
+    let samples = proportion_samples(raw)?;
+    let mut chart = PChart::new();
+    for &(d, n) in &samples {
+        chart.add_sample(d, n);
+    }
+    let p_bar = chart.p_bar().ok_or("no samples provided")?;
+    Ok(PChartDto {
+        p_bar,
+        points: attribute_point_dtos(chart.points()),
+        in_control: chart.is_in_control(),
+    })
+}
+
+fn laney_p_dto(raw: &[[u64; 2]]) -> Result<LaneyPChartDto, String> {
+    let samples = proportion_samples(raw)?;
+    let chart = crate::spc::laney_p_chart(&samples).ok_or("at least 3 samples are needed")?;
+    Ok(LaneyPChartDto {
+        p_bar: chart.p_bar,
+        phi: chart.phi,
+        points: laney_point_dtos(&chart.points),
+    })
+}
+
+fn np_chart_dto(defectives: &[u64], sample_size: u64) -> Result<FixedLimitChartDto, String> {
+    use crate::spc::NPChart;
+
+    let mut chart = NPChart::new(sample_size).map_err(|e| e.to_string())?;
+    if let Some(i) = defectives.iter().position(|&d| d > sample_size) {
+        return Err(format!(
+            "defectives[{i}] is {}, more than sample_size {sample_size}",
+            defectives[i]
+        ));
+    }
+    for &d in defectives {
+        chart.add_sample(d);
+    }
+    let (ucl, cl, lcl) = chart
+        .control_limits()
+        .ok_or("defectives must not be empty")?;
+    Ok(FixedLimitChartDto {
+        cl,
+        ucl,
+        lcl,
+        points: attribute_point_dtos(chart.points()),
+        in_control: chart.is_in_control(),
+    })
+}
+
+fn c_chart_dto(defects: &[u64]) -> Result<FixedLimitChartDto, String> {
+    use crate::spc::CChart;
+
+    let mut chart = CChart::new();
+    for &c in defects {
+        chart.add_sample(c);
+    }
+    let (ucl, cl, lcl) = chart.control_limits().ok_or("defects must not be empty")?;
+    Ok(FixedLimitChartDto {
+        cl,
+        ucl,
+        lcl,
+        points: attribute_point_dtos(chart.points()),
+        in_control: chart.is_in_control(),
+    })
+}
+
+fn u_chart_dto(raw: &[(u64, f64)]) -> Result<UChartDto, String> {
+    use crate::spc::UChart;
+
+    check_rate_samples(raw)?;
+    let mut chart = UChart::new();
+    for &(d, u) in raw {
+        chart.add_sample(d, u);
+    }
+    let u_bar = chart.u_bar().ok_or("samples must not be empty")?;
+    Ok(UChartDto {
+        u_bar,
+        points: attribute_point_dtos(chart.points()),
+        in_control: chart.is_in_control(),
+    })
+}
+
+fn laney_u_dto(raw: &[(u64, f64)]) -> Result<LaneyUChartDto, String> {
+    check_rate_samples(raw)?;
+    let chart = crate::spc::laney_u_chart(raw).ok_or("at least 3 samples are needed")?;
+    Ok(LaneyUChartDto {
+        u_bar: chart.u_bar,
+        phi: chart.phi,
+        points: laney_point_dtos(&chart.points),
+    })
+}
 /// Compute the G chart for rare-event monitoring (inter-event conforming counts).
 ///
 /// Suitable when defect rates are very low (< 1%).
@@ -1758,5 +1949,94 @@ mod binding_contract_tests {
         .err()
         .expect("unknown key");
         assert!(e.contains("unknown field"), "{e}");
+    }
+
+    // --- #220: attributes charts ---
+
+    #[test]
+    fn np_chart_reports_the_crate_chart() {
+        use crate::spc::NPChart;
+        let defectives = [5, 8, 3, 6, 4, 7, 2, 9, 5, 6];
+        let d = np_chart_dto(&defectives, 100).expect("valid");
+        let mut chart = NPChart::new(100).expect("valid size");
+        for &x in &defectives {
+            chart.add_sample(x);
+        }
+        let (ucl, cl, lcl) = chart.control_limits().expect("limits");
+        assert_eq!((d.ucl, d.cl, d.lcl), (ucl, cl, lcl));
+        assert_eq!(d.points.len(), defectives.len());
+        assert_eq!(d.in_control, chart.is_in_control());
+    }
+
+    #[test]
+    fn np_chart_refuses_rows_it_cannot_chart() {
+        let e = np_chart_dto(&[5, 101, 3], 100).expect_err("more defectives than inspected");
+        assert!(e.contains("defectives[1]"), "{e}");
+        // A zero sample size is a value, not a panic that would trap the module.
+        let e = np_chart_dto(&[0, 0], 0).expect_err("nothing inspected");
+        assert!(e.contains("sample size"), "{e}");
+    }
+
+    #[test]
+    fn c_chart_reports_the_crate_chart() {
+        use crate::spc::CChart;
+        let defects = [3, 5, 2, 4, 6, 3, 1, 4];
+        let d = c_chart_dto(&defects).expect("valid");
+        let mut chart = CChart::new();
+        for &x in &defects {
+            chart.add_sample(x);
+        }
+        let (ucl, cl, lcl) = chart.control_limits().expect("limits");
+        assert_eq!((d.ucl, d.cl, d.lcl), (ucl, cl, lcl));
+        assert!(c_chart_dto(&[]).is_err());
+    }
+
+    #[test]
+    fn u_chart_reports_the_crate_chart_and_refuses_empty_units() {
+        use crate::spc::UChart;
+        let samples = [(3, 1.0), (5, 1.5), (2, 0.8), (4, 1.2)];
+        let d = u_chart_dto(&samples).expect("valid");
+        let mut chart = UChart::new();
+        for &(x, u) in &samples {
+            chart.add_sample(x, u);
+        }
+        assert_eq!(Some(d.u_bar), chart.u_bar());
+        assert_eq!(d.points.len(), samples.len());
+
+        let e = u_chart_dto(&[(3, 1.0), (5, 0.0), (2, 0.8)]).expect_err("zero units");
+        assert!(e.contains("samples[1]"), "{e}");
+    }
+
+    #[test]
+    fn laney_u_chart_reports_the_crate_chart() {
+        let samples = [(3, 1.0), (5, 1.5), (2, 0.8), (4, 1.2), (6, 1.1)];
+        let d = laney_u_dto(&samples).expect("valid");
+        let expected = crate::spc::laney_u_chart(&samples).expect("valid");
+        assert_eq!((d.u_bar, d.phi), (expected.u_bar, expected.phi));
+        assert!(laney_u_dto(&samples[..2]).is_err(), "fewer than 3 samples");
+        let e = laney_u_dto(&[(3, 1.0), (5, -1.0), (2, 0.8)]).expect_err("negative units");
+        assert!(e.contains("samples[1]"), "{e}");
+    }
+
+    /// `p_chart` used to hand every pair to the chart, which dropped the ones
+    /// it could not use -- shifting the index of every later point.
+    #[test]
+    fn p_chart_refuses_a_sample_with_no_proportion() {
+        let e = p_chart_dto(&[[3, 100], [12, 10], [4, 100]]).expect_err("12 of 10");
+        assert!(e.contains("samples[1]"), "{e}");
+        let e = p_chart_dto(&[[3, 100], [0, 0]]).expect_err("0 of 0");
+        assert!(e.contains("samples[1]"), "{e}");
+        let ok = p_chart_dto(&[[3, 100], [5, 120], [2, 80]]).expect("valid");
+        assert_eq!(ok.points.len(), 3);
+    }
+
+    #[test]
+    fn laney_p_chart_refuses_a_sample_with_no_proportion() {
+        let e = laney_p_dto(&[[3, 100], [0, 0], [4, 100], [2, 100]]).expect_err("0 of 0");
+        assert!(e.contains("samples[1]"), "{e}");
+        assert!(
+            laney_p_dto(&[[3, 100], [5, 120]]).is_err(),
+            "fewer than 3 samples"
+        );
     }
 }

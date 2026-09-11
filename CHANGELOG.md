@@ -35,6 +35,11 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   handed, so rejecting it is an ordinary outcome rather than a contract
   violation -- and a boundary that cannot unwind, such as the WebAssembly
   entry points, needs it as a value.
+- **Breaking:** `NPChart::new` returns `Result<Self, ControlChartError>`
+  instead of panicking on a sample size of zero, for the same reason as the
+  subgroup charts: the size comes from data. `ControlChartError` gains
+  `ZeroSampleSize` and is now `#[non_exhaustive]`, so a later variant is not a
+  breaking change.
 - The WebAssembly `xbar_r_chart` binding no longer states the supported
   subgroup range itself. It carried a second copy of the same literal bound, so
   widening the tables would have left the binding rejecting sizes the crate had
@@ -71,6 +76,7 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 - WebAssembly `run_rules(values, limits, options?)` -- the run-test engine on
   its own, against caller-supplied limits. Given a chart's points and limits it
   reports exactly what the chart reported.
+- WebAssembly `np_chart`, `c_chart`, `u_chart` and `laney_u_chart`.
 - C FFI `uanalytics_xbar_r_chart` returns `sigma_hat`, and
   `uanalytics_process_capability` accepts `sigma_within` and reports
   `sigma_source` (`"within"` or `"moving_range"`).
@@ -102,6 +108,15 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 - The README's X-bar-R example had stopped compiling when `XBarRChart::new`
   began returning `Result`. The README's Rust examples now run with the
   doc-tests.
+- `laney_p_chart` returns `None` for a sample with nothing inspected or more
+  defectives than inspected. It checked only the total, so one such sample made
+  phi and every limit NaN -- and with NaN limits no point compares as out of
+  control, so the chart read as in control. Its documentation also said a
+  degenerate `p_bar` of 0 or 1 returns `None`; it returns a zero-width chart,
+  and now says so.
+- The WebAssembly `p_chart` and `laney_p_chart` reject a sample with nothing
+  inspected or more defectives than inspected, naming its index. `p_chart`
+  dropped such a sample, which shifted the index of every point after it.
 
 ## [0.8.0] - 2026-09-10
 

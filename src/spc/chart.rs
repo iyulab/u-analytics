@@ -148,6 +148,7 @@ pub const MAX_SUBGROUP_SIZE: usize = 25;
 
 /// Errors returned when a control chart cannot be constructed.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ControlChartError {
     /// The requested subgroup size is outside the range the factor tables cover.
     ///
@@ -162,6 +163,8 @@ pub enum ControlChartError {
         /// Largest supported size.
         max: usize,
     },
+    /// A sample size of zero: there is nothing to take a proportion of.
+    ZeroSampleSize,
 }
 
 impl fmt::Display for ControlChartError {
@@ -170,6 +173,7 @@ impl fmt::Display for ControlChartError {
             ControlChartError::SubgroupSizeOutOfRange { got, min, max } => {
                 write!(f, "subgroup size must be {min}..={max}, got {got}")
             }
+            ControlChartError::ZeroSampleSize => write!(f, "sample size must be at least 1"),
         }
     }
 }

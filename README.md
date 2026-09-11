@@ -274,6 +274,31 @@ run_rules([10.1, 10.4, 9.8, 12.9], { ucl: 12, cl: 10, lcl: 8 });
 Given a chart's own points and limits, it finds exactly the violations the chart
 reported.
 
+### Attributes charts
+
+```ts
+type AttrPoint = { index: number, value: number, ucl: number, cl: number, lcl: number,
+                   out_of_control: boolean };
+
+np_chart(defectives: number[], sample_size: number):
+  { cl: number, ucl: number, lcl: number, points: AttrPoint[], in_control: boolean }
+c_chart(defects: number[]):
+  { cl: number, ucl: number, lcl: number, points: AttrPoint[], in_control: boolean }
+u_chart(samples: [defects: number, units: number][]):
+  { u_bar: number, points: AttrPoint[], in_control: boolean }
+laney_u_chart(samples: [defects: number, units: number][]):   // at least 3 samples
+  { u_bar: number, phi: number, points: AttrPoint[] }
+```
+
+`p_chart` and `laney_p_chart` take `[defectives, size]` pairs, as before. These
+charts judge each point against its limits only; to apply the run tests to an
+NP or C chart, whose limits are constant, pass its points to `run_rules`.
+
+A row the chart cannot use -- more defectives than the sample size, a sample
+size of zero, `units` that are not positive -- is rejected with its index. The
+charts would otherwise drop it, and every later point would carry the index of
+the wrong row.
+
 ## Test Status
 
 ```text

@@ -194,17 +194,22 @@ pub struct NPChart {
 impl NPChart {
     /// Create a new NP chart with a constant sample size.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if `sample_size == 0`.
-    pub fn new(sample_size: u64) -> Self {
-        assert!(sample_size > 0, "sample_size must be > 0");
-        Self {
+    /// Returns [`ControlChartError::ZeroSampleSize`](crate::spc::ControlChartError::ZeroSampleSize)
+    /// when `sample_size == 0`. The size usually comes from data, so this is an
+    /// ordinary outcome rather than a contract violation -- and a boundary that
+    /// cannot unwind, such as the WebAssembly entry points, needs it as a value.
+    pub fn new(sample_size: u64) -> Result<Self, super::chart::ControlChartError> {
+        if sample_size == 0 {
+            return Err(super::chart::ControlChartError::ZeroSampleSize);
+        }
+        Ok(Self {
             sample_size,
             defective_counts: Vec::new(),
             chart_points: Vec::new(),
             limits: None,
-        }
+        })
     }
 
     /// Add a defective count for one subgroup.
@@ -557,8 +562,10 @@ pub struct LaneyUChart {
 ///
 /// # Returns
 ///
-/// `None` if fewer than 3 subgroups are provided, if all sample sizes are zero,
-/// or if p̄ is 0 or 1 (degenerate cases where σ = 0).
+/// `None` if fewer than 3 subgroups are provided, or if any sample has a size
+/// of zero or more defectives than its size. When p̄ is 0 or 1 there is no
+/// variation to scale (σ = 0): the chart comes back with φ = 0 and every limit
+/// on the centre line.
 ///
 /// # Reference
 ///
@@ -568,12 +575,15 @@ pub fn laney_p_chart(samples: &[(u64, u64)]) -> Option<LaneyPChart> {
     if samples.len() < 3 {
         return None;
     }
+    // Checked per sample, not only in total: one sample with nothing inspected
+    // makes its z-score NaN, and a NaN phi puts every limit at NaN -- where no
+    // point compares as out of control and the chart reads as in control.
+    if samples.iter().any(|&(d, n)| n == 0 || d > n) {
+        return None;
+    }
 
     let total_defectives: u64 = samples.iter().map(|&(d, _)| d).sum();
     let total_inspected: u64 = samples.iter().map(|&(_, n)| n).sum();
-    if total_inspected == 0 {
-        return None;
-    }
 
     let p_bar = total_defectives as f64 / total_inspected as f64;
     // Degenerate: σ = 0 means all proportions are exactly p̄ — φ computation is undefined.
@@ -584,7 +594,7 @@ pub fn laney_p_chart(samples: &[(u64, u64)]) -> Option<LaneyPChart> {
             .iter()
             .enumerate()
             .map(|(i, &(d, n))| {
-                let value = if n > 0 { d as f64 / n as f64 } else { p_bar };
+                let value = d as f64 / n as f64;
                 LaneyAttributePoint {
                     index: i,
                     value,
@@ -1063,7 +1073,7 @@ mod tests {
 
     #[test]
     fn test_np_chart_basic() {
-        let mut chart = NPChart::new(100);
+        let mut chart = NPChart::new(100).expect("100 is a valid sample size");
         let defectives = [5, 8, 3, 6, 4, 7, 2, 9, 5, 6];
         for &d in &defectives {
             chart.add_sample(d);
@@ -1079,20 +1089,22 @@ mod tests {
 
     #[test]
     fn test_np_chart_rejects_invalid() {
-        let mut chart = NPChart::new(100);
+        let mut chart = NPChart::new(100).expect("100 is a valid sample size");
         chart.add_sample(101); // More defectives than sample size
         assert!(chart.control_limits().is_none());
     }
 
     #[test]
-    #[should_panic(expected = "sample_size must be > 0")]
     fn test_np_chart_zero_sample_size() {
-        let _ = NPChart::new(0);
+        assert!(matches!(
+            NPChart::new(0),
+            Err(crate::spc::ControlChartError::ZeroSampleSize)
+        ));
     }
 
     #[test]
     fn test_np_chart_out_of_control() {
-        let mut chart = NPChart::new(100);
+        let mut chart = NPChart::new(100).expect("100 is a valid sample size");
         for _ in 0..20 {
             chart.add_sample(5);
         }
@@ -1107,7 +1119,7 @@ mod tests {
         // sigma = sqrt(200 * 0.05 * 0.95) = sqrt(9.5) ≈ 3.082
         // UCL = 10 + 3*3.082 = 19.246
         // LCL = 10 - 3*3.082 = 0.754
-        let mut chart = NPChart::new(200);
+        let mut chart = NPChart::new(200).expect("200 is a valid sample size");
         for _ in 0..10 {
             chart.add_sample(10);
         }
@@ -1276,7 +1288,7 @@ mod tests {
     fn test_p_and_np_consistent() {
         // P chart with constant n should give equivalent results to NP chart
         let mut p_chart = PChart::new();
-        let mut np_chart = NPChart::new(100);
+        let mut np_chart = NPChart::new(100).expect("100 is a valid sample size");
 
         let defectives = [5, 8, 3, 6, 4];
         for &d in &defectives {
@@ -1356,6 +1368,15 @@ mod tests {
     }
 
     #[test]
+    fn laney_p_rejects_a_sample_with_no_proportion() {
+        // One sample with nothing inspected divides by zero: its z-score is not
+        // a number, so phi and every limit become NaN, no point compares as out
+        // of control, and the chart reads as in control.
+        assert!(laney_p_chart(&[(3, 100), (0, 0), (4, 100), (2, 100)]).is_none());
+        // More defectives than inspected is not a proportion either.
+        assert!(laney_p_chart(&[(3, 100), (12, 10), (4, 100), (2, 100)]).is_none());
+    }
+    #[test]
     fn laney_u_basic() {
         let samples: Vec<(u64, f64)> = vec![(5, 10.0); 10];
         let chart = laney_u_chart(&samples).expect("chart should be Some");
@@ -1429,7 +1450,7 @@ mod tests {
     #[test]
     fn np_chart_montgomery_reference() {
         // 20 samples of n=100, total defectives=198 → p̄=0.099, np̄=9.9
-        let mut chart = NPChart::new(100);
+        let mut chart = NPChart::new(100).expect("100 is a valid sample size");
         for _ in 0..19 {
             chart.add_sample(10);
         }
