@@ -63,6 +63,39 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   so a caller can validate a subgroup size before building a chart and can match
   on the rejection rather than parsing a message.
 - `Debug` and `Clone` on `XBarRChart`, `XBarSChart` and `IndividualMRChart`.
+- `IndividualMRChart::sigma_hat` -- `MR-bar / d2(2)`, the within sigma for
+  individual observations. The subgroup charts already had theirs.
+- C FFI `uanalytics_xbar_r_chart` returns `sigma_hat`, and
+  `uanalytics_process_capability` accepts `sigma_within` and reports
+  `sigma_source` (`"within"` or `"moving_range"`).
+
+### Fixed
+
+- **Breaking (C FFI):** a rejected request now returns its failure status
+  (`-2` malformed JSON, `-3` rejected input). It returned `0` with an
+  `{"error": ...}` body, so a caller that branches on the status -- the C#
+  client does -- received the error as a successful result.
+- The C FFI X-bar-R, P and capability entry points carried their own
+  arithmetic instead of calling the crate. They now delegate:
+  - `uanalytics_xbar_r_chart` accepted only n <= 10 with three-decimal
+    constants after the crate reached n = 25. It now rejects ragged or
+    non-finite subgroups rather than letting the chart skip them, since its
+    response arrays carry no index and a skipped subgroup would shift every
+    later value onto the wrong row.
+  - `uanalytics_p_chart` rejects a sample with nothing inspected or more
+    defectives than inspected; it used to report a proportion above 1 or NaN.
+  - `uanalytics_process_capability` still estimates the within sigma from the
+    moving range when none is given, but through the crate's I-MR chart rather
+    than its own `d2` literal, and it now says so in `sigma_source`.
+- C FFI `uanalytics_laney_p_chart` passed its `[inspected, defective]` pairs to
+  a function that takes `(defective, sample_size)`, so every request was
+  computed in reverse.
+- C FFI `uanalytics_detect_changepoints` documented `"AIC"` and `"MBIC"`
+  penalties and computed `BIC` for both, as it did for any unrecognised string.
+  It now accepts `"BIC"` or a number and rejects anything else.
+- The README's X-bar-R example had stopped compiling when `XBarRChart::new`
+  began returning `Result`. The README's Rust examples now run with the
+  doc-tests.
 
 ## [0.8.0] - 2026-09-10
 

@@ -38,7 +38,7 @@ Control charts for monitoring process stability:
 ```rust
 use u_analytics::spc::{XBarRChart, ControlChart};
 
-let mut chart = XBarRChart::new(5);
+let mut chart = XBarRChart::new(5).expect("5 is a supported subgroup size");
 chart.add_sample(&[25.0, 26.0, 24.5, 25.5, 25.0]);
 chart.add_sample(&[25.2, 24.8, 25.1, 24.9, 25.3]);
 chart.add_sample(&[25.1, 25.0, 24.7, 25.3, 24.9]);
@@ -222,8 +222,8 @@ choice is `RuleSet`, passed to a chart with `with_rules`.
 
 ## Test Status
 
-```
-549 lib tests + 77 doc-tests = 626 total
+```text
+556 lib tests (567 with `ffi`, 572 with `wasm`) + 88 doc-tests
 0 clippy warnings
 ```
 

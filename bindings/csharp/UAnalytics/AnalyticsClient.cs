@@ -33,9 +33,17 @@ public sealed class AnalyticsClient : IDisposable
 
     // ── Capability ──
 
-    public JsonElement ProcessCapability(double[] data, double? usl, double? lsl, double? target = null)
+    /// <summary>
+    /// Capability indices. <paramref name="sigmaWithin"/> is the short-term sigma from a
+    /// control chart (the <c>sigma_hat</c> that <see cref="XbarRChart"/> returns); when it is
+    /// omitted the engine estimates one from the moving range of <paramref name="data"/> in
+    /// order, and the result's <c>sigma_source</c> is <c>"moving_range"</c> instead of
+    /// <c>"within"</c>.
+    /// </summary>
+    public JsonElement ProcessCapability(double[] data, double? usl, double? lsl, double? target = null,
+        double? sigmaWithin = null)
         => CallNative(NativeInterop.uanalytics_process_capability,
-            new { data, usl, lsl, target });
+            new { data, usl, lsl, target, sigma_within = sigmaWithin });
 
     public JsonElement PercentileCapability(double[] data, double? usl, double? lsl)
         => CallNative(NativeInterop.uanalytics_percentile_capability,

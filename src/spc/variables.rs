@@ -77,7 +77,6 @@ const D4: [f64; 24] = [
 ///
 /// Montgomery, D.C. (2020). *Introduction to Statistical Quality Control*, 8th ed.,
 /// Appendix Table VI.
-#[allow(dead_code)]
 const D2: [f64; 24] = [
     // d2(2) is exactly 2/sqrt(pi): the range of two standard normals is
     // |N(0, 2)|, whose mean is sqrt(2) * sqrt(2/pi).
@@ -141,7 +140,6 @@ const B4: [f64; 24] = [
 ///
 /// Montgomery, D.C. (2020). *Introduction to Statistical Quality Control*, 8th ed.,
 /// Appendix Table VI.
-#[allow(dead_code)]
 const C4: [f64; 24] = [
     0.7979, 0.8862, 0.9213, 0.9400, 0.9515, 0.9594, 0.9650, 0.9693, 0.9727, 0.9754, 0.9776, 0.9794,
     0.9810, 0.9823, 0.9835, 0.9845, 0.9854, 0.9862, 0.9869, 0.9876, 0.9882, 0.9887, 0.9892, 0.9896,
@@ -163,7 +161,10 @@ const D4_MR: f64 = 3.267;
 /// X-bar and Range (X-bar-R) control chart.
 ///
 /// Monitors the process mean (X-bar chart) and process variability (R chart)
-/// using subgroup ranges. Suitable for subgroup sizes n = 2..=10.
+/// using subgroup ranges. Accepts subgroup sizes
+/// `MIN_SUBGROUP_SIZE..=MAX_SUBGROUP_SIZE`; above about n = 10 the range
+/// discards enough of each subgroup's information that [`XBarSChart`] is the
+/// usual choice.
 ///
 /// # Algorithm
 ///
@@ -193,7 +194,7 @@ const D4_MR: f64 = 3.267;
 /// Chapter 6: Control Charts for Variables.
 #[derive(Debug, Clone)]
 pub struct XBarRChart {
-    /// Fixed subgroup size (2..=10).
+    /// Fixed subgroup size, within `MIN_SUBGROUP_SIZE..=MAX_SUBGROUP_SIZE`.
     subgroup_size: usize,
     /// Stored subgroups.
     subgroups: Vec<Vec<f64>>,
@@ -442,7 +443,7 @@ impl ControlChart for XBarRChart {
 /// Chapter 6: Control Charts for Variables.
 #[derive(Debug, Clone)]
 pub struct XBarSChart {
-    /// Fixed subgroup size (2..=10).
+    /// Fixed subgroup size, within `MIN_SUBGROUP_SIZE..=MAX_SUBGROUP_SIZE`.
     subgroup_size: usize,
     /// Stored subgroups.
     subgroups: Vec<Vec<f64>>,
@@ -753,6 +754,34 @@ impl IndividualMRChart {
             mr_limits: None,
             rules: RuleSet::default(),
         }
+    }
+
+    /// Short-term sigma estimated from this chart:
+    /// `sigma-hat = MR-bar / d2(2)`.
+    ///
+    /// The moving range of consecutive observations is a range of two, so
+    /// `d2(2) = 2/sqrt(pi)` is the unbiasing constant. This is the within
+    /// sigma a capability study of individual observations uses, and the
+    /// counterpart of [`XBarRChart::sigma_hat`] for subgroups of one.
+    ///
+    /// Returns `None` if there is not enough data for control limits.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::spc::{ControlChart, IndividualMRChart};
+    ///
+    /// let mut chart = IndividualMRChart::new();
+    /// for x in [1.0, 3.0, 2.0] {
+    ///     chart.add_sample(&[x]);
+    /// }
+    /// // MR-bar = (2 + 1) / 2 = 1.5
+    /// let sigma = chart.sigma_hat().expect("limits available");
+    /// assert!((sigma - 1.5 / (2.0 / std::f64::consts::PI.sqrt())).abs() < 1e-12);
+    /// ```
+    pub fn sigma_hat(&self) -> Option<f64> {
+        let mr_bar = self.mr_limits.as_ref()?.cl;
+        Some(mr_bar / D2[0])
     }
 
     /// Get the MR chart control limits, or `None` if insufficient data.

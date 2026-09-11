@@ -165,3 +165,22 @@ jobs:
       - run: cargo clippy --features wasm --all-targets -- -D warnings
       - name: Compile the binding for its real target
         run: cargo check --features wasm --target wasm32-unknown-unknown
+
+  ffi:
+    name: C FFI Binding
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # `src/ffi.rs` is behind the `ffi` feature and was compiled only by the
+      # NuGet release workflow -- after the version was already bumped. Its
+      # wire-contract tests drive the exported symbols the way a C caller does.
+      - name: Binding contract tests
+        run: cargo test --features ffi --lib
+      - run: cargo clippy --features ffi --all-targets -- -D warnings

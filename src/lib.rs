@@ -42,3 +42,11 @@ pub mod wasm;
 
 #[cfg(feature = "ffi")]
 pub mod ffi;
+
+// The README's Rust examples are the first code most users copy, so they are
+// compiled and run with the doc-tests. Without this they were checked by
+// nothing, and one stopped compiling when a constructor began returning
+// `Result` without any test noticing.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+pub struct ReadmeDoctests;
