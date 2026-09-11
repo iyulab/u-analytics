@@ -85,6 +85,22 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Fixed
 
+- **Breaking:** Cpm is computed against a declared target only, and from the
+  spread of the data about that target. It was derived from Cp, so it inherited
+  Cp's within-subgroup sigma, and without a target it was measured against the
+  specification midpoint. Chan, Cheng & Spiring (1988) define it through
+  `sqrt(sum((x_i - T)^2) / (n - 1))`, and Minitab reports it only when a target
+  is given. Now:
+  - `cpm` is `None` without `with_target`, when the target lies outside the
+    limits, or when every observation equals the target;
+  - the numerator is `min(T - LSL, USL - T) / 3`, which is `(USL - LSL) / 6`
+    when the target is the midpoint;
+  - `compute` and `compute_overall` give the same `cpm`, and the WebAssembly
+    `process_capability` returns it whether or not `sigma_within` is supplied.
+
+  For `[9.8, 10.1, 10.3, 9.9, 10.2, 10.4]` with limits 8 and 12 and a within
+  sigma of 0.2, 0.8.0 reported 2.8793 with no target; it now reports none, and
+  2.5198 against a declared target of 10.
 - **Breaking (C FFI):** a rejected request now returns its failure status
   (`-2` malformed JSON, `-3` rejected input). It returned `0` with an
   `{"error": ...}` body, so a caller that branches on the status -- the C#

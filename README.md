@@ -158,7 +158,7 @@ process_capability({
   usl?: number,          // at least one of usl / lsl is required
   lsl?: number,
   sigma_within?: number, // short-term sigma, e.g. R-bar / d2
-  target?: number,       // Cpm target; defaults to the specification midpoint
+  target?: number,       // Cpm target; without it `cpm` is null
 }): {
   mean: number,
   sigma_source: "within" | "overall",
@@ -174,10 +174,15 @@ process_capability({
 within-subgroup standard deviation, which is estimated from a control chart
 (R-bar/d2 or S-bar/c4) and is *not* recoverable from a flat measurement vector —
 the subgroup structure is gone. Omit `sigma_within` and `sigma_source` comes
-back as `"overall"` with `cp`, `cpk`, `cpu`, `cpl`, `cpm` and `std_dev_within`
-all `null`: only the long-term indices (Pp/Ppk) are reported. Filling the
+back as `"overall"` with `cp`, `cpk`, `cpu`, `cpl` and `std_dev_within` all
+`null`: only the long-term indices (Pp/Ppk) are reported. Filling the
 short-term names with the long-term sigma instead would make `cp` equal `pp`
 for every input.
+
+**Cpm needs a `target`.** It measures how closely the data cluster about the
+target -- `min(T - LSL, USL - T) / (3 * sqrt(sum((x - T)^2) / (n - 1)))` -- so it
+uses neither sigma and is reported with or without `sigma_within`. Without a
+`target` it is `null`; pass the specification midpoint if that is the target.
 
 `xbar_r_chart` returns `sigma_hat` (`R-bar / d2`) for exactly this purpose, so
 the two compose:

@@ -374,6 +374,9 @@ struct CapabilityRequest {
 /// used -- `"within"` or `"moving_range"` -- so the assumption is visible
 /// rather than folded silently into `cp`.
 ///
+/// `cpm` is `null` unless both limits and a `target` are given; it uses
+/// neither sigma, but the spread of `data` about the target.
+///
 /// # Safety
 ///
 /// `request_json` must be null or point to a NUL-terminated string, and

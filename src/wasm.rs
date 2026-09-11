@@ -118,7 +118,7 @@ struct CapabilityInputDto {
     /// subgroup structure is not in a flat measurement vector.
     #[serde(default)]
     sigma_within: Option<f64>,
-    /// Process target for Cpm. Defaults to the specification midpoint.
+    /// Process target for Cpm. Without it `cpm` is `null`.
     #[serde(default)]
     target: Option<f64>,
 }
@@ -653,8 +653,9 @@ pub fn p_chart(samples: JsValue) -> Result<JsValue, JsValue> {
 /// subgroup structure. Omit it and the short-term indices are reported as
 /// `null` rather than being computed from the long-term sigma.
 ///
-/// `target` sets the Cpm target. Omit it and the specification midpoint is
-/// used, which is what Cpm falls back to when no target is declared.
+/// `target` sets the Cpm target. Omit it and `cpm` is `null`: Cpm measures
+/// clustering about a declared target, and one substituted on the caller's
+/// behalf could not be told apart from it in the result.
 ///
 /// # Output JSON
 ///
@@ -665,9 +666,11 @@ pub fn p_chart(samples: JsValue) -> Result<JsValue, JsValue> {
 ///
 /// `sigma_source` is `"within"` when `sigma_within` was supplied and
 /// `"overall"` otherwise. In the `"overall"` case `std_dev_within`, `cp`,
-/// `cpk`, `cpu`, `cpl` and `cpm` are all `null`: the short-term indices are
+/// `cpk`, `cpu` and `cpl` are all `null`: the short-term indices are
 /// undefined without a short-term sigma, and reporting the long-term one in
-/// their place would make `cp` equal `pp` for every input.
+/// their place would make `cp` equal `pp` for every input. `cpm` uses neither
+/// sigma -- it is the spread of `data` about `target` -- so it is reported in
+/// both cases.
 #[wasm_bindgen]
 pub fn process_capability(input: JsValue) -> Result<JsValue, JsValue> {
     let input: CapabilityInputDto = from_js(input, "input")?;
@@ -742,7 +745,9 @@ fn capability_dto(input: CapabilityInputDto) -> Result<CapabilityDto, String> {
                 ppk: indices.ppk,
                 ppu: indices.ppu,
                 ppl: indices.ppl,
-                cpm: None,
+                // Not a short-term index: Cpm is the spread about the target,
+                // the same whichever sigma the caller could supply.
+                cpm: indices.cpm,
             }
         }
     };
@@ -1655,7 +1660,6 @@ mod binding_contract_tests {
         assert!(d.cpk.is_none());
         assert!(d.cpu.is_none());
         assert!(d.cpl.is_none());
-        assert!(d.cpm.is_none());
         // The long-term family is what this input can support, so it is present.
         assert!(d.pp.is_some());
         assert!(d.ppk.is_some());
@@ -1726,24 +1730,24 @@ mod binding_contract_tests {
     }
 
     #[test]
-    fn target_reaches_cpm_instead_of_the_midpoint() {
-        let base = json!({ "data": flat(), "usl": 11.0, "lsl": 9.0, "sigma_within": 0.2 });
-        let midpoint = dto(base.clone()).expect("valid").cpm.expect("cpm");
+    fn cpm_needs_a_declared_target_and_no_sigma() {
+        // This test used to assert that omitting `target` reproduced the
+        // midpoint exactly -- it pinned the substitution as the contract. Cpm
+        // is defined only against a declared target, so there is nothing to
+        // reproduce.
+        let within = json!({ "data": flat(), "usl": 11.0, "lsl": 9.0, "sigma_within": 0.2 });
+        let overall = json!({ "data": flat(), "usl": 11.0, "lsl": 9.0 });
+        assert!(dto(within.clone()).expect("valid").cpm.is_none());
+        assert!(dto(overall.clone()).expect("valid").cpm.is_none());
 
-        let mut shifted = base.clone();
-        shifted["target"] = json!(10.4);
-        let against_target = dto(shifted).expect("valid").cpm.expect("cpm");
-
-        assert!(
-            (midpoint - against_target).abs() > 1e-9,
-            "Cpm against a declared target is a different quantity, not a rounder one"
-        );
-
-        // Stating the midpoint explicitly must reproduce the default exactly:
-        // the fallback is the midpoint, not something near it.
-        let mut explicit = base;
-        explicit["target"] = json!(10.0);
-        assert_eq!(dto(explicit).expect("valid").cpm, Some(midpoint));
+        // With a target, Cpm is the spread about it: no sigma enters, so the
+        // two sigma sources give one value.
+        let (mut within, mut overall) = (within, overall);
+        within["target"] = json!(10.4);
+        overall["target"] = json!(10.4);
+        let a = dto(within).expect("valid").cpm.expect("cpm with a target");
+        let b = dto(overall).expect("valid").cpm.expect("cpm without sigma_within");
+        assert_eq!(a, b);
     }
 
     #[test]

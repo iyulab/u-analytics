@@ -71,10 +71,20 @@ pub struct CapabilityIndices {
     pub ppu: Option<f64>,
     /// Ppl = (mean - LSL) / (3 * sigma_overall). Requires LSL.
     pub ppl: Option<f64>,
-    /// Cpm = Cp / sqrt(1 + ((mean - target) / sigma_within)^2).
-    /// Requires both limits and a target.
+    /// Cpm = min(T - LSL, USL - T) / (3 * sigma_t), where
+    /// sigma_t = sqrt(sum((x_i - T)^2) / (n - 1)) is the spread of every
+    /// observation about the target T. With T at the specification midpoint
+    /// the numerator is (USL - LSL) / 6, the form Chan, Cheng & Spiring (1988)
+    /// give.
     ///
-    /// Reference: Chan, Cheng & Spiring (1988).
+    /// `None` unless both limits and a target are set, the target lies within
+    /// the limits, and sigma_t is positive. Cpm measures how closely the
+    /// process clusters about the target, so it depends on neither sigma
+    /// estimate above and is the same from [`ProcessCapability::compute`] and
+    /// [`ProcessCapability::compute_overall`].
+    ///
+    /// References: Chan, Cheng & Spiring (1988); Minitab, *Capability Analysis
+    /// (Normal) Formulas*, for the numerator when T is not the midpoint.
     pub cpm: Option<f64>,
     /// Sample mean of the data.
     pub mean: f64,
@@ -143,11 +153,12 @@ impl ProcessCapability {
         })
     }
 
-    /// Sets the target value for Cpm calculation.
+    /// Sets the target value for Cpm.
     ///
-    /// If not set, the target defaults to the midpoint `(USL + LSL) / 2`
-    /// when both limits are available. Cpm is not computed for one-sided
-    /// specifications without an explicit target.
+    /// Cpm is computed only against a declared target. Without one it is
+    /// `None` rather than measured against the specification midpoint: a
+    /// substituted target cannot be told apart from a declared one in the
+    /// result. A process whose target is the midpoint passes it here.
     ///
     /// # Examples
     ///
@@ -201,7 +212,7 @@ impl ProcessCapability {
         let x_bar = stats::mean(data)?;
         let sigma_overall = stats::std_dev(data)?;
 
-        Some(self.compute_indices(x_bar, sigma_within, sigma_overall))
+        Some(self.compute_indices(data, x_bar, sigma_within, sigma_overall))
     }
 
     /// Computes capability indices using overall sigma for both short-term
@@ -233,12 +244,14 @@ impl ProcessCapability {
         let x_bar = stats::mean(data)?;
         let sigma_overall = stats::std_dev(data)?;
 
-        Some(self.compute_indices(x_bar, sigma_overall, sigma_overall))
+        Some(self.compute_indices(data, x_bar, sigma_overall, sigma_overall))
     }
 
-    /// Internal computation of all indices given mean and sigma values.
+    /// Internal computation of all indices given the data, its mean and the
+    /// two sigma values.
     fn compute_indices(
         &self,
+        data: &[f64],
         x_bar: f64,
         sigma_within: f64,
         sigma_overall: f64,
@@ -271,15 +284,7 @@ impl ProcessCapability {
             (None, None) => None,
         };
 
-        // Taguchi Cpm index
-        let cpm = cp.and_then(|cp_val| {
-            let target = self.target.or_else(|| match (self.usl, self.lsl) {
-                (Some(u), Some(l)) => Some((u + l) / 2.0),
-                _ => None,
-            })?;
-            let deviation_ratio = (x_bar - target) / sigma_within;
-            Some(cp_val / (1.0 + deviation_ratio * deviation_ratio).sqrt())
-        });
+        let cpm = self.cpm(data);
 
         CapabilityIndices {
             cp,
@@ -295,6 +300,26 @@ impl ProcessCapability {
             std_dev_within: sigma_within,
             std_dev_overall: sigma_overall,
         }
+    }
+
+    /// Cpm against the declared target -- see [`CapabilityIndices::cpm`].
+    ///
+    /// The spread is taken about T directly rather than assembled from a sigma
+    /// and the offset of the mean: `sum((x_i - T)^2) / (n - 1)` is the
+    /// estimator Chan, Cheng & Spiring (1988) give, and it differs from
+    /// `s^2 + (mean - T)^2` by a factor of n / (n - 1) on the offset term.
+    fn cpm(&self, data: &[f64]) -> Option<f64> {
+        let (usl, lsl, target) = (self.usl?, self.lsl?, self.target?);
+        if !target.is_finite() || target < lsl || target > usl || data.len() < 2 {
+            return None;
+        }
+        let sum_sq: f64 = data.iter().map(|&x| (x - target).powi(2)).sum();
+        let sigma_t = (sum_sq / (data.len() - 1) as f64).sqrt();
+        // Every observation on the target leaves no spread to divide by.
+        if sigma_t <= 0.0 {
+            return None;
+        }
+        Some((target - lsl).min(usl - target) / (3.0 * sigma_t))
     }
 }
 
@@ -344,7 +369,7 @@ mod tests {
 
     /// Textbook example: Montgomery (2019), Example 8.1
     ///
-    /// LSL = 200, USL = 220, target = 210 (midpoint)
+    /// LSL = 200, USL = 220, no target declared
     /// Process mean ~ 210, sigma_within = 2.0
     ///
     /// Cp = (220 - 200) / (6 * 2) = 20/12 = 1.6667
@@ -370,8 +395,9 @@ mod tests {
         let cpk = indices.cpk.unwrap();
         assert!(cpk > 0.0, "Cpk should be positive");
 
-        let cpm = indices.cpm.unwrap();
-        assert!(cpm > 0.0, "Cpm should be positive for centered process");
+        // No target was declared, so there is no Cpm -- the midpoint is not
+        // assumed on the caller's behalf.
+        assert!(indices.cpm.is_none());
     }
 
     /// Off-center process: mean shifted toward USL.
@@ -479,45 +505,77 @@ mod tests {
     // Cpm with explicit target
     // -----------------------------------------------------------------------
 
+    /// The case reported against 0.8.0, which derived Cpm from Cp: with no
+    /// target it reported 2.8793 against the midpoint, and 0.7361 against a
+    /// target of 11 -- both from the within sigma of 0.2.
+    ///
+    /// Hand computation, sigma_t = sqrt(sum((x - T)^2) / 5):
+    /// - T = 10: sum = 0.35, sigma_t = 0.264575, Cpm = (4/6) / sigma_t = 2.519763
+    /// - T = 11: sum = 4.95, sigma_t = 0.994987, Cpm = (1/3) / sigma_t = 0.335013
     #[test]
-    fn cpm_with_explicit_target() {
+    fn cpm_is_the_spread_about_a_declared_target() {
+        let data = [9.8, 10.1, 10.3, 9.9, 10.2, 10.4];
+        let spec = || ProcessCapability::new(Some(12.0), Some(8.0)).unwrap();
+
+        assert!(spec().compute(&data, 0.2).unwrap().cpm.is_none());
+        assert!(spec().compute_overall(&data).unwrap().cpm.is_none());
+
+        for (target, expected) in [(10.0, 2.519_763), (11.0, 0.335_013)] {
+            let spec = spec().with_target(target);
+            let within = spec.compute(&data, 0.2).unwrap().cpm.unwrap();
+            let overall = spec.compute_overall(&data).unwrap().cpm.unwrap();
+            assert!((within - expected).abs() < 1e-6, "T={target}: {within}");
+            // No sigma enters Cpm, so the two entry points agree exactly.
+            assert_eq!(within, overall);
+        }
+    }
+
+    /// T off the midpoint: the numerator is the distance to the nearer limit.
+    ///
+    /// LSL = 200, USL = 220, T = 212: min(12, 8) / 3 = 8/3.
+    /// sum((x - 212)^2) = 16 + 9 + 4 + 1 + 0 = 30, sigma_t = sqrt(7.5).
+    /// Cpm = (8/3) / 2.738613 = 0.973729.
+    #[test]
+    fn cpm_off_midpoint_uses_the_nearer_limit() {
         let spec = ProcessCapability::new(Some(220.0), Some(200.0))
             .unwrap()
             .with_target(212.0);
+        let data = [208.0, 209.0, 210.0, 211.0, 212.0];
+        let cpm = spec.compute_overall(&data).unwrap().cpm.unwrap();
+        assert!((cpm - 0.973_729).abs() < 1e-6, "got {cpm}");
+    }
 
-        let data = [
-            208.0, 209.0, 210.0, 211.0, 212.0, 208.5, 209.5, 210.5, 211.5, 210.0,
-        ];
-
-        let sigma_within = 2.0;
-        let indices = spec.compute(&data, sigma_within).unwrap();
-
-        let cpm = indices.cpm.unwrap();
-        let cp = indices.cp.unwrap();
-
-        assert!(
-            cpm < cp,
-            "Cpm ({cpm}) should be less than Cp ({cp}) when mean != target"
-        );
+    /// With the mean on the target, sum((x - T)^2) / (n - 1) is the sample
+    /// variance, so Cpm is exactly Pp.
+    #[test]
+    fn cpm_equals_pp_when_the_mean_is_on_target() {
+        let spec = ProcessCapability::new(Some(220.0), Some(200.0))
+            .unwrap()
+            .with_target(210.0);
+        let data = [208.0, 209.0, 210.0, 211.0, 212.0];
+        let indices = spec.compute(&data, 2.0).unwrap();
+        let (cpm, pp) = (indices.cpm.unwrap(), indices.pp.unwrap());
+        assert!((cpm - pp).abs() < 1e-12, "Cpm {cpm} vs Pp {pp}");
     }
 
     #[test]
-    fn cpm_equals_cp_when_on_target() {
-        let spec = ProcessCapability::new(Some(220.0), Some(200.0)).unwrap();
+    fn cpm_is_none_where_it_is_undefined() {
+        let data = [208.0, 209.0, 210.0, 211.0, 212.0];
+        let two_sided = || ProcessCapability::new(Some(220.0), Some(200.0)).unwrap();
 
-        // Data perfectly at midpoint (target = 210)
-        let data = [210.0; 20];
-
-        let sigma_within = 2.0;
-        let indices = spec.compute(&data, sigma_within).unwrap();
-
-        let cpm = indices.cpm.unwrap();
-        let cp = indices.cp.unwrap();
-
-        assert!(
-            (cpm - cp).abs() < 1e-10,
-            "Cpm ({cpm}) should equal Cp ({cp}) when mean == target"
-        );
+        // A target outside the specification.
+        for t in [199.0, 221.0, f64::NAN] {
+            let cpm = two_sided().with_target(t).compute_overall(&data).unwrap().cpm;
+            assert!(cpm.is_none(), "T={t}");
+        }
+        // Every observation on the target: no spread to divide by.
+        let on_target = two_sided().with_target(210.0).compute(&[210.0; 5], 2.0);
+        assert!(on_target.unwrap().cpm.is_none());
+        // One-sided specification, even with a target.
+        let upper = ProcessCapability::new(Some(220.0), None)
+            .unwrap()
+            .with_target(210.0);
+        assert!(upper.compute_overall(&data).unwrap().cpm.is_none());
     }
 
     // -----------------------------------------------------------------------
