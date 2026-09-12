@@ -96,6 +96,7 @@ fn ffi_catch(
 
 #[cfg(feature = "ffi")]
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SpcChartRequest {
     subgroups: Vec<Vec<f64>>,
     /// Which run tests to apply, as the WASM binding's optional second
@@ -134,14 +135,150 @@ pub unsafe extern "C" fn uanalytics_xbar_r_chart(
             Ok(r) => r,
             Err(status) => return status,
         };
-        // `rules_from_json` reads the WASM binding's options object; this
-        // request carries the array at top level, so hand it over wrapped.
-        let options = req.rules.map(|r| serde_json::json!({ "rules": r }));
-        let rules = match crate::wire::rules_from_json(options) {
+        let rules = match rules_of(req.rules) {
             Ok(r) => r,
             Err(e) => return write_error(result_ptr, ERR_COMPUTE, &e),
         };
         match crate::wire::xbar_r_dto(req.subgroups, rules) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
+        }
+    })
+}
+
+// ── SPC: X-bar/S · I-MR · run rules ─────────────────────────
+
+/// Request for the individual-observations charts and the run-rule engine.
+/// `values` is the series in order; `rules` is the optional run-test list,
+/// exactly as `uanalytics_xbar_r_chart` takes it.
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ValuesRequest {
+    values: Vec<f64>,
+    #[serde(default)]
+    rules: Option<serde_json::Value>,
+}
+
+/// Request for `uanalytics_run_rules`: a series, one set of limits, and the
+/// optional run-test list.
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RunRulesRequest {
+    values: Vec<f64>,
+    limits: crate::wire::LimitsInputDto,
+    #[serde(default)]
+    rules: Option<serde_json::Value>,
+}
+
+#[cfg(feature = "ffi")]
+fn rules_of(rules: Option<serde_json::Value>) -> Result<crate::spc::RuleSet, String> {
+    crate::wire::rules_from_json(rules.map(|r| serde_json::json!({ "rules": r })))
+}
+
+/// SPC X-bar/S control chart -- the same request as `uanalytics_xbar_r_chart`
+/// and the same response shape with `s_*` limits in place of `r_*`. Returns
+/// `sigma_hat` (`S-bar / c4`) for `uanalytics_process_capability`.
+///
+/// # Safety
+///
+/// `request_json` must be null or point to a NUL-terminated string, and
+/// `result_ptr` must be null or valid for writing one pointer. A string written
+/// there is owned by the caller and must be released with
+/// [`uanalytics_free_string`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn uanalytics_xbar_s_chart(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+) -> i32 {
+    ffi_catch(result_ptr, || {
+        let json = match unsafe { read_json(request_json) } {
+            Ok(j) => j,
+            Err(e) => return e,
+        };
+        let req: SpcChartRequest = match parse_request(&json, result_ptr) {
+            Ok(r) => r,
+            Err(status) => return status,
+        };
+        let rules = match rules_of(req.rules) {
+            Ok(r) => r,
+            Err(e) => return write_error(result_ptr, ERR_COMPUTE, &e),
+        };
+        match crate::wire::xbar_s_dto(req.subgroups, rules) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
+        }
+    })
+}
+
+/// SPC Individual / Moving-Range chart for a series of single observations.
+/// Returns `sigma_hat` (`MR-bar / d2(2)`) -- the short-term sigma that
+/// `uanalytics_process_capability` needs for individual data, now that it no
+/// longer estimates one itself.
+///
+/// # Safety
+///
+/// `request_json` must be null or point to a NUL-terminated string, and
+/// `result_ptr` must be null or valid for writing one pointer. A string written
+/// there is owned by the caller and must be released with
+/// [`uanalytics_free_string`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn uanalytics_imr_chart(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+) -> i32 {
+    ffi_catch(result_ptr, || {
+        let json = match unsafe { read_json(request_json) } {
+            Ok(j) => j,
+            Err(e) => return e,
+        };
+        let req: ValuesRequest = match parse_request(&json, result_ptr) {
+            Ok(r) => r,
+            Err(status) => return status,
+        };
+        let rules = match rules_of(req.rules) {
+            Ok(r) => r,
+            Err(e) => return write_error(result_ptr, ERR_COMPUTE, &e),
+        };
+        match crate::wire::imr_dto(req.values, rules) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
+        }
+    })
+}
+
+/// Applies the run tests to a series against one set of limits -- the engine
+/// the charts use, callable on its own. One point per value, in order.
+///
+/// # Safety
+///
+/// `request_json` must be null or point to a NUL-terminated string, and
+/// `result_ptr` must be null or valid for writing one pointer. A string written
+/// there is owned by the caller and must be released with
+/// [`uanalytics_free_string`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn uanalytics_run_rules(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+) -> i32 {
+    ffi_catch(result_ptr, || {
+        let json = match unsafe { read_json(request_json) } {
+            Ok(j) => j,
+            Err(e) => return e,
+        };
+        let req: RunRulesRequest = match parse_request(&json, result_ptr) {
+            Ok(r) => r,
+            Err(status) => return status,
+        };
+        let rules = match rules_of(req.rules) {
+            Ok(r) => r,
+            Err(e) => return write_error(result_ptr, ERR_COMPUTE, &e),
+        };
+        match crate::wire::run_rules_dto(req.values, req.limits, rules) {
             Ok(dto) => write_json(result_ptr, &dto),
             Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
         }
@@ -157,6 +294,7 @@ pub unsafe extern "C" fn uanalytics_xbar_r_chart(
 /// names the other way round.
 #[cfg(feature = "ffi")]
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ProportionSamplesRequest {
     samples: Vec<[u64; 2]>,
 }
@@ -905,6 +1043,77 @@ mod tests {
         assert_eq!(code, 0, "{body}");
         let wire = crate::wire::pelt_dto(serde_json::from_value(pelt).unwrap()).unwrap();
         assert_eq!(body, serde_json::to_value(&wire).unwrap());
+
+        // -- X-bar/S, I-MR, run rules --
+        let groups: Vec<Vec<f64>> = (0..6)
+            .map(|g| {
+                (0..12)
+                    .map(|i| 10.0 + 0.1 * ((g * 7 + i * 3) % 5) as f64)
+                    .collect()
+            })
+            .collect();
+        let (code, body) = call(
+            uanalytics_xbar_s_chart,
+            &serde_json::json!({ "subgroups": groups }).to_string(),
+        );
+        assert_eq!(code, 0, "{body}");
+        let wire = crate::wire::xbar_s_dto(groups, RuleSet::nelson()).unwrap();
+        assert_eq!(body, serde_json::to_value(&wire).unwrap());
+
+        let values: Vec<f64> = (0..20).map(|i| 10.0 + 0.3 * ((i * 7) % 5) as f64).collect();
+        let (code, body) = call(
+            uanalytics_imr_chart,
+            &serde_json::json!({ "values": values }).to_string(),
+        );
+        assert_eq!(code, 0, "{body}");
+        let wire = crate::wire::imr_dto(values.clone(), RuleSet::nelson()).unwrap();
+        assert_eq!(body, serde_json::to_value(&wire).unwrap());
+
+        let limits = serde_json::json!({ "ucl": 11.0, "cl": 10.5, "lcl": 10.0 });
+        let (code, body) = call(
+            uanalytics_run_rules,
+            &serde_json::json!({ "values": values, "limits": limits }).to_string(),
+        );
+        assert_eq!(code, 0, "{body}");
+        let wire = crate::wire::run_rules_dto(
+            values,
+            serde_json::from_value(limits).unwrap(),
+            RuleSet::nelson(),
+        )
+        .unwrap();
+        assert_eq!(body, serde_json::to_value(&wire).unwrap());
+    }
+
+    #[test]
+    fn imr_sigma_hat_feeds_capability_the_number_the_old_default_produced() {
+        // The route the changelog points individual-data callers to: the I-MR
+        // chart owns the moving-range estimate, capability takes it as
+        // `sigma_within`. This is the number `process_capability` used to
+        // compute silently on its own.
+        use crate::spc::{ControlChart, IndividualMRChart};
+        let data = [10.1, 9.8, 10.3, 10.0, 9.7, 10.2, 10.1, 9.9];
+        let (code, body) = call(
+            uanalytics_imr_chart,
+            &serde_json::json!({ "values": data }).to_string(),
+        );
+        assert_eq!(code, 0, "{body}");
+        let sigma_hat = body["sigma_hat"]
+            .as_f64()
+            .expect("eight values give a sigma");
+        let mut imr = IndividualMRChart::new();
+        for x in data {
+            imr.add_sample(&[x]).unwrap();
+        }
+        assert_eq!(Some(sigma_hat), imr.sigma_hat());
+
+        let (code, body) = call(
+            uanalytics_process_capability,
+            &serde_json::json!({ "data": data, "usl": 11.0, "lsl": 9.0, "sigma_within": sigma_hat })
+                .to_string(),
+        );
+        assert_eq!(code, 0, "{body}");
+        assert_eq!(body["sigma_source"], "within");
+        assert!(body["cp"].is_f64(), "{body}");
     }
 
     #[test]

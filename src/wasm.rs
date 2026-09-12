@@ -18,56 +18,15 @@ use wasm_bindgen::prelude::*;
 // transports cannot drift apart again. See `crate::wire`.
 use crate::wire::{
     add_rows, attribute_point_dtos, capability_dto, default_cost, default_min_seg, default_penalty,
-    gage_rr_anova_dto, gage_rr_xbar_r_dto, laney_p_dto, laney_point_dtos, p_chart_dto, pelt_dto,
-    percentile_capability_dto, point_dtos, rules_from_json, subgroup_size, xbar_r_dto,
-    AttributeChartPointDto, CapabilityInputDto, ChartPointDto, GageRRInputDto, PeltInputDto,
+    gage_rr_anova_dto, gage_rr_xbar_r_dto, imr_dto, laney_p_dto, laney_point_dtos, p_chart_dto,
+    pelt_dto, percentile_capability_dto, rules_from_json, run_rules_dto, xbar_r_dto, xbar_s_dto,
+    AttributeChartPointDto, CapabilityInputDto, GageRRInputDto, LimitsInputDto, PeltInputDto,
     PeltPenaltyDto, PeltResultDto, PercentileCapabilityInputDto,
 };
 
 // ---------------------------------------------------------------------------
 // Serializable DTO types
 // ---------------------------------------------------------------------------
-
-#[derive(Serialize, Debug)]
-struct XbarSChartDto {
-    xbar_cl: f64,
-    xbar_ucl: f64,
-    xbar_lcl: f64,
-    s_cl: f64,
-    s_ucl: f64,
-    s_lcl: f64,
-    /// Short-term sigma implied by this chart (`S-bar / c4`), for
-    /// `process_capability`'s `sigma_within`.
-    sigma_hat: Option<f64>,
-    xbar_points: Vec<ChartPointDto>,
-    s_points: Vec<ChartPointDto>,
-    in_control: bool,
-}
-
-#[derive(Serialize, Debug)]
-struct ImrChartDto {
-    i_cl: f64,
-    i_ucl: f64,
-    i_lcl: f64,
-    mr_cl: f64,
-    mr_ucl: f64,
-    mr_lcl: f64,
-    /// Short-term sigma implied by this chart (`MR-bar / d2(2)`).
-    sigma_hat: Option<f64>,
-    i_points: Vec<ChartPointDto>,
-    /// Starts at index 1: the first value has no moving range.
-    mr_points: Vec<ChartPointDto>,
-    in_control: bool,
-}
-
-/// Control limits a caller supplies to `run_rules`.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LimitsInputDto {
-    ucl: f64,
-    cl: f64,
-    lcl: f64,
-}
 
 #[derive(Serialize)]
 struct AdNormalityDto {
@@ -302,98 +261,6 @@ fn rules_option(options: Option<JsValue>) -> Result<crate::spc::RuleSet, JsValue
     }
 }
 
-fn xbar_s_dto(
-    subgroups: Vec<Vec<f64>>,
-    rules: crate::spc::RuleSet,
-) -> Result<XbarSChartDto, String> {
-    use crate::spc::{ControlChart, XBarSChart};
-
-    let n = subgroup_size(&subgroups)?;
-    let mut chart = XBarSChart::new(n)
-        .map_err(|e| e.to_string())?
-        .with_rules(rules);
-    add_rows(&subgroups, "subgroups", |g| chart.add_sample(g))?;
-    let x = chart
-        .control_limits()
-        .ok_or("insufficient data for control limits")?;
-    let s = chart
-        .s_limits()
-        .ok_or("insufficient data for S chart limits")?;
-    Ok(XbarSChartDto {
-        xbar_cl: x.cl,
-        xbar_ucl: x.ucl,
-        xbar_lcl: x.lcl,
-        s_cl: s.cl,
-        s_ucl: s.ucl,
-        s_lcl: s.lcl,
-        sigma_hat: chart.sigma_hat(),
-        xbar_points: point_dtos(chart.points()),
-        s_points: point_dtos(chart.s_points()),
-        in_control: chart.is_in_control(),
-    })
-}
-
-fn imr_dto(values: Vec<f64>, rules: crate::spc::RuleSet) -> Result<ImrChartDto, String> {
-    use crate::spc::{ControlChart, IndividualMRChart};
-
-    let mut chart = IndividualMRChart::new().with_rules(rules);
-    add_rows(&values, "values", |x| {
-        chart.add_sample(std::slice::from_ref(x))
-    })?;
-    let i = chart
-        .control_limits()
-        .ok_or("at least two values are needed for control limits")?;
-    let mr = chart
-        .mr_limits()
-        .ok_or("at least two values are needed for control limits")?;
-    Ok(ImrChartDto {
-        i_cl: i.cl,
-        i_ucl: i.ucl,
-        i_lcl: i.lcl,
-        mr_cl: mr.cl,
-        mr_ucl: mr.ucl,
-        mr_lcl: mr.lcl,
-        sigma_hat: chart.sigma_hat(),
-        i_points: point_dtos(chart.points()),
-        mr_points: point_dtos(chart.mr_points()),
-        in_control: chart.is_in_control(),
-    })
-}
-
-fn run_rules_dto(
-    values: Vec<f64>,
-    limits: LimitsInputDto,
-    rules: crate::spc::RuleSet,
-) -> Result<Vec<ChartPointDto>, String> {
-    use crate::spc::{ChartPoint, ControlLimits, RunRule};
-
-    let LimitsInputDto { ucl, cl, lcl } = limits;
-    // Written so that a NaN fails it too.
-    if !(lcl <= cl && cl <= ucl) {
-        return Err(format!(
-            "limits: need lcl <= cl <= ucl, got lcl={lcl} cl={cl} ucl={ucl}"
-        ));
-    }
-    if let Some(i) = values.iter().position(|x| !x.is_finite()) {
-        return Err(format!("values[{i}] is not a finite number"));
-    }
-
-    let mut points: Vec<ChartPoint> = values
-        .iter()
-        .enumerate()
-        .map(|(index, &value)| ChartPoint {
-            value,
-            index,
-            violations: Vec::new(),
-        })
-        .collect();
-    for (index, rule) in rules.check(&points, &ControlLimits { ucl, cl, lcl }) {
-        if let Some(point) = points.get_mut(index) {
-            point.violations.push(rule);
-        }
-    }
-    Ok(point_dtos(&points))
-}
 /// Compute a P chart from (defectives, sample_size) pairs.
 ///
 /// # Input JSON

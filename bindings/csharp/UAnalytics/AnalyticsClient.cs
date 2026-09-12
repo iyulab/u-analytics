@@ -57,6 +57,36 @@ public sealed class AnalyticsClient : IDisposable
     public JsonElement LaneyPChart(ulong[][] samples)
         => CallNative(NativeInterop.uanalytics_laney_p_chart, new { samples });
 
+    /// <summary>
+    /// X-bar/S chart. Same request and response shape as <see cref="XbarRChart"/> with
+    /// <c>s_*</c> limits in place of <c>r_*</c>; the usual choice once subgroups exceed about
+    /// ten values. Returns <c>sigma_hat</c> (<c>S-bar / c4</c>).
+    /// </summary>
+    public JsonElement XbarSChart(double[][] subgroups, string[]? rules = null)
+        => CallNative(NativeInterop.uanalytics_xbar_s_chart,
+            rules is null ? new { subgroups } : (object)new { subgroups, rules });
+
+    /// <summary>
+    /// Individual / Moving-Range chart for a series of single observations. Returns
+    /// <c>sigma_hat</c> (<c>MR-bar / d2(2)</c>) -- pass it as <c>sigmaWithin</c> to
+    /// <see cref="ProcessCapability"/> for individual data, which no longer estimates one itself.
+    /// </summary>
+    public JsonElement ImrChart(double[] values, string[]? rules = null)
+        => CallNative(NativeInterop.uanalytics_imr_chart,
+            rules is null ? new { values } : (object)new { values, rules });
+
+    /// <summary>
+    /// Applies the run tests to a series against one set of limits -- the engine the charts
+    /// use, callable on its own. One point per value, in order, each with its
+    /// <c>violations</c>.
+    /// </summary>
+    public JsonElement RunRules(double[] values, double ucl, double cl, double lcl,
+        string[]? rules = null)
+        => CallNative(NativeInterop.uanalytics_run_rules,
+            rules is null
+                ? new { values, limits = new { ucl, cl, lcl } }
+                : (object)new { values, limits = new { ucl, cl, lcl }, rules });
+
     // ── Capability ──
 
     /// <summary>

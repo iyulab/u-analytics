@@ -53,6 +53,12 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 - The C# client exposes `LaneyPChart` (the native entry point already existed),
   an optional `rules` argument on `XbarRChart`, and takes the changepoint
   `penalty` as `double?` plus a `cost` argument.
+- **Three C FFI entry points that only WASM had**: `uanalytics_xbar_s_chart`,
+  `uanalytics_imr_chart` and `uanalytics_run_rules`, with `XbarSChart`,
+  `ImrChart` and `RunRules` on the C# client. `imr_chart` is what makes the
+  `process_capability` change above whole for individual data: it returns the
+  moving-range `sigma_hat` that the capability entry point used to compute on
+  its own, and a test pins that feeding it back yields the same number.
 
 ### Fixed
 

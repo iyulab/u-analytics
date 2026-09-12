@@ -635,3 +635,137 @@ pub(crate) fn pelt_dto(input: PeltInputDto) -> Result<PeltResultDto, String> {
         changepoints: result.changepoints,
     })
 }
+
+#[derive(Serialize, Debug)]
+pub(crate) struct XbarSChartDto {
+    pub(crate) xbar_cl: f64,
+    pub(crate) xbar_ucl: f64,
+    pub(crate) xbar_lcl: f64,
+    pub(crate) s_cl: f64,
+    pub(crate) s_ucl: f64,
+    pub(crate) s_lcl: f64,
+    /// Short-term sigma implied by this chart (`S-bar / c4`), for
+    /// `process_capability`'s `sigma_within`.
+    pub(crate) sigma_hat: Option<f64>,
+    pub(crate) xbar_points: Vec<ChartPointDto>,
+    pub(crate) s_points: Vec<ChartPointDto>,
+    pub(crate) in_control: bool,
+}
+
+#[derive(Serialize, Debug)]
+pub(crate) struct ImrChartDto {
+    pub(crate) i_cl: f64,
+    pub(crate) i_ucl: f64,
+    pub(crate) i_lcl: f64,
+    pub(crate) mr_cl: f64,
+    pub(crate) mr_ucl: f64,
+    pub(crate) mr_lcl: f64,
+    /// Short-term sigma implied by this chart (`MR-bar / d2(2)`).
+    pub(crate) sigma_hat: Option<f64>,
+    pub(crate) i_points: Vec<ChartPointDto>,
+    /// Starts at index 1: the first value has no moving range.
+    pub(crate) mr_points: Vec<ChartPointDto>,
+    pub(crate) in_control: bool,
+}
+
+/// Control limits a caller supplies to `run_rules`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LimitsInputDto {
+    pub(crate) ucl: f64,
+    pub(crate) cl: f64,
+    pub(crate) lcl: f64,
+}
+
+pub(crate) fn xbar_s_dto(
+    subgroups: Vec<Vec<f64>>,
+    rules: crate::spc::RuleSet,
+) -> Result<XbarSChartDto, String> {
+    use crate::spc::{ControlChart, XBarSChart};
+
+    let n = subgroup_size(&subgroups)?;
+    let mut chart = XBarSChart::new(n)
+        .map_err(|e| e.to_string())?
+        .with_rules(rules);
+    add_rows(&subgroups, "subgroups", |g| chart.add_sample(g))?;
+    let x = chart
+        .control_limits()
+        .ok_or("insufficient data for control limits")?;
+    let s = chart
+        .s_limits()
+        .ok_or("insufficient data for S chart limits")?;
+    Ok(XbarSChartDto {
+        xbar_cl: x.cl,
+        xbar_ucl: x.ucl,
+        xbar_lcl: x.lcl,
+        s_cl: s.cl,
+        s_ucl: s.ucl,
+        s_lcl: s.lcl,
+        sigma_hat: chart.sigma_hat(),
+        xbar_points: point_dtos(chart.points()),
+        s_points: point_dtos(chart.s_points()),
+        in_control: chart.is_in_control(),
+    })
+}
+
+pub(crate) fn imr_dto(values: Vec<f64>, rules: crate::spc::RuleSet) -> Result<ImrChartDto, String> {
+    use crate::spc::{ControlChart, IndividualMRChart};
+
+    let mut chart = IndividualMRChart::new().with_rules(rules);
+    add_rows(&values, "values", |x| {
+        chart.add_sample(std::slice::from_ref(x))
+    })?;
+    let i = chart
+        .control_limits()
+        .ok_or("at least two values are needed for control limits")?;
+    let mr = chart
+        .mr_limits()
+        .ok_or("at least two values are needed for control limits")?;
+    Ok(ImrChartDto {
+        i_cl: i.cl,
+        i_ucl: i.ucl,
+        i_lcl: i.lcl,
+        mr_cl: mr.cl,
+        mr_ucl: mr.ucl,
+        mr_lcl: mr.lcl,
+        sigma_hat: chart.sigma_hat(),
+        i_points: point_dtos(chart.points()),
+        mr_points: point_dtos(chart.mr_points()),
+        in_control: chart.is_in_control(),
+    })
+}
+
+pub(crate) fn run_rules_dto(
+    values: Vec<f64>,
+    limits: LimitsInputDto,
+    rules: crate::spc::RuleSet,
+) -> Result<Vec<ChartPointDto>, String> {
+    use crate::spc::{ChartPoint, ControlLimits, RunRule};
+
+    let LimitsInputDto { ucl, cl, lcl } = limits;
+    // Written so that a NaN fails it too.
+    if !(lcl <= cl && cl <= ucl) {
+        return Err(format!(
+            "limits: need lcl <= cl <= ucl, got lcl={lcl} cl={cl} ucl={ucl}"
+        ));
+    }
+    if let Some(i) = values.iter().position(|x| !x.is_finite()) {
+        return Err(format!("values[{i}] is not a finite number"));
+    }
+
+    let mut points: Vec<ChartPoint> = values
+        .iter()
+        .enumerate()
+        .map(|(index, &value)| ChartPoint {
+            value,
+            index,
+            violations: Vec::new(),
+        })
+        .collect();
+    for (index, rule) in rules.check(&points, &ControlLimits { ucl, cl, lcl }) {
+        if let Some(point) = points.get_mut(index) {
+            point.violations.push(rule);
+        }
+    }
+    Ok(point_dtos(&points))
+}
