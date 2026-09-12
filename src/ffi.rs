@@ -510,6 +510,7 @@ pub unsafe extern "C" fn uanalytics_gage_rr_anova(
 
 #[cfg(feature = "ffi")]
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WeibullRequest {
     failure_times: Vec<f64>,
 }
@@ -588,6 +589,7 @@ pub unsafe extern "C" fn uanalytics_detect_changepoints(
 
 #[cfg(feature = "ffi")]
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CorrelationRequest {
     variables: Vec<Vec<f64>>,
 }
@@ -641,6 +643,7 @@ pub unsafe extern "C" fn uanalytics_correlation_matrix(
 
 #[cfg(feature = "ffi")]
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RegressionRequest {
     x: Vec<f64>,
     y: Vec<f64>,
@@ -692,6 +695,7 @@ pub unsafe extern "C" fn uanalytics_simple_regression(
 
 #[cfg(feature = "ffi")]
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FitBestRequest {
     data: Vec<f64>,
 }
@@ -1251,6 +1255,18 @@ mod tests {
         assert_eq!(code, -2, "{body}");
         assert!(
             body["error"].as_str().unwrap().contains("sigmaWithin"),
+            "{body}"
+        );
+
+        // The four entry points the WASM binding does not carry hold the same
+        // line: a request type is a contract, not a suggestion.
+        let (code, body) = call(
+            uanalytics_simple_regression,
+            r#"{"x": [1.0, 2.0, 3.0], "y": [2.0, 4.0, 6.1], "weights": [1.0, 1.0, 1.0]}"#,
+        );
+        assert_eq!(code, -2, "{body}");
+        assert!(
+            body["error"].as_str().unwrap().contains("weights"),
             "{body}"
         );
     }

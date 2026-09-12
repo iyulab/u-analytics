@@ -390,10 +390,137 @@ the same convention and rejects both ends of `(0, 1e6)`, which the sigma scale
 does not reach. The round trip closes to ~3·10⁻⁴ (the inverse normal CDF is a
 rational approximation).
 
+### The remaining exports, briefly
+
+Every export takes plain JSON values and returns one; a rejected input throws
+an `Error` whose message names what was wrong. The shapes below are the ones
+the sections above have not already spelled out.
+
+```ts
+// Attributes charts on [defectives, sample_size] pairs (the crate's own order)
+p_chart(samples: [defectives: number, sample_size: number][]):
+  { p_bar: number, points: AttrPoint[], in_control: boolean }
+laney_p_chart(samples: [defectives: number, sample_size: number][]):   // >= 3 samples
+  { p_bar: number, phi: number, points: AttrPoint[] }
+// where AttrPoint = { index, value, ucl, cl, lcl, out_of_control }
+
+// Rare-event charts
+g_chart(gaps: number[]):  { g_bar: number, points: AttrPoint[] }    // events between occurrences
+t_chart(times: number[]): { t_bar: number, points: AttrPoint[] }    // time between occurrences
+
+// Normality
+anderson_darling_normality(data: number[]):
+  { statistic: number, statistic_modified: number, p_value: number }
+
+// Changepoints — PELT (Killick et al., 2012)
+detect_changepoints(input: {
+  data: number[],
+  cost?: "l2" | "normal",        // default "l2": mean shift; "normal": mean + variance
+  penalty?: "bic" | number,      // default "bic"
+  min_segment_len?: number,      // default 2, must be >= 2
+}): { changepoints: number[], n_segments: number }
+detect_changepoints_multi(input: { signals: number[][], cost?, penalty?, min_segment_len? }):
+  { changepoints: number[], n_segments: number }   // channels of equal length
+
+// Gage R&R — measurements[part][operator][trial]
+gage_rr_xbar_r(input: { measurements: number[][][], tolerance?: number }): {
+  ev, av, grr, pv, tv, percent_ev, percent_av, percent_grr, percent_pv: number,
+  percent_tolerance: number | null, ndc: number, status: "Acceptable" | "Marginal" | "Unacceptable",
+}
+gage_rr_anova(input: { measurements: number[][][], tolerance?: number }): {
+  anova_table: { source, df, ss, ms, f_value: number | null, p_value: number | null }[],
+  variance_components: { part, operator, interaction, repeatability, reproducibility, total },
+  ev, av, grr, pv, tv, percent_grr: number, percent_tolerance: number | null,
+  ndc: number, status: string, interaction_significant: boolean, interaction_pooled: boolean,
+}
+
+// Non-parametric (percentile) capability — >= 20 observations, at least one limit
+percentile_capability(input: { data: number[], usl?: number, lsl?: number }): {
+  cp_star, cpk_star, cpu_star, cpl_star: number | null,
+  median: number, percentile_lower: number, percentile_upper: number,
+}
+```
+
+## C FFI (NuGet `UAnalytics`)
+
+The `ffi` feature builds a `cdylib` with a C ABI for hosts that cannot load
+WebAssembly — .NET through the `UAnalytics` NuGet package, or anything that can
+call a C function.
+
+```bash
+cargo build --release --features ffi
+```
+
+**Every entry point is JSON-in / JSON-out with one calling convention:**
+
+```c
+int32_t uanalytics_<name>(const char *request_json, char **result_ptr);
+void    uanalytics_free_string(char *ptr);   // release any string the library returned
+char   *uanalytics_version(void);            // crate version; free with uanalytics_free_string
+```
+
+| Status | Meaning | `*result_ptr` |
+|---|---|---|
+| `0` | success | the response JSON |
+| `-1` | `request_json` or `result_ptr` was null | null |
+| `-2` | the request did not parse into the expected shape | `{"error": "..."}` naming the field |
+| `-3` | the request parsed, and the computation rejected it | `{"error": "..."}` |
+| `-4` | internal panic (caught; never unwinds across the boundary) | `{"error": "..."}` |
+
+Unknown request fields are rejected (`-2`, naming the field) rather than
+ignored, so a misspelt option cannot silently change which analysis you get.
+The string written to `*result_ptr` is owned by the caller and must be released
+with `uanalytics_free_string`.
+
+**The FFI and the WASM binding share one contract.** Every entry point that
+both transports carry parses the same request type and serialises the same
+response type (`src/wire.rs`), and a test pins that the FFI body is the
+`serde_json` rendering of the value the WASM binding emits. So the schemas in
+the JavaScript section above *are* the FFI schemas: the request is the WASM
+function's arguments as one JSON object, the response is the same JSON.
+
+| C entry point | WASM export | Request JSON |
+|---|---|---|
+| `uanalytics_xbar_r_chart` | `xbar_r_chart(subgroups, { rules? })` | `{ subgroups, rules? }` |
+| `uanalytics_xbar_s_chart` | `xbar_s_chart(subgroups, { rules? })` | `{ subgroups, rules? }` |
+| `uanalytics_imr_chart` | `imr_chart(values, { rules? })` | `{ values, rules? }` |
+| `uanalytics_run_rules` | `run_rules(values, limits, { rules? })` | `{ values, limits: { ucl, cl, lcl }, rules? }` |
+| `uanalytics_p_chart` | `p_chart(samples)` | `{ samples: [[defectives, sample_size], …] }` |
+| `uanalytics_laney_p_chart` | `laney_p_chart(samples)` | `{ samples: [[defectives, sample_size], …] }` |
+| `uanalytics_process_capability` | `process_capability(input)` | `input` as is |
+| `uanalytics_percentile_capability` | `percentile_capability(input)` | `input` as is |
+| `uanalytics_gage_rr_xbar_r` | `gage_rr_xbar_r(input)` | `input` as is |
+| `uanalytics_gage_rr_anova` | `gage_rr_anova(input)` | `input` as is |
+| `uanalytics_detect_changepoints` | `detect_changepoints(input)` | `input` as is |
+
+The composition documented for JavaScript holds here too: `imr_chart` (or
+`xbar_s_chart`) returns `sigma_hat`, which is what `process_capability` needs as
+`sigma_within` to report the short-term indices — the FFI does not guess a
+within sigma from a flat vector any more than the WASM binding does.
+
+Four entry points exist only on the FFI:
+
+```ts
+uanalytics_weibull_mle        { failure_times: number[] }  → { shape: number, scale: number }
+uanalytics_correlation_matrix { variables: number[][] }    → { rows: number, cols: number, data: number[] } // row-major
+uanalytics_simple_regression  { x: number[], y: number[] } → { slope, intercept, r_squared, adjusted_r_squared,
+                                                                slope_se, intercept_se: number }
+uanalytics_fit_best           { data: number[] }           → { distribution: string, parameters: [name: string, value: number][],
+                                                                log_likelihood, aic, bic: number }[] // ascending AIC
+```
+
+The .NET client (`bindings/csharp/UAnalytics`, package `UAnalytics`) wraps each
+entry point as a method on `AnalyticsClient` — `XbarRChart`, `ImrChart`,
+`ProcessCapability`, `DetectChangepoints`, … — serialising the arguments to the
+request above and returning the response as a `JsonElement`. A non-zero status
+surfaces as `AnalyticsException` carrying the code and the `error` message. The
+package follows its own version line (it is a binding, not the crate), noted
+in the CHANGELOG entry that changes it.
+
 ## Test Status
 
 ```text
-559 lib tests (570 with `ffi`, 598 with `wasm`) + 88 doc-tests
+560 lib tests (576 with `ffi`, 604 with `wasm`) + 88 doc-tests
 0 clippy warnings
 ```
 

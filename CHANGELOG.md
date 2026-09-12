@@ -44,12 +44,18 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   - `uanalytics_percentile_capability` reports `percentile_lower` and
     `percentile_upper`; the Gage R&R `status` uses the same spelling as WASM.
   - **Unknown request fields are rejected** over the FFI as they always were
-    over WASM. A misspelt `sigmaWithin` used to be ignored silently, yielding
+    over WASM -- on every entry point, including the four the WASM binding
+    does not carry (`weibull_mle`, `correlation_matrix`, `simple_regression`,
+    `fit_best`). A misspelt `sigmaWithin` used to be ignored silently, yielding
     a long-term-only answer with no hint that the caller's sigma never
     arrived; it is now a parse error naming the field.
   - A test asserts, for all eight shared entry points, that the FFI body is
     the `serde_json` rendering of the wire value the WASM binding emits, so
     the two cannot drift silently again.
+- The README documents the C FFI: the calling convention and status codes,
+  the entry-point-to-WASM-export table (the two transports share one JSON
+  contract, so the JavaScript schemas are the FFI schemas), and the four
+  FFI-only entry points. The WASM section now covers every export.
 - The C# client exposes `LaneyPChart` (the native entry point already existed),
   an optional `rules` argument on `XbarRChart`, and takes the changepoint
   `penalty` as `double?` plus a `cost` argument.
