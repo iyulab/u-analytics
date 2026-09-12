@@ -98,22 +98,12 @@ fn ffi_catch(
 #[derive(Deserialize)]
 struct SpcChartRequest {
     subgroups: Vec<Vec<f64>>,
-}
-
-#[cfg(feature = "ffi")]
-#[derive(Serialize)]
-struct SpcChartResponse {
-    x_bar_cl: f64,
-    x_bar_ucl: f64,
-    x_bar_lcl: f64,
-    r_cl: f64,
-    r_ucl: f64,
-    r_lcl: f64,
-    /// Short-term sigma implied by the chart (`R-bar / d2`) -- the
-    /// `sigma_within` a capability study of the same data needs.
-    sigma_hat: Option<f64>,
-    x_bars: Vec<f64>,
-    ranges: Vec<f64>,
+    /// Which run tests to apply, as the WASM binding's optional second
+    /// argument takes them: `{ "rules": ["BeyondLimits", ...] }`. Absent means
+    /// all eight Nelson tests, which is what this entry point did before the
+    /// option existed anywhere.
+    #[serde(default)]
+    rules: Option<serde_json::Value>,
 }
 
 /// SPC X-bar/R control chart.
@@ -135,8 +125,6 @@ pub unsafe extern "C" fn uanalytics_xbar_r_chart(
     request_json: *const libc::c_char,
     result_ptr: *mut *mut libc::c_char,
 ) -> i32 {
-    use crate::spc::{ControlChart, XBarRChart};
-
     ffi_catch(result_ptr, || {
         let json = match unsafe { read_json(request_json) } {
             Ok(j) => j,
@@ -146,81 +134,38 @@ pub unsafe extern "C" fn uanalytics_xbar_r_chart(
             Ok(r) => r,
             Err(status) => return status,
         };
-
-        let Some(n) = req.subgroups.first().map(Vec::len) else {
-            return write_error(result_ptr, ERR_COMPUTE, "subgroups must not be empty");
+        // `rules_from_json` reads the WASM binding's options object; this
+        // request carries the array at top level, so hand it over wrapped.
+        let options = req.rules.map(|r| serde_json::json!({ "rules": r }));
+        let rules = match crate::wire::rules_from_json(options) {
+            Ok(r) => r,
+            Err(e) => return write_error(result_ptr, ERR_COMPUTE, &e),
         };
-        let mut chart = match XBarRChart::new(n) {
-            Ok(chart) => chart,
-            Err(e) => return write_error(result_ptr, ERR_COMPUTE, &e.to_string()),
-        };
-        // `x_bars` and `ranges` carry no index, so a ragged or non-finite
-        // subgroup is refused by its row rather than left out.
-        for (i, subgroup) in req.subgroups.iter().enumerate() {
-            if let Err(e) = chart.add_sample(subgroup) {
-                return write_error(result_ptr, ERR_COMPUTE, &format!("subgroup {i}: {e}"));
-            }
+        match crate::wire::xbar_r_dto(req.subgroups, rules) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
         }
-
-        let (Some(x), Some(r)) = (chart.control_limits(), chart.r_limits()) else {
-            return write_error(
-                result_ptr,
-                ERR_COMPUTE,
-                "insufficient data for control limits",
-            );
-        };
-        let resp = SpcChartResponse {
-            x_bar_cl: x.cl,
-            x_bar_ucl: x.ucl,
-            x_bar_lcl: x.lcl,
-            r_cl: r.cl,
-            r_ucl: r.ucl,
-            r_lcl: r.lcl,
-            sigma_hat: chart.sigma_hat(),
-            x_bars: chart.points().iter().map(|p| p.value).collect(),
-            ranges: chart.r_points().iter().map(|p| p.value).collect(),
-        };
-        write_json(result_ptr, &resp)
     })
 }
 
 // ── SPC: P Chart ────────────────────────────────────────────
 
+/// A P-chart-family request. `samples` carries `[defectives, sample_size]`
+/// pairs -- the order `PChart::add_sample` takes, and the order the WASM
+/// binding has always used. This entry point used to accept the pair reversed,
+/// which produced a plausible-looking chart from a caller that read the field
+/// names the other way round.
 #[cfg(feature = "ffi")]
 #[derive(Deserialize)]
-struct PChartRequest {
-    samples: Vec<(u64, u64)>, // (inspected, defective)
-}
-
-#[cfg(feature = "ffi")]
-#[derive(Serialize)]
-struct PChartResponse {
-    p_bar: f64,
-    proportions: Vec<f64>,
-    ucls: Vec<f64>,
-    lcls: Vec<f64>,
-}
-
-/// Finds the first sample with no defined proportion: nothing inspected, or
-/// more defectives than inspected items.
-#[cfg(feature = "ffi")]
-fn invalid_proportion_sample(samples: &[(u64, u64)]) -> Option<String> {
-    samples
-        .iter()
-        .position(|&(inspected, defective)| inspected == 0 || defective > inspected)
-        .map(|i| {
-            let (inspected, defective) = samples[i];
-            format!(
-                "sample {i} has {defective} defectives out of {inspected} inspected; \
-                 each sample needs 0 <= defective <= inspected and inspected > 0"
-            )
-        })
+struct ProportionSamplesRequest {
+    samples: Vec<[u64; 2]>,
 }
 
 /// SPC P chart.
 ///
 /// A thin adapter over [`crate::spc::PChart`]. Requests carry
-/// `[inspected, defective]` pairs.
+/// `[defectives, sample_size]` pairs -- the same shape and order as the WASM
+/// binding, and the order the crate's `add_sample` takes.
 ///
 /// # Safety
 ///
@@ -234,43 +179,19 @@ pub unsafe extern "C" fn uanalytics_p_chart(
     request_json: *const libc::c_char,
     result_ptr: *mut *mut libc::c_char,
 ) -> i32 {
-    use crate::spc::PChart;
-
     ffi_catch(result_ptr, || {
         let json = match unsafe { read_json(request_json) } {
             Ok(j) => j,
             Err(e) => return e,
         };
-        let req: PChartRequest = match parse_request(&json, result_ptr) {
+        let req: ProportionSamplesRequest = match parse_request(&json, result_ptr) {
             Ok(r) => r,
             Err(status) => return status,
         };
-        // The chart drops a sample it cannot use, and the response arrays
-        // carry no index -- a dropped sample would misalign every later row.
-        if let Some(msg) = invalid_proportion_sample(&req.samples) {
-            return write_error(result_ptr, ERR_COMPUTE, &msg);
+        match crate::wire::p_chart_dto(&req.samples) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
         }
-
-        let mut chart = PChart::new();
-        for (i, &(inspected, defective)) in req.samples.iter().enumerate() {
-            if let Err(e) = chart.add_sample(defective, inspected) {
-                return write_error(result_ptr, ERR_COMPUTE, &format!("sample {i}: {e}"));
-            }
-        }
-        let Some(p_bar) = chart.p_bar() else {
-            return write_error(result_ptr, ERR_COMPUTE, "samples must not be empty");
-        };
-
-        let points = chart.points();
-        write_json(
-            result_ptr,
-            &PChartResponse {
-                p_bar,
-                proportions: points.iter().map(|p| p.value).collect(),
-                ucls: points.iter().map(|p| p.ucl).collect(),
-                lcls: points.iter().map(|p| p.lcl).collect(),
-            },
-        )
     })
 }
 
@@ -296,37 +217,13 @@ pub unsafe extern "C" fn uanalytics_laney_p_chart(
             Err(e) => return e,
         };
 
-        let req: PChartRequest = match parse_request(&json, result_ptr) {
+        let req: ProportionSamplesRequest = match parse_request(&json, result_ptr) {
             Ok(r) => r,
             Err(status) => return status,
         };
-
-        if let Some(msg) = invalid_proportion_sample(&req.samples) {
-            return write_error(result_ptr, ERR_COMPUTE, &msg);
-        }
-        // The request carries `[inspected, defective]`, like the P chart's;
-        // the crate function takes `(defective, sample_size)`.
-        let samples: Vec<(u64, u64)> = req
-            .samples
-            .iter()
-            .map(|&(inspected, defective)| (defective, inspected))
-            .collect();
-
-        match crate::spc::laney_p_chart(&samples) {
-            Some(result) => {
-                let proportions: Vec<f64> = result.points.iter().map(|p| p.value).collect();
-                let ucls: Vec<f64> = result.points.iter().map(|p| p.ucl).collect();
-                let lcls: Vec<f64> = result.points.iter().map(|p| p.lcl).collect();
-                let resp = serde_json::json!({
-                    "p_bar": result.p_bar,
-                    "phi": result.phi,
-                    "proportions": proportions,
-                    "ucls": ucls,
-                    "lcls": lcls,
-                });
-                write_json(result_ptr, &resp)
-            }
-            None => write_error(result_ptr, ERR_COMPUTE, "Laney P' chart computation failed"),
+        match crate::wire::laney_p_dto(&req.samples) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
         }
     })
 }
@@ -1000,11 +897,21 @@ mod tests {
         }
         let x = chart.control_limits().expect("limits");
         let r = chart.r_limits().expect("limits");
-        assert_eq!(body["x_bar_ucl"].as_f64(), Some(x.ucl));
-        assert_eq!(body["x_bar_lcl"].as_f64(), Some(x.lcl));
+        // Field names are the wire contract's -- the ones the WASM binding
+        // has always used -- not this entry point's former `x_bar_*`.
+        assert_eq!(body["xbar_ucl"].as_f64(), Some(x.ucl));
+        assert_eq!(body["xbar_lcl"].as_f64(), Some(x.lcl));
         assert_eq!(body["r_ucl"].as_f64(), Some(r.ucl));
         assert_eq!(body["r_lcl"].as_f64(), Some(r.lcl));
         assert_eq!(body["sigma_hat"].as_f64(), chart.sigma_hat());
+        assert!(
+            body.get("x_bar_ucl").is_none(),
+            "the old spelling must be gone"
+        );
+        // The per-point payload that used to exist only over WASM.
+        assert_eq!(body["xbar_points"].as_array().map(Vec::len), Some(6));
+        assert!(body["xbar_points"][0]["violations"].is_array());
+        assert!(body["in_control"].is_boolean());
     }
 
     #[test]
@@ -1029,18 +936,43 @@ mod tests {
     #[test]
     fn p_chart_matches_the_crate_chart() {
         use crate::spc::PChart;
+        // `[defectives, sample_size]` -- the crate's order.
         let (code, body) = call(
             uanalytics_p_chart,
-            r#"{"samples": [[100, 3], [120, 5], [80, 2], [100, 4]]}"#,
+            r#"{"samples": [[3, 100], [5, 120], [2, 80], [4, 100]]}"#,
         );
         assert_eq!(code, 0, "{body}");
         let mut chart = PChart::new();
-        for (n, d) in [(100, 3), (120, 5), (80, 2), (100, 4)] {
+        for (d, n) in [(3, 100), (5, 120), (2, 80), (4, 100)] {
             chart.add_sample(d, n).unwrap();
         }
         assert_eq!(body["p_bar"].as_f64(), chart.p_bar());
         let ucls: Vec<f64> = chart.points().iter().map(|p| p.ucl).collect();
-        assert_eq!(body["ucls"], serde_json::json!(ucls));
+        let got: Vec<f64> = body["points"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["ucl"].as_f64().unwrap())
+            .collect();
+        assert_eq!(got, ucls);
+    }
+
+    #[test]
+    fn p_chart_pair_order_is_the_crate_order_and_the_reverse_is_refused() {
+        // This entry point used to take `[inspected, defective]`. A caller
+        // sending that order now gets an error naming the row, not a chart
+        // built from proportions above one.
+        let (code, body) = call(uanalytics_p_chart, r#"{"samples": [[100, 3], [120, 5]]}"#);
+        assert_eq!(code, -3, "{body}");
+        assert!(
+            body["error"].as_str().unwrap().contains("samples[0]"),
+            "{body}"
+        );
+
+        let (code, body) = call(uanalytics_p_chart, r#"{"samples": [[3, 100], [5, 120]]}"#);
+        assert_eq!(code, 0, "{body}");
+        let p0 = body["points"][0]["value"].as_f64().unwrap();
+        assert!((p0 - 0.03).abs() < 1e-12, "3 of 100 is 0.03, got {p0}");
     }
 
     #[test]
@@ -1055,22 +987,106 @@ mod tests {
 
     #[test]
     fn laney_p_chart_reads_pairs_in_the_order_the_p_chart_does() {
-        // Both entry points take `[inspected, defective]`; the crate function
-        // takes `(defective, sample_size)`. Passing the pairs through
-        // unchanged fed every Laney request in reverse.
+        // Both entry points now take `[defectives, sample_size]`, which is
+        // also what the crate function takes -- no swap anywhere.
         use crate::spc::laney_p_chart;
-        let pairs = [(100, 3), (120, 9), (80, 2), (100, 7), (110, 4)];
+        let pairs = [(3, 100), (9, 120), (2, 80), (7, 100), (4, 110)];
         let request = serde_json::json!({ "samples": pairs });
         let (code, body) = call(uanalytics_laney_p_chart, &request.to_string());
         assert_eq!(code, 0, "{body}");
-        let swapped: Vec<(u64, u64)> = pairs.iter().map(|&(n, d)| (d, n)).collect();
-        let expected = laney_p_chart(&swapped).expect("valid samples");
+        let expected = laney_p_chart(&pairs).expect("valid samples");
         assert_eq!(body["p_bar"].as_f64(), Some(expected.p_bar));
         assert_eq!(body["phi"].as_f64(), Some(expected.phi));
 
         let (code, body) = call(
             uanalytics_laney_p_chart,
-            r#"{"samples": [[100, 3], [10, 12], [90, 2]]}"#,
+            r#"{"samples": [[3, 100], [12, 10], [2, 90]]}"#,
+        );
+        assert_eq!(code, -3, "{body}");
+    }
+
+    // -- one contract, two transports ---------------------------------------
+
+    /// What this module returns over the C boundary must be byte-for-byte the
+    /// JSON the WASM binding returns for the same logical request. Both are
+    /// `serde_json` renderings of the same `crate::wire` value, so this pins
+    /// that neither side has grown a private shape again.
+    #[test]
+    fn ffi_bodies_are_the_wire_contract_the_wasm_binding_emits() {
+        use crate::spc::RuleSet;
+
+        let groups: Vec<Vec<f64>> = (0..6)
+            .map(|g| {
+                (0..5)
+                    .map(|i| 10.0 + 0.1 * ((g * 7 + i * 3) % 5) as f64)
+                    .collect()
+            })
+            .collect();
+        let (code, body) = call(
+            uanalytics_xbar_r_chart,
+            &serde_json::json!({ "subgroups": groups }).to_string(),
+        );
+        assert_eq!(code, 0, "{body}");
+        let wire = crate::wire::xbar_r_dto(groups, RuleSet::nelson()).expect("chart");
+        assert_eq!(body, serde_json::to_value(&wire).unwrap());
+
+        let samples = [[3_u64, 100], [5, 120], [2, 80], [4, 100]];
+        let (code, body) = call(
+            uanalytics_p_chart,
+            &serde_json::json!({ "samples": samples }).to_string(),
+        );
+        assert_eq!(code, 0, "{body}");
+        let wire = crate::wire::p_chart_dto(&samples).expect("chart");
+        assert_eq!(body, serde_json::to_value(&wire).unwrap());
+
+        let (code, body) = call(
+            uanalytics_laney_p_chart,
+            &serde_json::json!({ "samples": samples }).to_string(),
+        );
+        assert_eq!(code, 0, "{body}");
+        let wire = crate::wire::laney_p_dto(&samples).expect("chart");
+        assert_eq!(body, serde_json::to_value(&wire).unwrap());
+    }
+
+    #[test]
+    fn xbar_r_honours_the_rules_option_like_the_wasm_binding() {
+        // A steady upward drift trips Nelson's trend test under the default
+        // rule set. `rules: []` keeps only the limit check -- as the WASM
+        // binding documents it -- so no pattern test may fire.
+        let groups: Vec<Vec<f64>> = (0..12)
+            .map(|g| {
+                let base = 10.0 + 0.05 * g as f64;
+                vec![base - 0.3, base + 0.2, base - 0.1, base + 0.4]
+            })
+            .collect();
+        let with_nelson = serde_json::json!({ "subgroups": groups });
+        let limits_only = serde_json::json!({ "subgroups": groups, "rules": [] });
+
+        let (code, body) = call(uanalytics_xbar_r_chart, &with_nelson.to_string());
+        assert_eq!(code, 0, "{body}");
+        let fired: Vec<String> = body["xbar_points"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|p| p["violations"].as_array().unwrap().clone())
+            .map(|v| v.as_str().unwrap().to_owned())
+            .collect();
+        assert!(
+            fired.iter().any(|v| v == "SixTrend"),
+            "drift should trip the trend test: {fired:?}"
+        );
+
+        let (code, body) = call(uanalytics_xbar_r_chart, &limits_only.to_string());
+        assert_eq!(code, 0, "{body}");
+        for p in body["xbar_points"].as_array().unwrap() {
+            for v in p["violations"].as_array().unwrap() {
+                assert_eq!(v, "BeyondLimits", "only the limit check may fire: {p}");
+            }
+        }
+
+        let (code, body) = call(
+            uanalytics_xbar_r_chart,
+            &serde_json::json!({ "subgroups": [[1.0, 2.0]], "rules": ["NoSuchRule"] }).to_string(),
         );
         assert_eq!(code, -3, "{body}");
     }

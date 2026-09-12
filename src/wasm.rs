@@ -14,34 +14,16 @@
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
+// The shapes below are the wire contract, shared with the C FFI so the two
+// transports cannot drift apart again. See `crate::wire`.
+use crate::wire::{
+    add_rows, attribute_point_dtos, laney_p_dto, laney_point_dtos, p_chart_dto, point_dtos,
+    rules_from_json, subgroup_size, xbar_r_dto, AttributeChartPointDto, ChartPointDto,
+};
+
 // ---------------------------------------------------------------------------
 // Serializable DTO types
 // ---------------------------------------------------------------------------
-
-#[derive(Serialize, Debug)]
-struct XbarRChartDto {
-    xbar_cl: f64,
-    xbar_ucl: f64,
-    xbar_lcl: f64,
-    r_cl: f64,
-    r_ucl: f64,
-    r_lcl: f64,
-    /// Short-term sigma implied by this chart (`R-bar / d2`). Feed it to
-    /// `process_capability` as `sigma_within` -- it is the quantity a
-    /// capability study needs and the one a flat measurement vector cannot
-    /// carry.
-    sigma_hat: Option<f64>,
-    xbar_points: Vec<ChartPointDto>,
-    r_points: Vec<ChartPointDto>,
-    in_control: bool,
-}
-
-#[derive(Serialize, Debug)]
-struct ChartPointDto {
-    index: usize,
-    value: f64,
-    violations: Vec<String>,
-}
 
 #[derive(Serialize, Debug)]
 struct XbarSChartDto {
@@ -82,23 +64,6 @@ struct LimitsInputDto {
     ucl: f64,
     cl: f64,
     lcl: f64,
-}
-
-#[derive(Serialize, Debug)]
-struct PChartDto {
-    p_bar: f64,
-    points: Vec<AttributeChartPointDto>,
-    in_control: bool,
-}
-
-#[derive(Serialize, Debug)]
-struct AttributeChartPointDto {
-    index: usize,
-    value: f64,
-    ucl: f64,
-    cl: f64,
-    lcl: f64,
-    out_of_control: bool,
 }
 
 /// Input for `process_capability`.
@@ -149,13 +114,6 @@ struct AdNormalityDto {
     statistic: f64,
     statistic_modified: f64,
     p_value: f64,
-}
-
-#[derive(Serialize, Debug)]
-struct LaneyPChartDto {
-    p_bar: f64,
-    phi: f64,
-    points: Vec<AttributeChartPointDto>,
 }
 
 /// NP and C charts: one set of limits for every point.
@@ -253,72 +211,9 @@ fn from_json<T: serde::de::DeserializeOwned>(
     serde_json::from_value(json).map_err(|e| format!("{param}: {e}"))
 }
 
-fn violation_name(v: crate::spc::ViolationType) -> &'static str {
-    use crate::spc::ViolationType;
-    match v {
-        ViolationType::BeyondLimits => "BeyondLimits",
-        ViolationType::NineOneSide => "NineOneSide",
-        ViolationType::SixTrend => "SixTrend",
-        ViolationType::FourteenAlternating => "FourteenAlternating",
-        ViolationType::TwoOfThreeBeyond2Sigma => "TwoOfThreeBeyond2Sigma",
-        ViolationType::FourOfFiveBeyond1Sigma => "FourOfFiveBeyond1Sigma",
-        ViolationType::FifteenWithin1Sigma => "FifteenWithin1Sigma",
-        ViolationType::EightBeyond1Sigma => "EightBeyond1Sigma",
-    }
-}
-
 // ---------------------------------------------------------------------------
 // WASM exports
 // ---------------------------------------------------------------------------
-
-/// Parse an optional `{ rules: [...] }` options object into a rule set.
-///
-/// Absent, `undefined`, `null` or an object without `rules` all mean "the
-/// default set", so a caller that never passes options keeps the behaviour it
-/// had. Split out from the binding so it can be exercised without a `JsValue`.
-fn rules_from_json(options: Option<serde_json::Value>) -> Result<crate::spc::RuleSet, String> {
-    use crate::spc::{RuleSet, ViolationType};
-
-    let Some(value) = options else {
-        return Ok(RuleSet::default());
-    };
-    if value.is_null() {
-        return Ok(RuleSet::default());
-    }
-    let Some(names) = value.get("rules") else {
-        return Ok(RuleSet::default());
-    };
-    if names.is_null() {
-        return Ok(RuleSet::default());
-    }
-    let names = names
-        .as_array()
-        .ok_or_else(|| "rules: expected an array of rule names".to_string())?;
-
-    let mut set = RuleSet::none();
-    for name in names {
-        let name = name
-            .as_str()
-            .ok_or_else(|| "rules: expected an array of rule names".to_string())?;
-        let rule = match name {
-            "BeyondLimits" => ViolationType::BeyondLimits,
-            "NineOneSide" => ViolationType::NineOneSide,
-            "SixTrend" => ViolationType::SixTrend,
-            "FourteenAlternating" => ViolationType::FourteenAlternating,
-            "TwoOfThreeBeyond2Sigma" => ViolationType::TwoOfThreeBeyond2Sigma,
-            "FourOfFiveBeyond1Sigma" => ViolationType::FourOfFiveBeyond1Sigma,
-            "FifteenWithin1Sigma" => ViolationType::FifteenWithin1Sigma,
-            "EightBeyond1Sigma" => ViolationType::EightBeyond1Sigma,
-            other => {
-                return Err(format!(
-                    "rules: unknown rule {other:?} -- the names are the values                      `violations` reports"
-                ))
-            }
-        };
-        set = set.with(rule);
-    }
-    Ok(set)
-}
 
 /// Compute an X-bar R chart from subgroups.
 ///
@@ -445,83 +340,6 @@ fn rules_option(options: Option<JsValue>) -> Result<crate::spc::RuleSet, JsValue
         }
         _ => Ok(crate::spc::RuleSet::default()),
     }
-}
-
-fn point_dtos(points: &[crate::spc::ChartPoint]) -> Vec<ChartPointDto> {
-    points
-        .iter()
-        .map(|p| ChartPointDto {
-            index: p.index,
-            value: p.value,
-            violations: p
-                .violations
-                .iter()
-                .map(|&v| violation_name(v).to_owned())
-                .collect(),
-        })
-        .collect()
-}
-
-/// Checks the matrix a subgroup chart takes and returns its subgroup size.
-///
-/// A ragged subgroup is refused by its row: the chart would skip it, and every
-/// later point would then carry an index one short of the row it came from.
-///
-/// The supported subgroup range is not restated here. It used to be, as a
-/// literal `2..=10` alongside the same literal in the constructor, so widening
-/// the crate's factor tables left the binding rejecting sizes the crate had
-/// just learned to handle -- a disagreement no test in either crate could see,
-/// because each one was right about its own copy.
-fn subgroup_size(subgroups: &[Vec<f64>]) -> Result<usize, String> {
-    let n = subgroups
-        .first()
-        .map(Vec::len)
-        .ok_or("at least one subgroup required")?;
-    Ok(n)
-}
-
-/// Feeds rows to a chart, naming the row a rejection came from. The chart
-/// knows why a sample is unusable but not where it sat in the caller's input.
-fn add_rows<T>(
-    rows: impl IntoIterator<Item = T>,
-    label: &str,
-    mut add: impl FnMut(T) -> Result<(), crate::spc::ControlChartError>,
-) -> Result<(), String> {
-    for (i, row) in rows.into_iter().enumerate() {
-        add(row).map_err(|e| format!("{label}[{i}]: {e}"))?;
-    }
-    Ok(())
-}
-
-fn xbar_r_dto(
-    subgroups: Vec<Vec<f64>>,
-    rules: crate::spc::RuleSet,
-) -> Result<XbarRChartDto, String> {
-    use crate::spc::{ControlChart, XBarRChart};
-
-    let n = subgroup_size(&subgroups)?;
-    let mut chart = XBarRChart::new(n)
-        .map_err(|e| e.to_string())?
-        .with_rules(rules);
-    add_rows(&subgroups, "subgroups", |g| chart.add_sample(g))?;
-    let x = chart
-        .control_limits()
-        .ok_or("insufficient data for control limits")?;
-    let r = chart
-        .r_limits()
-        .ok_or("insufficient data for R chart limits")?;
-    Ok(XbarRChartDto {
-        xbar_cl: x.cl,
-        xbar_ucl: x.ucl,
-        xbar_lcl: x.lcl,
-        r_cl: r.cl,
-        r_ucl: r.ucl,
-        r_lcl: r.lcl,
-        sigma_hat: chart.sigma_hat(),
-        xbar_points: point_dtos(chart.points()),
-        r_points: point_dtos(chart.r_points()),
-        in_control: chart.is_in_control(),
-    })
 }
 
 fn xbar_s_dto(
@@ -867,52 +685,6 @@ pub fn laney_u_chart(samples: JsValue) -> Result<JsValue, JsValue> {
 // carries the index of the wrong row. The cores refuse such a row by its index
 // before the chart sees it.
 
-fn attribute_point_dtos(points: &[crate::spc::AttributeChartPoint]) -> Vec<AttributeChartPointDto> {
-    points
-        .iter()
-        .map(|p| AttributeChartPointDto {
-            index: p.index,
-            value: p.value,
-            ucl: p.ucl,
-            cl: p.cl,
-            lcl: p.lcl,
-            out_of_control: p.out_of_control,
-        })
-        .collect()
-}
-
-fn laney_point_dtos(points: &[crate::spc::LaneyAttributePoint]) -> Vec<AttributeChartPointDto> {
-    points
-        .iter()
-        .map(|p| AttributeChartPointDto {
-            index: p.index,
-            value: p.value,
-            ucl: p.ucl,
-            cl: p.cl,
-            lcl: p.lcl,
-            out_of_control: p.out_of_control,
-        })
-        .collect()
-}
-
-/// `[defectives, sample_size]` pairs as `(defectives, sample_size)`, refusing
-/// a pair that has no proportion.
-fn proportion_samples(raw: &[[u64; 2]]) -> Result<Vec<(u64, u64)>, String> {
-    raw.iter()
-        .enumerate()
-        .map(|(i, &[d, n])| {
-            if n == 0 || d > n {
-                Err(format!(
-                    "samples[{i}]: {d} defectives out of {n} -- each sample needs a size \
-                     above 0 and at most that many defectives"
-                ))
-            } else {
-                Ok((d, n))
-            }
-        })
-        .collect()
-}
-
 /// Refuses a `[defects, units]` pair whose units are not a positive number.
 fn check_rate_samples(raw: &[(u64, f64)]) -> Result<(), String> {
     match raw.iter().position(|&(_, u)| !(u.is_finite() && u > 0.0)) {
@@ -922,30 +694,6 @@ fn check_rate_samples(raw: &[(u64, f64)]) -> Result<(), String> {
         )),
         None => Ok(()),
     }
-}
-
-fn p_chart_dto(raw: &[[u64; 2]]) -> Result<PChartDto, String> {
-    use crate::spc::PChart;
-
-    let samples = proportion_samples(raw)?;
-    let mut chart = PChart::new();
-    add_rows(&samples, "samples", |&(d, n)| chart.add_sample(d, n))?;
-    let p_bar = chart.p_bar().ok_or("no samples provided")?;
-    Ok(PChartDto {
-        p_bar,
-        points: attribute_point_dtos(chart.points()),
-        in_control: chart.is_in_control(),
-    })
-}
-
-fn laney_p_dto(raw: &[[u64; 2]]) -> Result<LaneyPChartDto, String> {
-    let samples = proportion_samples(raw)?;
-    let chart = crate::spc::laney_p_chart(&samples).ok_or("at least 3 samples are needed")?;
-    Ok(LaneyPChartDto {
-        p_bar: chart.p_bar,
-        phi: chart.phi,
-        points: laney_point_dtos(&chart.points),
-    })
 }
 
 fn np_chart_dto(defectives: &[u64], sample_size: u64) -> Result<FixedLimitChartDto, String> {

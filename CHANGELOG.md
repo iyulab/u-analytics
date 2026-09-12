@@ -8,7 +8,34 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Changed
+
+- **The C FFI and the WASM binding now share one JSON contract** (`src/wire.rs`).
+  Both transports carry the same analyses, but their shapes had drifted apart;
+  the SPC family is unified in this release, the rest follows. **Breaking for
+  C FFI callers** (`UAnalytics` NuGet 0.4.0 → 0.5.0):
+  - `uanalytics_xbar_r_chart` answers `xbar_cl`/`xbar_ucl`/`xbar_lcl` (was
+    `x_bar_*`), and carries the per-point `xbar_points`/`r_points` (each with
+    `index`, `value`, `violations`) and `in_control` that only the WASM side
+    reported before. The request accepts an optional `rules` array, exactly as
+    the WASM binding's options do.
+  - `uanalytics_p_chart` and `uanalytics_laney_p_chart` take `[defectives,
+    sample_size]` pairs -- the crate's own order, and the WASM binding's. They
+    used to take the pair **reversed**, so a caller reading the two transports'
+    docs against each other got a plausible chart from the wrong numbers.
+    Responses now carry per-point `points` (`index`, `value`, `ucl`, `cl`,
+    `lcl`, `out_of_control`) and `in_control` instead of parallel
+    `proportions`/`ucls`/`lcls` arrays.
+  - A test now asserts that each FFI body is byte-for-byte the `serde_json`
+    rendering of the wire value the WASM binding emits, so the two cannot
+    drift silently again.
+- The C# client exposes `LaneyPChart` (the native entry point already existed)
+  and an optional `rules` argument on `XbarRChart`.
+
 ### Fixed
+
+- The `rules: unknown rule …` error message carried a run of literal spaces in
+  the middle of a sentence (a line-continuation lost at some point).
 
 - **`boxcox_capability` no longer reports short-term capability indices.** It
   computed `cp`/`cpk`/`cpu`/`cpl` from the overall sigma of the transformed

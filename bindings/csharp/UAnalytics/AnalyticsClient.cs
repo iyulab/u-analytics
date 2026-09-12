@@ -25,11 +25,37 @@ public sealed class AnalyticsClient : IDisposable
 
     // ── SPC ──
 
-    public JsonElement XbarRChart(double[][] subgroups)
-        => CallNative(NativeInterop.uanalytics_xbar_r_chart, new { subgroups });
+    /// <summary>
+    /// X-bar/R chart. Returns the same JSON the WASM binding does:
+    /// <c>xbar_cl</c>/<c>xbar_ucl</c>/<c>xbar_lcl</c>, <c>r_cl</c>/<c>r_ucl</c>/<c>r_lcl</c>,
+    /// <c>sigma_hat</c>, per-point <c>xbar_points</c>/<c>r_points</c> (each with
+    /// <c>index</c>, <c>value</c>, <c>violations</c>) and <c>in_control</c>.
+    /// <paramref name="rules"/> names the run tests to apply, in the vocabulary
+    /// <c>violations</c> reports; <c>null</c> applies all eight Nelson tests, an
+    /// empty array applies the control limits only.
+    /// </summary>
+    public JsonElement XbarRChart(double[][] subgroups, string[]? rules = null)
+        => CallNative(NativeInterop.uanalytics_xbar_r_chart,
+            rules is null ? new { subgroups } : (object)new { subgroups, rules });
 
+    /// <summary>
+    /// P chart. Each sample is <c>[defectives, sampleSize]</c> -- the order the
+    /// chart's own <c>add_sample</c> takes, and the order the WASM binding uses.
+    /// Returns <c>p_bar</c>, per-point <c>points</c> (<c>index</c>, <c>value</c>,
+    /// <c>ucl</c>, <c>cl</c>, <c>lcl</c>, <c>out_of_control</c>) and <c>in_control</c>.
+    /// A sample with more defectives than its size, or a size of zero, is rejected
+    /// by its row rather than dropped.
+    /// </summary>
     public JsonElement PChart(ulong[][] samples)
         => CallNative(NativeInterop.uanalytics_p_chart, new { samples });
+
+    /// <summary>
+    /// Laney P' chart for over- or under-dispersed proportions. Same
+    /// <c>[defectives, sampleSize]</c> samples as <see cref="PChart"/>; at least three.
+    /// Returns <c>p_bar</c>, <c>phi</c> and per-point <c>points</c>.
+    /// </summary>
+    public JsonElement LaneyPChart(ulong[][] samples)
+        => CallNative(NativeInterop.uanalytics_laney_p_chart, new { samples });
 
     // ── Capability ──
 

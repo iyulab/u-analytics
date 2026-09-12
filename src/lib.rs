@@ -37,6 +37,10 @@ pub mod spc;
 pub mod testing;
 pub mod weibull;
 
+/// The JSON wire contract shared by the `ffi` and `wasm` transports.
+#[cfg(any(feature = "ffi", feature = "wasm"))]
+mod wire;
+
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
