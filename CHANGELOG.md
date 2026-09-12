@@ -11,9 +11,11 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 ### Changed
 
 - **The C FFI and the WASM binding now share one JSON contract** (`src/wire.rs`).
-  Both transports carry the same analyses, but their shapes had drifted apart;
-  the SPC family is unified in this release, the rest follows. **Breaking for
-  C FFI callers** (`UAnalytics` NuGet 0.4.0 → 0.5.0):
+  Both transports carry the same analyses, but their shapes had drifted apart.
+  Every entry point the two have in common -- the three SPC charts, both
+  capability analyses, both Gage R&R methods and changepoint detection -- now
+  parses the same request type and serialises the same response type.
+  **Breaking for C FFI callers** (`UAnalytics` NuGet 0.4.0 → 0.5.0):
   - `uanalytics_xbar_r_chart` answers `xbar_cl`/`xbar_ucl`/`xbar_lcl` (was
     `x_bar_*`), and carries the per-point `xbar_points`/`r_points` (each with
     `index`, `value`, `violations`) and `in_control` that only the WASM side
@@ -26,11 +28,31 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
     Responses now carry per-point `points` (`index`, `value`, `ucl`, `cl`,
     `lcl`, `out_of_control`) and `in_control` instead of parallel
     `proportions`/`ucls`/`lcls` arrays.
-  - A test now asserts that each FFI body is byte-for-byte the `serde_json`
-    rendering of the wire value the WASM binding emits, so the two cannot
-    drift silently again.
-- The C# client exposes `LaneyPChart` (the native entry point already existed)
-  and an optional `rules` argument on `XbarRChart`.
+  - `uanalytics_process_capability` no longer estimates a within sigma from
+    the moving range when `sigma_within` is omitted. That estimate is right
+    for individual observations and wrong for data flattened out of
+    subgroups, and the entry point could not tell which it had; the WASM
+    binding never guessed. Without `sigma_within` the short-term indices are
+    `null` and `sigma_source` is `"overall"`. A caller with individual
+    observations gets the former number by running `imr_chart` first and
+    passing its `sigma_hat` -- the assumption becomes the caller's, and
+    visible.
+  - `uanalytics_detect_changepoints` defaults to the `l2` cost (was `normal`
+    -- same input, different changepoints across the two transports), takes
+    a numeric `penalty` as a JSON number rather than a numeric string, accepts
+    an optional `cost` of `"l2"`/`"normal"`, and reports `n_segments`.
+  - `uanalytics_percentile_capability` reports `percentile_lower` and
+    `percentile_upper`; the Gage R&R `status` uses the same spelling as WASM.
+  - **Unknown request fields are rejected** over the FFI as they always were
+    over WASM. A misspelt `sigmaWithin` used to be ignored silently, yielding
+    a long-term-only answer with no hint that the caller's sigma never
+    arrived; it is now a parse error naming the field.
+  - A test asserts, for all eight shared entry points, that the FFI body is
+    the `serde_json` rendering of the wire value the WASM binding emits, so
+    the two cannot drift silently again.
+- The C# client exposes `LaneyPChart` (the native entry point already existed),
+  an optional `rules` argument on `XbarRChart`, and takes the changepoint
+  `penalty` as `double?` plus a `cost` argument.
 
 ### Fixed
 

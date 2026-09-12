@@ -19,7 +19,7 @@
 //! it would lose the index a caller needs to line a violation up with its input
 //! row.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Debug)]
 pub(crate) struct XbarRChartDto {
@@ -283,5 +283,355 @@ pub(crate) fn laney_p_dto(raw: &[[u64; 2]]) -> Result<LaneyPChartDto, String> {
         p_bar: chart.p_bar,
         phi: chart.phi,
         points: laney_point_dtos(&chart.points),
+    })
+}
+
+/// Input for `process_capability`.
+///
+/// Every field except `data` is optional, but at least one of `usl`/`lsl` must
+/// be present -- a capability index without a specification limit is undefined.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CapabilityInputDto {
+    pub(crate) data: Vec<f64>,
+    #[serde(default)]
+    pub(crate) usl: Option<f64>,
+    #[serde(default)]
+    pub(crate) lsl: Option<f64>,
+    /// Short-term (within-subgroup) sigma, normally estimated from a control
+    /// chart as R-bar/d2 or S-bar/c4. It cannot be recovered from `data`: the
+    /// subgroup structure is not in a flat measurement vector.
+    #[serde(default)]
+    pub(crate) sigma_within: Option<f64>,
+    /// Process target for Cpm. Without it `cpm` is `null`.
+    #[serde(default)]
+    pub(crate) target: Option<f64>,
+}
+
+#[derive(Serialize, Debug)]
+pub(crate) struct CapabilityDto {
+    pub(crate) mean: f64,
+    /// `"within"` when `sigma_within` was supplied, `"overall"` otherwise.
+    /// Without it the short-term indices are not computed at all rather than
+    /// being filled with the long-term sigma -- a number under the wrong name
+    /// is harder to notice than a null.
+    pub(crate) sigma_source: &'static str,
+    pub(crate) std_dev_within: Option<f64>,
+    pub(crate) std_dev_overall: f64,
+    pub(crate) cp: Option<f64>,
+    pub(crate) cpk: Option<f64>,
+    pub(crate) cpu: Option<f64>,
+    pub(crate) cpl: Option<f64>,
+    pub(crate) pp: Option<f64>,
+    pub(crate) ppk: Option<f64>,
+    pub(crate) ppu: Option<f64>,
+    pub(crate) ppl: Option<f64>,
+    pub(crate) cpm: Option<f64>,
+}
+
+/// Pure core of [`process_capability`]: the specification, sigma-source and
+/// null-handling contract, with no `JsValue` in sight.
+///
+/// The binding above is a two-line adapter over this. The split is what makes
+/// the contract testable at all on a host without a WebAssembly runner --
+/// `JsValue` cannot be constructed off `wasm32`, so a monolithic binding is
+/// only reachable from a browser or Node. Everything this function decides
+/// (which index family is computed, which fields come back `null`, which
+/// specification shapes are legal) is the part a consumer actually observes.
+pub(crate) fn capability_dto(input: CapabilityInputDto) -> Result<CapabilityDto, String> {
+    use crate::capability::ProcessCapability;
+
+    let mut spec = ProcessCapability::new(input.usl, input.lsl)
+        .map_err(|e| format!("invalid specification limits: {e}"))?;
+    if let Some(target) = input.target {
+        if !target.is_finite() {
+            return Err("target must be finite".to_string());
+        }
+        spec = spec.with_target(target);
+    }
+
+    let dto = match input.sigma_within {
+        Some(sigma_within) => {
+            if !sigma_within.is_finite() || sigma_within <= 0.0 {
+                return Err("sigma_within must be a positive, finite number \
+                     (R-bar/d2 or S-bar/c4 from the control chart)"
+                    .to_string());
+            }
+            let indices = spec
+                .compute(&input.data, sigma_within)
+                .ok_or("insufficient or invalid data (need >= 2 finite values)")?;
+            CapabilityDto {
+                mean: indices.mean,
+                sigma_source: "within",
+                std_dev_within: Some(indices.std_dev_within),
+                std_dev_overall: indices.std_dev_overall,
+                cp: indices.cp,
+                cpk: indices.cpk,
+                cpu: indices.cpu,
+                cpl: indices.cpl,
+                pp: indices.pp,
+                ppk: indices.ppk,
+                ppu: indices.ppu,
+                ppl: indices.ppl,
+                cpm: indices.cpm,
+            }
+        }
+        None => {
+            // No short-term sigma: report the long-term indices only. The
+            // crate computes both from the same sigma in this mode, so
+            // carrying the short-term names through would publish Pp under the
+            // name Cp for every input.
+            let indices = spec
+                .compute_overall(&input.data)
+                .ok_or("insufficient or invalid data (need >= 2 finite values)")?;
+            CapabilityDto {
+                mean: indices.mean,
+                sigma_source: "overall",
+                std_dev_within: None,
+                std_dev_overall: indices.std_dev_overall,
+                cp: None,
+                cpk: None,
+                cpu: None,
+                cpl: None,
+                pp: indices.pp,
+                ppk: indices.ppk,
+                ppu: indices.ppu,
+                ppl: indices.ppl,
+                // Not a short-term index: Cpm is the spread about the target,
+                // the same whichever sigma the caller could supply.
+                cpm: indices.cpm,
+            }
+        }
+    };
+    Ok(dto)
+}
+
+/// Input for `percentile_capability`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PercentileCapabilityInputDto {
+    pub(crate) data: Vec<f64>,
+    pub(crate) lsl: Option<f64>,
+    pub(crate) usl: Option<f64>,
+}
+
+#[derive(Serialize)]
+pub(crate) struct PercentileCapabilityDto {
+    pub(crate) cp_star: Option<f64>,
+    pub(crate) cpk_star: Option<f64>,
+    pub(crate) cpu_star: Option<f64>,
+    pub(crate) cpl_star: Option<f64>,
+    pub(crate) median: f64,
+    pub(crate) percentile_lower: f64,
+    pub(crate) percentile_upper: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct GageRRInputDto {
+    pub(crate) measurements: Vec<Vec<Vec<f64>>>,
+    pub(crate) tolerance: Option<f64>,
+}
+
+#[derive(Serialize)]
+pub(crate) struct GageRRResultDto {
+    pub(crate) ev: f64,
+    pub(crate) av: f64,
+    pub(crate) grr: f64,
+    pub(crate) pv: f64,
+    pub(crate) tv: f64,
+    pub(crate) percent_ev: f64,
+    pub(crate) percent_av: f64,
+    pub(crate) percent_grr: f64,
+    pub(crate) percent_pv: f64,
+    pub(crate) percent_tolerance: Option<f64>,
+    pub(crate) ndc: u32,
+    pub(crate) status: String,
+}
+
+#[derive(Serialize)]
+pub(crate) struct GageRRAnovaResultDto {
+    pub(crate) anova_table: Vec<AnovaRowDto>,
+    pub(crate) variance_components: VarianceComponentsDto,
+    pub(crate) ev: f64,
+    pub(crate) av: f64,
+    pub(crate) grr: f64,
+    pub(crate) pv: f64,
+    pub(crate) tv: f64,
+    pub(crate) percent_grr: f64,
+    pub(crate) percent_tolerance: Option<f64>,
+    pub(crate) ndc: u32,
+    pub(crate) status: String,
+    pub(crate) interaction_significant: bool,
+    pub(crate) interaction_pooled: bool,
+}
+
+#[derive(Serialize)]
+pub(crate) struct AnovaRowDto {
+    pub(crate) source: String,
+    pub(crate) df: f64,
+    pub(crate) ss: f64,
+    pub(crate) ms: f64,
+    pub(crate) f_value: Option<f64>,
+    pub(crate) p_value: Option<f64>,
+}
+
+#[derive(Serialize)]
+pub(crate) struct VarianceComponentsDto {
+    pub(crate) part: f64,
+    pub(crate) operator: f64,
+    pub(crate) interaction: f64,
+    pub(crate) repeatability: f64,
+    pub(crate) reproducibility: f64,
+    pub(crate) total: f64,
+}
+
+pub(crate) fn grr_status_str(status: crate::msa::GrrStatus) -> &'static str {
+    match status {
+        crate::msa::GrrStatus::Acceptable => "Acceptable",
+        crate::msa::GrrStatus::Marginal => "Marginal",
+        crate::msa::GrrStatus::Unacceptable => "Unacceptable",
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PeltInputDto {
+    pub(crate) data: Vec<f64>,
+    #[serde(default = "default_cost")]
+    pub(crate) cost: String,
+    #[serde(default = "default_penalty")]
+    pub(crate) penalty: PeltPenaltyDto,
+    #[serde(default = "default_min_seg")]
+    pub(crate) min_segment_len: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(crate) enum PeltPenaltyDto {
+    Named(String),
+    Value(f64),
+}
+
+#[derive(Serialize)]
+pub(crate) struct PeltResultDto {
+    pub(crate) changepoints: Vec<usize>,
+    pub(crate) n_segments: usize,
+}
+
+pub(crate) fn default_cost() -> String {
+    "l2".to_owned()
+}
+
+pub(crate) fn default_penalty() -> PeltPenaltyDto {
+    PeltPenaltyDto::Named("bic".to_owned())
+}
+
+pub(crate) fn default_min_seg() -> usize {
+    2
+}
+
+pub(crate) fn percentile_capability_dto(
+    input: PercentileCapabilityInputDto,
+) -> Result<PercentileCapabilityDto, String> {
+    let result = crate::capability::percentile_capability(&input.data, input.lsl, input.usl)
+        .map_err(|e| e.to_string())?;
+    Ok(PercentileCapabilityDto {
+        cp_star: result.cp_star,
+        cpk_star: result.cpk_star,
+        cpu_star: result.cpu_star,
+        cpl_star: result.cpl_star,
+        median: result.median,
+        percentile_lower: result.percentile_lower,
+        percentile_upper: result.percentile_upper,
+    })
+}
+
+pub(crate) fn gage_rr_xbar_r_dto(dto: GageRRInputDto) -> Result<GageRRResultDto, String> {
+    let input = crate::msa::GageRRInput {
+        measurements: dto.measurements,
+        tolerance: dto.tolerance,
+    };
+    let result = crate::msa::gage_rr_xbar_r(&input).map_err(|e| e.to_string())?;
+    Ok(GageRRResultDto {
+        ev: result.ev,
+        av: result.av,
+        grr: result.grr,
+        pv: result.pv,
+        tv: result.tv,
+        percent_ev: result.percent_ev,
+        percent_av: result.percent_av,
+        percent_grr: result.percent_grr,
+        percent_pv: result.percent_pv,
+        percent_tolerance: result.percent_tolerance,
+        ndc: result.ndc,
+        status: grr_status_str(result.status).to_owned(),
+    })
+}
+
+pub(crate) fn gage_rr_anova_dto(dto: GageRRInputDto) -> Result<GageRRAnovaResultDto, String> {
+    let input = crate::msa::GageRRInput {
+        measurements: dto.measurements,
+        tolerance: dto.tolerance,
+    };
+    let result = crate::msa::gage_rr_anova(&input).map_err(|e| e.to_string())?;
+    let anova_table = result
+        .anova_table
+        .rows
+        .iter()
+        .map(|r| AnovaRowDto {
+            source: r.source.clone(),
+            df: r.df,
+            ss: r.ss,
+            ms: r.ms,
+            f_value: r.f_value,
+            p_value: r.p_value,
+        })
+        .collect();
+    let vc = &result.variance_components;
+    Ok(GageRRAnovaResultDto {
+        anova_table,
+        variance_components: VarianceComponentsDto {
+            part: vc.part,
+            operator: vc.operator,
+            interaction: vc.interaction,
+            repeatability: vc.repeatability,
+            reproducibility: vc.reproducibility,
+            total: vc.total,
+        },
+        ev: result.ev,
+        av: result.av,
+        grr: result.grr,
+        pv: result.pv,
+        tv: result.tv,
+        percent_grr: result.percent_grr,
+        percent_tolerance: result.percent_tolerance,
+        ndc: result.ndc,
+        status: grr_status_str(result.status).to_owned(),
+        interaction_significant: result.interaction_significant,
+        interaction_pooled: result.interaction_pooled,
+    })
+}
+
+pub(crate) fn pelt_dto(input: PeltInputDto) -> Result<PeltResultDto, String> {
+    if input.data.is_empty() {
+        return Err("data must not be empty".to_owned());
+    }
+    let cost = match input.cost.as_str() {
+        "l2" => crate::detection::CostFunction::L2,
+        "normal" => crate::detection::CostFunction::Normal,
+        other => return Err(format!("unknown cost function: {other}")),
+    };
+    let penalty = match input.penalty {
+        PeltPenaltyDto::Named(ref s) if s == "bic" => crate::detection::Penalty::Bic,
+        PeltPenaltyDto::Named(ref s) => return Err(format!("unknown penalty: {s}")),
+        PeltPenaltyDto::Value(v) => crate::detection::Penalty::Custom(v),
+    };
+    let pelt = crate::detection::Pelt::with_min_segment_len(cost, penalty, input.min_segment_len)
+        .ok_or("invalid parameters (penalty must be positive, min_segment_len >= 2)")?;
+    let result = pelt.detect(&input.data);
+    Ok(PeltResultDto {
+        n_segments: result.changepoints.len() + 1,
+        changepoints: result.changepoints,
     })
 }

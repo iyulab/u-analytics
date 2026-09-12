@@ -61,10 +61,11 @@ public sealed class AnalyticsClient : IDisposable
 
     /// <summary>
     /// Capability indices. <paramref name="sigmaWithin"/> is the short-term sigma from a
-    /// control chart (the <c>sigma_hat</c> that <see cref="XbarRChart"/> returns); when it is
-    /// omitted the engine estimates one from the moving range of <paramref name="data"/> in
-    /// order, and the result's <c>sigma_source</c> is <c>"moving_range"</c> instead of
-    /// <c>"within"</c>.
+    /// control chart (the <c>sigma_hat</c> that <see cref="XbarRChart"/> returns). Without it
+    /// the short-term indices (<c>cp</c>, <c>cpk</c>, <c>cpu</c>, <c>cpl</c>) are <c>null</c> and
+    /// <c>sigma_source</c> is <c>"overall"</c> -- a flat vector carries no subgroup structure to
+    /// estimate one from, and this client no longer guesses one from the moving range.
+    /// Same JSON as the WASM binding.
     /// </summary>
     public JsonElement ProcessCapability(double[] data, double? usl, double? lsl, double? target = null,
         double? sigmaWithin = null)
@@ -93,9 +94,18 @@ public sealed class AnalyticsClient : IDisposable
 
     // ── Detection ──
 
-    public JsonElement DetectChangepoints(double[] data, string? penalty = null, int? minSegmentLen = null)
+    /// <summary>
+    /// PELT changepoint detection. <paramref name="penalty"/> is a positive number, or
+    /// <c>null</c> for BIC. <paramref name="cost"/> is <c>"l2"</c> (mean change, the default)
+    /// or <c>"normal"</c> (mean and variance). Returns <c>changepoints</c> and
+    /// <c>n_segments</c>. Same JSON as the WASM binding; the penalty was formerly a string.
+    /// </summary>
+    public JsonElement DetectChangepoints(double[] data, double? penalty = null, int? minSegmentLen = null,
+        string cost = "l2")
         => CallNative(NativeInterop.uanalytics_detect_changepoints,
-            new { data, penalty, min_segment_len = minSegmentLen });
+            penalty is null
+                ? new { data, cost, min_segment_len = minSegmentLen }
+                : (object)new { data, cost, penalty, min_segment_len = minSegmentLen });
 
     // ── Correlation ──
 

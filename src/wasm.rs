@@ -17,8 +17,11 @@ use wasm_bindgen::prelude::*;
 // The shapes below are the wire contract, shared with the C FFI so the two
 // transports cannot drift apart again. See `crate::wire`.
 use crate::wire::{
-    add_rows, attribute_point_dtos, laney_p_dto, laney_point_dtos, p_chart_dto, point_dtos,
-    rules_from_json, subgroup_size, xbar_r_dto, AttributeChartPointDto, ChartPointDto,
+    add_rows, attribute_point_dtos, capability_dto, default_cost, default_min_seg, default_penalty,
+    gage_rr_anova_dto, gage_rr_xbar_r_dto, laney_p_dto, laney_point_dtos, p_chart_dto, pelt_dto,
+    percentile_capability_dto, point_dtos, rules_from_json, subgroup_size, xbar_r_dto,
+    AttributeChartPointDto, CapabilityInputDto, ChartPointDto, GageRRInputDto, PeltInputDto,
+    PeltPenaltyDto, PeltResultDto, PercentileCapabilityInputDto,
 };
 
 // ---------------------------------------------------------------------------
@@ -64,49 +67,6 @@ struct LimitsInputDto {
     ucl: f64,
     cl: f64,
     lcl: f64,
-}
-
-/// Input for `process_capability`.
-///
-/// Every field except `data` is optional, but at least one of `usl`/`lsl` must
-/// be present -- a capability index without a specification limit is undefined.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CapabilityInputDto {
-    data: Vec<f64>,
-    #[serde(default)]
-    usl: Option<f64>,
-    #[serde(default)]
-    lsl: Option<f64>,
-    /// Short-term (within-subgroup) sigma, normally estimated from a control
-    /// chart as R-bar/d2 or S-bar/c4. It cannot be recovered from `data`: the
-    /// subgroup structure is not in a flat measurement vector.
-    #[serde(default)]
-    sigma_within: Option<f64>,
-    /// Process target for Cpm. Without it `cpm` is `null`.
-    #[serde(default)]
-    target: Option<f64>,
-}
-
-#[derive(Serialize, Debug)]
-struct CapabilityDto {
-    mean: f64,
-    /// `"within"` when `sigma_within` was supplied, `"overall"` otherwise.
-    /// Without it the short-term indices are not computed at all rather than
-    /// being filled with the long-term sigma -- a number under the wrong name
-    /// is harder to notice than a null.
-    sigma_source: &'static str,
-    std_dev_within: Option<f64>,
-    std_dev_overall: f64,
-    cp: Option<f64>,
-    cpk: Option<f64>,
-    cpu: Option<f64>,
-    cpl: Option<f64>,
-    pp: Option<f64>,
-    ppk: Option<f64>,
-    ppu: Option<f64>,
-    ppl: Option<f64>,
-    cpm: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -493,83 +453,6 @@ pub fn process_capability(input: JsValue) -> Result<JsValue, JsValue> {
     to_js(&capability_dto(input).map_err(js_err)?)
 }
 
-/// Pure core of [`process_capability`]: the specification, sigma-source and
-/// null-handling contract, with no `JsValue` in sight.
-///
-/// The binding above is a two-line adapter over this. The split is what makes
-/// the contract testable at all on a host without a WebAssembly runner --
-/// `JsValue` cannot be constructed off `wasm32`, so a monolithic binding is
-/// only reachable from a browser or Node. Everything this function decides
-/// (which index family is computed, which fields come back `null`, which
-/// specification shapes are legal) is the part a consumer actually observes.
-fn capability_dto(input: CapabilityInputDto) -> Result<CapabilityDto, String> {
-    use crate::capability::ProcessCapability;
-
-    let mut spec = ProcessCapability::new(input.usl, input.lsl)
-        .map_err(|e| format!("invalid specification limits: {e}"))?;
-    if let Some(target) = input.target {
-        if !target.is_finite() {
-            return Err("target must be finite".to_string());
-        }
-        spec = spec.with_target(target);
-    }
-
-    let dto = match input.sigma_within {
-        Some(sigma_within) => {
-            if !sigma_within.is_finite() || sigma_within <= 0.0 {
-                return Err("sigma_within must be a positive, finite number \
-                     (R-bar/d2 or S-bar/c4 from the control chart)"
-                    .to_string());
-            }
-            let indices = spec
-                .compute(&input.data, sigma_within)
-                .ok_or("insufficient or invalid data (need >= 2 finite values)")?;
-            CapabilityDto {
-                mean: indices.mean,
-                sigma_source: "within",
-                std_dev_within: Some(indices.std_dev_within),
-                std_dev_overall: indices.std_dev_overall,
-                cp: indices.cp,
-                cpk: indices.cpk,
-                cpu: indices.cpu,
-                cpl: indices.cpl,
-                pp: indices.pp,
-                ppk: indices.ppk,
-                ppu: indices.ppu,
-                ppl: indices.ppl,
-                cpm: indices.cpm,
-            }
-        }
-        None => {
-            // No short-term sigma: report the long-term indices only. The
-            // crate computes both from the same sigma in this mode, so
-            // carrying the short-term names through would publish Pp under the
-            // name Cp for every input.
-            let indices = spec
-                .compute_overall(&input.data)
-                .ok_or("insufficient or invalid data (need >= 2 finite values)")?;
-            CapabilityDto {
-                mean: indices.mean,
-                sigma_source: "overall",
-                std_dev_within: None,
-                std_dev_overall: indices.std_dev_overall,
-                cp: None,
-                cpk: None,
-                cpu: None,
-                cpl: None,
-                pp: indices.pp,
-                ppk: indices.ppk,
-                ppu: indices.ppu,
-                ppl: indices.ppl,
-                // Not a short-term index: Cpm is the spread about the target,
-                // the same whichever sigma the caller could supply.
-                cpm: indices.cpm,
-            }
-        }
-    };
-    Ok(dto)
-}
-
 /// Anderson-Darling normality test (Stephens 1974).
 ///
 /// H₀: data is normally distributed.
@@ -828,43 +711,6 @@ pub fn t_chart(times: &[f64]) -> Result<JsValue, JsValue> {
 // PELT changepoint detection
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PeltInputDto {
-    data: Vec<f64>,
-    #[serde(default = "default_cost")]
-    cost: String,
-    #[serde(default = "default_penalty")]
-    penalty: PeltPenaltyDto,
-    #[serde(default = "default_min_seg")]
-    min_segment_len: usize,
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum PeltPenaltyDto {
-    Named(String),
-    Value(f64),
-}
-
-fn default_cost() -> String {
-    "l2".to_owned()
-}
-
-fn default_penalty() -> PeltPenaltyDto {
-    PeltPenaltyDto::Named("bic".to_owned())
-}
-
-fn default_min_seg() -> usize {
-    2
-}
-
-#[derive(Serialize)]
-struct PeltResultDto {
-    changepoints: Vec<usize>,
-    n_segments: usize,
-}
-
 /// Detect changepoints using the PELT algorithm (Killick et al., 2012).
 ///
 /// # Input JSON
@@ -891,35 +737,7 @@ struct PeltResultDto {
 #[wasm_bindgen]
 pub fn detect_changepoints(input: JsValue) -> Result<JsValue, JsValue> {
     let input: PeltInputDto = from_js(input, "input")?;
-
-    if input.data.is_empty() {
-        return Err(js_err("data must not be empty"));
-    }
-
-    let cost = match input.cost.as_str() {
-        "l2" => crate::detection::CostFunction::L2,
-        "normal" => crate::detection::CostFunction::Normal,
-        other => return Err(js_err(format!("unknown cost function: {other}"))),
-    };
-
-    let penalty = match input.penalty {
-        PeltPenaltyDto::Named(ref s) if s == "bic" => crate::detection::Penalty::Bic,
-        PeltPenaltyDto::Named(ref s) => return Err(js_err(format!("unknown penalty: {s}"))),
-        PeltPenaltyDto::Value(v) => crate::detection::Penalty::Custom(v),
-    };
-
-    let pelt = crate::detection::Pelt::with_min_segment_len(cost, penalty, input.min_segment_len)
-        .ok_or_else(|| {
-        js_err("invalid parameters (penalty must be positive, min_segment_len >= 2)")
-    })?;
-
-    let result = pelt.detect(&input.data);
-
-    let dto = PeltResultDto {
-        n_segments: result.changepoints.len() + 1,
-        changepoints: result.changepoints,
-    };
-    to_js(&dto)
+    to_js(&pelt_dto(input).map_err(js_err)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -998,94 +816,6 @@ pub fn detect_changepoints_multi(input: JsValue) -> Result<JsValue, JsValue> {
 // Gage R&R (MSA)
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct GageRRInputDto {
-    measurements: Vec<Vec<Vec<f64>>>,
-    tolerance: Option<f64>,
-}
-
-/// Input for `percentile_capability`.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PercentileCapabilityInputDto {
-    data: Vec<f64>,
-    lsl: Option<f64>,
-    usl: Option<f64>,
-}
-
-#[derive(Serialize)]
-struct GageRRResultDto {
-    ev: f64,
-    av: f64,
-    grr: f64,
-    pv: f64,
-    tv: f64,
-    percent_ev: f64,
-    percent_av: f64,
-    percent_grr: f64,
-    percent_pv: f64,
-    percent_tolerance: Option<f64>,
-    ndc: u32,
-    status: String,
-}
-
-#[derive(Serialize)]
-struct GageRRAnovaResultDto {
-    anova_table: Vec<AnovaRowDto>,
-    variance_components: VarianceComponentsDto,
-    ev: f64,
-    av: f64,
-    grr: f64,
-    pv: f64,
-    tv: f64,
-    percent_grr: f64,
-    percent_tolerance: Option<f64>,
-    ndc: u32,
-    status: String,
-    interaction_significant: bool,
-    interaction_pooled: bool,
-}
-
-#[derive(Serialize)]
-struct AnovaRowDto {
-    source: String,
-    df: f64,
-    ss: f64,
-    ms: f64,
-    f_value: Option<f64>,
-    p_value: Option<f64>,
-}
-
-#[derive(Serialize)]
-struct VarianceComponentsDto {
-    part: f64,
-    operator: f64,
-    interaction: f64,
-    repeatability: f64,
-    reproducibility: f64,
-    total: f64,
-}
-
-#[derive(Serialize)]
-struct PercentileCapabilityDto {
-    cp_star: Option<f64>,
-    cpk_star: Option<f64>,
-    cpu_star: Option<f64>,
-    cpl_star: Option<f64>,
-    median: f64,
-    percentile_lower: f64,
-    percentile_upper: f64,
-}
-
-fn grr_status_str(status: crate::msa::GrrStatus) -> &'static str {
-    match status {
-        crate::msa::GrrStatus::Acceptable => "Acceptable",
-        crate::msa::GrrStatus::Marginal => "Marginal",
-        crate::msa::GrrStatus::Unacceptable => "Unacceptable",
-    }
-}
-
 /// Compute Gage R&R using the X̄-R (Average & Range) method.
 ///
 /// # Input JSON
@@ -1105,30 +835,8 @@ fn grr_status_str(status: crate::msa::GrrStatus) -> &'static str {
 /// `percent_grr`, `percent_pv`, `percent_tolerance`, `ndc`, `status`.
 #[wasm_bindgen]
 pub fn gage_rr_xbar_r(input: JsValue) -> Result<JsValue, JsValue> {
-    let dto: GageRRInputDto = from_js(input, "input")?;
-
-    let input = crate::msa::GageRRInput {
-        measurements: dto.measurements,
-        tolerance: dto.tolerance,
-    };
-
-    let result = crate::msa::gage_rr_xbar_r(&input).map_err(js_err)?;
-
-    let out = GageRRResultDto {
-        ev: result.ev,
-        av: result.av,
-        grr: result.grr,
-        pv: result.pv,
-        tv: result.tv,
-        percent_ev: result.percent_ev,
-        percent_av: result.percent_av,
-        percent_grr: result.percent_grr,
-        percent_pv: result.percent_pv,
-        percent_tolerance: result.percent_tolerance,
-        ndc: result.ndc,
-        status: grr_status_str(result.status).to_owned(),
-    };
-    to_js(&out)
+    let input: GageRRInputDto = from_js(input, "input")?;
+    to_js(&gage_rr_xbar_r_dto(input).map_err(js_err)?)
 }
 
 /// Compute Gage R&R using the two-factor crossed ANOVA method.
@@ -1144,53 +852,8 @@ pub fn gage_rr_xbar_r(input: JsValue) -> Result<JsValue, JsValue> {
 /// `interaction_significant`, `interaction_pooled`.
 #[wasm_bindgen]
 pub fn gage_rr_anova(input: JsValue) -> Result<JsValue, JsValue> {
-    let dto: GageRRInputDto = from_js(input, "input")?;
-
-    let input = crate::msa::GageRRInput {
-        measurements: dto.measurements,
-        tolerance: dto.tolerance,
-    };
-
-    let result = crate::msa::gage_rr_anova(&input).map_err(js_err)?;
-
-    let anova_rows: Vec<AnovaRowDto> = result
-        .anova_table
-        .rows
-        .iter()
-        .map(|r| AnovaRowDto {
-            source: r.source.clone(),
-            df: r.df,
-            ss: r.ss,
-            ms: r.ms,
-            f_value: r.f_value,
-            p_value: r.p_value,
-        })
-        .collect();
-
-    let vc = &result.variance_components;
-    let out = GageRRAnovaResultDto {
-        anova_table: anova_rows,
-        variance_components: VarianceComponentsDto {
-            part: vc.part,
-            operator: vc.operator,
-            interaction: vc.interaction,
-            repeatability: vc.repeatability,
-            reproducibility: vc.reproducibility,
-            total: vc.total,
-        },
-        ev: result.ev,
-        av: result.av,
-        grr: result.grr,
-        pv: result.pv,
-        tv: result.tv,
-        percent_grr: result.percent_grr,
-        percent_tolerance: result.percent_tolerance,
-        ndc: result.ndc,
-        status: grr_status_str(result.status).to_owned(),
-        interaction_significant: result.interaction_significant,
-        interaction_pooled: result.interaction_pooled,
-    };
-    to_js(&out)
+    let input: GageRRInputDto = from_js(input, "input")?;
+    to_js(&gage_rr_anova_dto(input).map_err(js_err)?)
 }
 
 /// Compute percentile-based capability indices (ISO 22514-2).
@@ -1214,20 +877,7 @@ pub fn gage_rr_anova(input: JsValue) -> Result<JsValue, JsValue> {
 #[wasm_bindgen]
 pub fn percentile_capability(input: JsValue) -> Result<JsValue, JsValue> {
     let input: PercentileCapabilityInputDto = from_js(input, "input")?;
-
-    let result = crate::capability::percentile_capability(&input.data, input.lsl, input.usl)
-        .map_err(js_err)?;
-
-    let dto = PercentileCapabilityDto {
-        cp_star: result.cp_star,
-        cpk_star: result.cpk_star,
-        cpu_star: result.cpu_star,
-        cpl_star: result.cpl_star,
-        median: result.median,
-        percentile_lower: result.percentile_lower,
-        percentile_upper: result.percentile_upper,
-    };
-    to_js(&dto)
+    to_js(&percentile_capability_dto(input).map_err(js_err)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -1744,7 +1394,7 @@ mod binding_contract_tests {
         SUBGROUPS.iter().flatten().copied().collect()
     }
 
-    fn dto(v: serde_json::Value) -> Result<super::CapabilityDto, String> {
+    fn dto(v: serde_json::Value) -> Result<crate::wire::CapabilityDto, String> {
         capability_dto(from_json::<CapabilityInputDto>(v, "input")?)
     }
 

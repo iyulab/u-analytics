@@ -230,27 +230,17 @@ pub unsafe extern "C" fn uanalytics_laney_p_chart(
 
 // ── Process Capability ──────────────────────────────────────
 
-#[cfg(feature = "ffi")]
-#[derive(Deserialize)]
-struct CapabilityRequest {
-    data: Vec<f64>,
-    usl: Option<f64>,
-    lsl: Option<f64>,
-    target: Option<f64>,
-    /// Short-term sigma from a control chart (`R-bar/d2`, `S-bar/c4`; the
-    /// X-bar/R entry point returns it as `sigma_hat`).
-    sigma_within: Option<f64>,
-}
-
 /// Process capability analysis (Cp, Cpk, Pp, Ppk, Cpm).
 ///
-/// The short-term indices need a within sigma. `sigma_within` supplies it;
-/// without one it is estimated from the moving range of `data` taken in order
-/// (`MR-bar / d2(2)`, as an Individual-MR chart does), which is the standard
-/// estimate for individual observations and wrong for data that was
-/// flattened out of subgroups. `sigma_source` in the response says which was
-/// used -- `"within"` or `"moving_range"` -- so the assumption is visible
-/// rather than folded silently into `cp`.
+/// The short-term indices need a within sigma, and a flat `data` vector cannot
+/// supply one -- the subgroup structure is gone. `sigma_within` carries it
+/// (the `sigma_hat` an X-bar/R, X-bar/S or I-MR chart returns). Without it the
+/// short-term indices are `null` and `sigma_source` is `"overall"`, exactly as
+/// over WASM. This entry point used to estimate a within sigma from the moving
+/// range instead, which is right for individual observations and wrong for
+/// data flattened out of subgroups -- and it could not tell the two apart. A
+/// caller with individual observations gets the same number by running
+/// `imr_chart` first and passing its `sigma_hat`.
 ///
 /// `cpm` is `null` unless both limits and a `target` are given; it uses
 /// neither sigma, but the spread of `data` about the target.
@@ -267,93 +257,23 @@ pub unsafe extern "C" fn uanalytics_process_capability(
     request_json: *const libc::c_char,
     result_ptr: *mut *mut libc::c_char,
 ) -> i32 {
-    use crate::spc::{ControlChart, IndividualMRChart};
-
     ffi_catch(result_ptr, || {
         let json = match unsafe { read_json(request_json) } {
             Ok(j) => j,
             Err(e) => return e,
         };
-        let req: CapabilityRequest = match parse_request(&json, result_ptr) {
+        let req: crate::wire::CapabilityInputDto = match parse_request(&json, result_ptr) {
             Ok(r) => r,
             Err(status) => return status,
         };
-
-        let pc = match crate::capability::ProcessCapability::new(req.usl, req.lsl) {
-            Ok(pc) => match req.target {
-                Some(t) => pc.with_target(t),
-                None => pc,
-            },
-            Err(e) => return write_error(result_ptr, ERR_COMPUTE, e),
-        };
-
-        let (sigma_within, sigma_source) = match req.sigma_within {
-            Some(s) if s.is_finite() && s > 0.0 => (s, "within"),
-            Some(_) => {
-                return write_error(
-                    result_ptr,
-                    ERR_COMPUTE,
-                    "sigma_within must be a positive, finite number",
-                )
-            }
-            None => {
-                let mut imr = IndividualMRChart::new();
-                for (i, &x) in req.data.iter().enumerate() {
-                    if let Err(e) = imr.add_sample(&[x]) {
-                        return write_error(result_ptr, ERR_COMPUTE, &format!("data[{i}]: {e}"));
-                    }
-                }
-                match imr.sigma_hat() {
-                    Some(s) if s > 0.0 => (s, "moving_range"),
-                    _ => {
-                        return write_error(
-                            result_ptr,
-                            ERR_COMPUTE,
-                            "cannot estimate a within sigma from data: need at least two \
-                             finite values that are not all equal, or supply sigma_within",
-                        )
-                    }
-                }
-            }
-        };
-
-        match pc.compute(&req.data, sigma_within) {
-            Some(indices) => {
-                let resp = serde_json::json!({
-                    "cp": indices.cp,
-                    "cpk": indices.cpk,
-                    "cpu": indices.cpu,
-                    "cpl": indices.cpl,
-                    "pp": indices.pp,
-                    "ppk": indices.ppk,
-                    "ppu": indices.ppu,
-                    "ppl": indices.ppl,
-                    "cpm": indices.cpm,
-                    "mean": indices.mean,
-                    "sigma_source": sigma_source,
-                    "std_dev_within": indices.std_dev_within,
-                    "std_dev_overall": indices.std_dev_overall,
-                });
-                write_json(result_ptr, &resp)
-            }
-            None => write_error(
-                result_ptr,
-                ERR_COMPUTE,
-                "insufficient or invalid data (need >= 2 finite values)",
-            ),
+        match crate::wire::capability_dto(req) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
         }
     })
 }
 
 // ── Percentile Capability ───────────────────────────────────
-
-#[cfg(feature = "ffi")]
-#[derive(Deserialize)]
-struct PercentileCapabilityRequest {
-    data: Vec<f64>,
-    usl: Option<f64>,
-    lsl: Option<f64>,
-}
 
 /// Percentile-based process capability
 ///
@@ -374,36 +294,19 @@ pub unsafe extern "C" fn uanalytics_percentile_capability(
             Ok(j) => j,
             Err(e) => return e,
         };
-
-        let req: PercentileCapabilityRequest = match parse_request(&json, result_ptr) {
+        let req: crate::wire::PercentileCapabilityInputDto = match parse_request(&json, result_ptr)
+        {
             Ok(r) => r,
             Err(status) => return status,
         };
-
-        match crate::capability::percentile_capability(&req.data, req.lsl, req.usl) {
-            Ok(result) => {
-                let resp = serde_json::json!({
-                    "cp_star": result.cp_star,
-                    "cpk_star": result.cpk_star,
-                    "cpu_star": result.cpu_star,
-                    "cpl_star": result.cpl_star,
-                    "median": result.median,
-                });
-                write_json(result_ptr, &resp)
-            }
-            Err(e) => write_error(result_ptr, ERR_COMPUTE, e),
+        match crate::wire::percentile_capability_dto(req) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
         }
     })
 }
 
 // ── MSA: Gage R&R X-bar/R ───────────────────────────────────
-
-#[cfg(feature = "ffi")]
-#[derive(Deserialize)]
-struct GageRRRequest {
-    measurements: Vec<Vec<Vec<f64>>>, // [part][operator][trial]
-    tolerance: Option<f64>,
-}
 
 /// Gage R&R (X-bar/R method)
 ///
@@ -424,36 +327,13 @@ pub unsafe extern "C" fn uanalytics_gage_rr_xbar_r(
             Ok(j) => j,
             Err(e) => return e,
         };
-
-        let req: GageRRRequest = match parse_request(&json, result_ptr) {
+        let req: crate::wire::GageRRInputDto = match parse_request(&json, result_ptr) {
             Ok(r) => r,
             Err(status) => return status,
         };
-
-        let input = crate::msa::GageRRInput {
-            measurements: req.measurements,
-            tolerance: req.tolerance,
-        };
-
-        match crate::msa::gage_rr_xbar_r(&input) {
-            Ok(result) => {
-                let resp = serde_json::json!({
-                    "ev": result.ev,
-                    "av": result.av,
-                    "grr": result.grr,
-                    "pv": result.pv,
-                    "tv": result.tv,
-                    "percent_ev": result.percent_ev,
-                    "percent_av": result.percent_av,
-                    "percent_grr": result.percent_grr,
-                    "percent_pv": result.percent_pv,
-                    "percent_tolerance": result.percent_tolerance,
-                    "ndc": result.ndc,
-                    "status": format!("{:?}", result.status),
-                });
-                write_json(result_ptr, &resp)
-            }
-            Err(e) => write_error(result_ptr, ERR_COMPUTE, e),
+        match crate::wire::gage_rr_xbar_r_dto(req) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
         }
     })
 }
@@ -477,34 +357,13 @@ pub unsafe extern "C" fn uanalytics_gage_rr_anova(
             Ok(j) => j,
             Err(e) => return e,
         };
-
-        let req: GageRRRequest = match parse_request(&json, result_ptr) {
+        let req: crate::wire::GageRRInputDto = match parse_request(&json, result_ptr) {
             Ok(r) => r,
             Err(status) => return status,
         };
-
-        let input = crate::msa::GageRRInput {
-            measurements: req.measurements,
-            tolerance: req.tolerance,
-        };
-
-        match crate::msa::gage_rr_anova(&input) {
-            Ok(result) => {
-                let resp = serde_json::json!({
-                    "ev": result.ev,
-                    "av": result.av,
-                    "grr": result.grr,
-                    "pv": result.pv,
-                    "tv": result.tv,
-                    "percent_grr": result.percent_grr,
-                    "ndc": result.ndc,
-                    "status": format!("{:?}", result.status),
-                    "interaction_significant": result.interaction_significant,
-                    "interaction_pooled": result.interaction_pooled,
-                });
-                write_json(result_ptr, &resp)
-            }
-            Err(e) => write_error(result_ptr, ERR_COMPUTE, e),
+        match crate::wire::gage_rr_anova_dto(req) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
         }
     })
 }
@@ -557,14 +416,6 @@ pub unsafe extern "C" fn uanalytics_weibull_mle(
 
 // ── Change-Point Detection (PELT) ───────────────────────────
 
-#[cfg(feature = "ffi")]
-#[derive(Deserialize)]
-struct PeltRequest {
-    data: Vec<f64>,
-    penalty: Option<String>, // "BIC", "AIC", "MBIC", or numeric
-    min_segment_len: Option<usize>,
-}
-
 /// PELT change-point detection
 ///
 /// # Safety
@@ -584,48 +435,14 @@ pub unsafe extern "C" fn uanalytics_detect_changepoints(
             Ok(j) => j,
             Err(e) => return e,
         };
-
-        let req: PeltRequest = match parse_request(&json, result_ptr) {
+        let req: crate::wire::PeltInputDto = match parse_request(&json, result_ptr) {
             Ok(r) => r,
             Err(status) => return status,
         };
-
-        // The crate implements BIC and a caller-chosen value. Any other name
-        // used to fall through to BIC, including the "AIC" and "MBIC" this
-        // entry point once documented -- a different penalty than the one
-        // asked for, reported as success.
-        let penalty = match req.penalty.as_deref() {
-            None => crate::detection::Penalty::Bic,
-            Some(s) if s.eq_ignore_ascii_case("bic") => crate::detection::Penalty::Bic,
-            Some(s) => match s.parse::<f64>() {
-                Ok(v) => crate::detection::Penalty::Custom(v),
-                Err(_) => {
-                    return write_error(
-                        result_ptr,
-                        ERR_COMPUTE,
-                        &format!("unsupported penalty {s:?}: use \"BIC\" or a positive number"),
-                    )
-                }
-            },
-        };
-
-        let min_seg = req.min_segment_len.unwrap_or(2);
-
-        let pelt = match crate::detection::Pelt::with_min_segment_len(
-            crate::detection::CostFunction::Normal,
-            penalty,
-            min_seg,
-        ) {
-            Some(p) => p,
-            None => return write_error(result_ptr, ERR_COMPUTE, "Failed to create PELT detector"),
-        };
-
-        let result = pelt.detect(&req.data);
-
-        let resp = serde_json::json!({
-            "changepoints": result.changepoints,
-        });
-        write_json(result_ptr, &resp)
+        match crate::wire::pelt_dto(req) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
+        }
     })
 }
 
@@ -1046,6 +863,48 @@ mod tests {
         assert_eq!(code, 0, "{body}");
         let wire = crate::wire::laney_p_dto(&samples).expect("chart");
         assert_eq!(body, serde_json::to_value(&wire).unwrap());
+
+        // -- capability, percentile, gage R&R (both methods), changepoints --
+        let cap = serde_json::json!({
+            "data": [10.1, 9.8, 10.3, 10.0, 9.7, 10.2, 10.1, 9.9],
+            "usl": 11.0, "lsl": 9.0, "sigma_within": 0.2, "target": 10.0
+        });
+        let (code, body) = call(uanalytics_process_capability, &cap.to_string());
+        assert_eq!(code, 0, "{body}");
+        let wire = crate::wire::capability_dto(serde_json::from_value(cap).unwrap()).unwrap();
+        assert_eq!(body, serde_json::to_value(&wire).unwrap());
+
+        let pct = serde_json::json!({
+            "data": (0..40).map(|i| 10.0 + (i as f64 * 0.37).sin()).collect::<Vec<_>>(),
+            "usl": 11.5, "lsl": 8.5
+        });
+        let (code, body) = call(uanalytics_percentile_capability, &pct.to_string());
+        assert_eq!(code, 0, "{body}");
+        let wire =
+            crate::wire::percentile_capability_dto(serde_json::from_value(pct).unwrap()).unwrap();
+        assert_eq!(body, serde_json::to_value(&wire).unwrap());
+
+        let grr = serde_json::json!({
+            "measurements": (0..5).map(|p| (0..3).map(|o| (0..3).map(|t|
+                10.0 + p as f64 + 0.1 * o as f64 + 0.03 * ((p * 7 + o * 3 + t * 5) % 4) as f64
+            ).collect::<Vec<_>>()).collect::<Vec<_>>()).collect::<Vec<_>>(),
+            "tolerance": 6.0
+        });
+        let (code, body) = call(uanalytics_gage_rr_xbar_r, &grr.to_string());
+        assert_eq!(code, 0, "{body}");
+        let wire =
+            crate::wire::gage_rr_xbar_r_dto(serde_json::from_value(grr.clone()).unwrap()).unwrap();
+        assert_eq!(body, serde_json::to_value(&wire).unwrap());
+        let (code, body) = call(uanalytics_gage_rr_anova, &grr.to_string());
+        assert_eq!(code, 0, "{body}");
+        let wire = crate::wire::gage_rr_anova_dto(serde_json::from_value(grr).unwrap()).unwrap();
+        assert_eq!(body, serde_json::to_value(&wire).unwrap());
+
+        let pelt = serde_json::json!({ "data": [1.0, 1.1, 0.9, 1.0, 5.0, 5.1, 4.9, 5.0] });
+        let (code, body) = call(uanalytics_detect_changepoints, &pelt.to_string());
+        assert_eq!(code, 0, "{body}");
+        let wire = crate::wire::pelt_dto(serde_json::from_value(pelt).unwrap()).unwrap();
+        assert_eq!(body, serde_json::to_value(&wire).unwrap());
     }
 
     #[test]
@@ -1094,26 +953,36 @@ mod tests {
     // -- capability -------------------------------------------------------
 
     #[test]
-    fn capability_names_where_its_short_term_sigma_came_from() {
+    fn capability_reports_no_short_term_indices_without_a_within_sigma() {
         use crate::spc::{ControlChart, IndividualMRChart};
         let data = [10.1, 9.8, 10.3, 10.0, 9.7, 10.2, 10.1, 9.9];
 
+        // No `sigma_within`: the long-term indices only, and the source says
+        // so. This entry point used to estimate one from the moving range and
+        // report it as `"moving_range"`; the WASM binding never did.
         let request = serde_json::json!({ "data": data, "usl": 11.0, "lsl": 9.0 });
         let (code, body) = call(uanalytics_process_capability, &request.to_string());
         assert_eq!(code, 0, "{body}");
-        assert_eq!(body["sigma_source"], "moving_range");
+        assert_eq!(body["sigma_source"], "overall");
+        assert!(body["cp"].is_null() && body["cpk"].is_null(), "{body}");
+        assert!(body["std_dev_within"].is_null(), "{body}");
+        assert!(body["pp"].is_f64() && body["ppk"].is_f64(), "{body}");
+
+        // The moving-range estimate is still one call away -- through the chart
+        // that owns it, so the assumption is the caller's and visible.
         let mut imr = IndividualMRChart::new();
         for x in data {
             imr.add_sample(&[x]).unwrap();
         }
-        assert_eq!(body["std_dev_within"].as_f64(), imr.sigma_hat());
-
-        let request =
-            serde_json::json!({ "data": data, "usl": 11.0, "lsl": 9.0, "sigma_within": 0.25 });
+        let sigma_hat = imr.sigma_hat().expect("eight values");
+        let request = serde_json::json!({
+            "data": data, "usl": 11.0, "lsl": 9.0, "sigma_within": sigma_hat
+        });
         let (code, body) = call(uanalytics_process_capability, &request.to_string());
         assert_eq!(code, 0, "{body}");
         assert_eq!(body["sigma_source"], "within");
-        assert_eq!(body["std_dev_within"].as_f64(), Some(0.25));
+        assert_eq!(body["std_dev_within"].as_f64(), Some(sigma_hat));
+        assert!(body["cp"].is_f64(), "{body}");
     }
 
     #[test]
@@ -1126,19 +995,54 @@ mod tests {
     // -- change points ----------------------------------------------------
 
     #[test]
-    fn changepoints_rejects_a_penalty_it_does_not_implement() {
+    fn changepoints_takes_the_wire_penalty_and_cost_like_the_wasm_binding() {
         // "AIC" and "MBIC" used to be documented and then computed as BIC.
-        for penalty in ["AIC", "MBIC", "bogus"] {
-            let request =
-                format!(r#"{{"data": [1.0, 1.0, 1.0, 5.0, 5.0, 5.0], "penalty": "{penalty}"}}"#);
-            let (code, body) = call(uanalytics_detect_changepoints, &request);
+        // The contract is now the WASM one: `"bic"` or a JSON number, and an
+        // optional `cost` of `"l2"` (default) or `"normal"`.
+        let data = [1.0, 1.0, 1.0, 5.0, 5.0, 5.0];
+        for penalty in [
+            serde_json::json!("AIC"),
+            serde_json::json!("MBIC"),
+            serde_json::json!("3.5"),
+        ] {
+            let request = serde_json::json!({ "data": data, "penalty": penalty });
+            let (code, body) = call(uanalytics_detect_changepoints, &request.to_string());
             assert_eq!(code, -3, "{penalty}: {body}");
         }
-        for penalty in ["BIC", "bic", "3.5"] {
-            let request =
-                format!(r#"{{"data": [1.0, 1.0, 1.0, 5.0, 5.0, 5.0], "penalty": "{penalty}"}}"#);
-            let (code, body) = call(uanalytics_detect_changepoints, &request);
+        for penalty in [serde_json::json!("bic"), serde_json::json!(3.5)] {
+            let request = serde_json::json!({ "data": data, "penalty": penalty });
+            let (code, body) = call(uanalytics_detect_changepoints, &request.to_string());
             assert_eq!(code, 0, "{penalty}: {body}");
+            assert!(body["n_segments"].is_u64(), "{body}");
         }
+        // This entry point used to default to the normal (mean+variance) cost
+        // while WASM defaulted to L2 -- same input, different changepoints.
+        // Both now default to L2, and `normal` is opt-in on both.
+        let (code, body) = call(
+            uanalytics_detect_changepoints,
+            &serde_json::json!({ "data": data, "cost": "normal" }).to_string(),
+        );
+        assert_eq!(code, 0, "{body}");
+        let (code, body) = call(
+            uanalytics_detect_changepoints,
+            &serde_json::json!({ "data": data, "cost": "l1" }).to_string(),
+        );
+        assert_eq!(code, -3, "{body}");
+    }
+
+    #[test]
+    fn ffi_rejects_unknown_request_fields_like_the_wasm_binding_does() {
+        // Over WASM a misspelt option has always been an error. Over the FFI it
+        // was silently ignored -- `sigmaWithin` produced a long-term-only
+        // answer with no hint that the caller's sigma never arrived.
+        let (code, body) = call(
+            uanalytics_process_capability,
+            r#"{"data": [1.0, 2.0, 3.0], "usl": 5.0, "sigmaWithin": 0.5}"#,
+        );
+        assert_eq!(code, -2, "{body}");
+        assert!(
+            body["error"].as_str().unwrap().contains("sigmaWithin"),
+            "{body}"
+        );
     }
 }
