@@ -357,7 +357,7 @@ empty `data` and any parameter outside its domain, naming the offending one.
 ## Test Status
 
 ```text
-557 lib tests (568 with `ffi`, 589 with `wasm`) + 88 doc-tests
+559 lib tests (570 with `ffi`, 598 with `wasm`) + 88 doc-tests
 0 clippy warnings
 ```
 
