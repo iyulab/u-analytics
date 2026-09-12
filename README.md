@@ -354,6 +354,42 @@ The defaults are the values their sources recommend: `k = 0.5` is optimal for a
 `L = 3` is sensitive across 0.5–2.0 sigma shifts (Roberts 1959). Both reject an
 empty `data` and any parameter outside its domain, naming the offending one.
 
+### Non-normal capability, and sigma level ↔ PPM
+
+```ts
+boxcox_capability(input: {
+  data: number[],          // >= 4 observations, all strictly positive
+  usl?: number,            // at least one limit is required; each must be positive
+  lsl?: number,
+}): {
+  lambda: number,          // ML-estimated optimal Box-Cox parameter over [-2, 2]
+  pp: number | null, ppk: number | null, ppu: number | null, ppl: number | null,
+  cp: null, cpk: null, cpu: null, cpl: null,   // always null — see below
+  cpm: number | null,
+}
+
+sigma_to_ppm(sigma: number): number   // 6 → ~3.4,  3 → ~66807
+ppm_to_sigma(ppm: number): number     // inverse; ppm must be inside (0, 1e6)
+```
+
+**Only the long-term indices are reported.** `data` is a flat vector, so there
+is no rational subgrouping and no within-subgroup sigma to estimate. Computing
+`cp`/`cpk` from the overall sigma instead would make `cp` equal `pp` for every
+input — a long-term number wearing a short-term name — so they come back `null`,
+the same choice `process_capability` makes when `sigma_within` is omitted.
+
+Every index is on the **transformed** scale, which is where the normal-theory
+formulas hold; they are not comparable to indices computed on the raw
+non-normal data. The specification limits are transformed with the same lambda.
+
+**`sigma_to_ppm` uses the Motorola convention, including the 1.5-sigma shift**
+(`PPM = 10^6 · (1 − Φ(σ − 1.5))`). Six sigma therefore reports ~3.4 PPM rather
+than the ~0.002 PPM of an unshifted normal tail — if you are checking against a
+table, check which convention it uses. `ppm_to_sigma` is the exact inverse on
+the same convention and rejects both ends of `(0, 1e6)`, which the sigma scale
+does not reach. The round trip closes to ~3·10⁻⁴ (the inverse normal CDF is a
+rational approximation).
+
 ## Test Status
 
 ```text

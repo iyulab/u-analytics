@@ -8,8 +8,31 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Fixed
+
+- **`boxcox_capability` no longer reports short-term capability indices.** It
+  computed `cp`/`cpk`/`cpu`/`cpl` from the overall sigma of the transformed
+  data, which made `cp` equal `pp` and `cpk` equal `ppk` for every input — a
+  long-term number under a short-term name. A Box-Cox analysis starts from a
+  flat vector, so there is no rational subgrouping and no within-subgroup sigma
+  to estimate; the four are now always `None` (`NaN` across the C FFI, `null`
+  in WASM), the same choice `process_capability` already makes when
+  `sigma_within` is omitted. **Breaking** for callers reading those four
+  fields; the values they were reading were not short-term indices.
+  A crate test that asserted `cp.is_some()` had been pinning the old behaviour.
+
 ### Added
 
+- **WASM bindings for `boxcox_capability`, `sigma_to_ppm` and `ppm_to_sigma`**.
+  `#[wasm_bindgen]` exports go from 21 to 24.
+  - `boxcox_capability({ data, usl?, lsl? })` → `{ lambda, pp, ppk, ppu, ppl, cpm, … }`
+  - `sigma_to_ppm(sigma)` / `ppm_to_sigma(ppm)` — scalar in, scalar out.
+  - Both sigma-level functions use the Motorola convention **including the
+    1.5-sigma shift**, which the docs now name explicitly rather than leaving to
+    be inferred from a table: six sigma is ~3.4 PPM, not ~0.002.
+  - `sigma_to_ppm` rejects a non-finite input instead of returning `NaN`;
+    `ppm_to_sigma` rejects both ends of `(0, 1_000_000)`, which the sigma scale
+    does not reach.
 - **WASM bindings for `cusum` and `ewma`** (docket #220 group ②). The crate has
   had both charts since before the bindings existed; only the exposure was
   missing, so JS/TS consumers reimplemented sequential shift detection that the

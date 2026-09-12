@@ -1712,6 +1712,133 @@ fn ewma_dto(input: EwmaInputDto) -> Result<EwmaDto, String> {
     })
 }
 
+// ---------------------------------------------------------------------------
+// Non-normal capability (Box-Cox) and sigma level <-> PPM
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BoxcoxCapabilityInputDto {
+    data: Vec<f64>,
+    #[serde(default)]
+    usl: Option<f64>,
+    #[serde(default)]
+    lsl: Option<f64>,
+}
+
+#[derive(Serialize, Debug)]
+struct BoxcoxCapabilityDto {
+    /// Estimated optimal Box-Cox parameter. `0` is a log transform, `1` the
+    /// identity, `0.5` approximately a square root.
+    lambda: f64,
+    /// Every index below is on the **transformed** scale, which is where the
+    /// normal-theory formulas are valid -- they are not comparable to indices
+    /// computed on the raw non-normal data.
+    cp: Option<f64>,
+    cpk: Option<f64>,
+    cpu: Option<f64>,
+    cpl: Option<f64>,
+    pp: Option<f64>,
+    ppk: Option<f64>,
+    ppu: Option<f64>,
+    ppl: Option<f64>,
+    cpm: Option<f64>,
+}
+
+/// Process capability for non-normal data, via a Box-Cox transformation.
+///
+/// # Input JSON
+///
+/// ```json
+/// { "data": [1.2, 3.4, 9.1, 22.0], "usl": 100.0, "lsl": 1.0 }
+/// ```
+///
+/// - `data` (required): at least 4 observations, **all strictly positive**.
+/// - `usl` / `lsl` (optional): at least one is required; each must be positive.
+///
+/// # Output JSON
+///
+/// ```json
+/// { "lambda": 0.13, "cp": null, "cpk": null, "cpu": null, "cpl": null,
+///   "pp": 1.42, "ppk": 1.19, "ppu": 1.19, "ppl": 1.65, "cpm": null }
+/// ```
+///
+/// The optimal lambda is estimated by maximum likelihood over `[-2, 2]`, the
+/// specification limits are transformed with that same lambda, and the indices
+/// are computed on the transformed scale. `cp`/`cpk`/`cpu`/`cpl` need a
+/// short-term sigma, which a flat vector cannot carry, so they come back
+/// `null` here -- exactly as they do from `process_capability` without
+/// `sigma_within`.
+#[wasm_bindgen]
+pub fn boxcox_capability(input: JsValue) -> Result<JsValue, JsValue> {
+    let input: BoxcoxCapabilityInputDto = from_js(input, "input")?;
+    let dto = boxcox_capability_dto(input).map_err(js_err)?;
+    to_js(&dto)
+}
+
+/// The half of [`boxcox_capability`] below the `JsValue` boundary, so the
+/// contract is testable off `wasm32`.
+fn boxcox_capability_dto(input: BoxcoxCapabilityInputDto) -> Result<BoxcoxCapabilityDto, String> {
+    let result = crate::capability::boxcox_capability(&input.data, input.usl, input.lsl)
+        .map_err(|e| e.to_string())?;
+    let i = result.indices;
+    Ok(BoxcoxCapabilityDto {
+        lambda: result.lambda,
+        cp: i.cp,
+        cpk: i.cpk,
+        cpu: i.cpu,
+        cpl: i.cpl,
+        pp: i.pp,
+        ppk: i.ppk,
+        ppu: i.ppu,
+        ppl: i.ppl,
+        cpm: i.cpm,
+    })
+}
+
+/// Converts a sigma quality level to a defect rate in parts per million.
+///
+/// ```js
+/// sigma_to_ppm(6.0);  // -> ~3.4
+/// sigma_to_ppm(3.0);  // -> ~66807
+/// ```
+///
+/// **This is the Motorola convention, which includes the 1.5-sigma shift**
+/// (`PPM = 10^6 * (1 - Phi(sigma - 1.5))`). A "six sigma" process therefore
+/// reports ~3.4 PPM rather than the ~0.002 PPM an unshifted normal tail gives.
+/// A consumer comparing against an unshifted table will see a different number
+/// for the same input, so the convention is named here rather than inferred.
+///
+/// Rejects a non-finite `sigma` instead of returning `NaN`.
+#[wasm_bindgen]
+pub fn sigma_to_ppm(sigma: f64) -> Result<f64, JsValue> {
+    if !sigma.is_finite() {
+        return Err(js_err(format!("sigma must be finite, got {sigma}")));
+    }
+    Ok(crate::capability::sigma_to_ppm(sigma))
+}
+
+/// Converts a defect rate in parts per million to a sigma quality level.
+///
+/// The inverse of [`sigma_to_ppm`], on the same (1.5-shifted) convention.
+///
+/// ```js
+/// ppm_to_sigma(3.4);      // -> ~6.0
+/// ppm_to_sigma(66807.0);  // -> ~3.0
+/// ```
+///
+/// `ppm` must lie strictly inside `(0, 1_000_000)`: both ends are limits the
+/// sigma scale does not reach, so they are rejected rather than mapped to an
+/// infinity.
+#[wasm_bindgen]
+pub fn ppm_to_sigma(ppm: f64) -> Result<f64, JsValue> {
+    crate::capability::ppm_to_sigma(ppm).ok_or_else(|| {
+        js_err(format!(
+            "ppm must be finite and strictly inside (0, 1000000), got {ppm}"
+        ))
+    })
+}
+
 // ── Wire-schema strictness tests ─────────────────────────────────────
 
 #[cfg(test)]
@@ -1764,6 +1891,13 @@ mod dto_strictness_tests {
     fn ewma_input_rejects_unknown_keys() {
         assert_rejects_unknown::<super::EwmaInputDto>(
             json!({ "data": [1.0, 2.0], "target": 1.0, "sigma": 1.0, "lFactor": 3.0 }),
+        );
+    }
+
+    #[test]
+    fn boxcox_capability_input_rejects_unknown_keys() {
+        assert_rejects_unknown::<super::BoxcoxCapabilityInputDto>(
+            json!({ "data": [1.0, 2.0, 3.0, 4.0], "USL": 9.0 }),
         );
     }
 
@@ -2264,6 +2398,71 @@ mod binding_contract_tests {
         assert!(e.contains("samples[1]"), "{e}");
         let ok = p_chart_dto(&[[3, 100], [5, 120], [2, 80]]).expect("valid");
         assert_eq!(ok.points.len(), 3);
+    }
+
+    // Box-Cox capability and sigma level <-> PPM
+
+    #[test]
+    fn boxcox_reports_lambda_and_long_term_indices_matching_the_crate() {
+        let data: Vec<f64> = (1..=20).map(|i| (i as f64 * 0.3_f64).exp()).collect();
+        let input: super::BoxcoxCapabilityInputDto =
+            super::from_json(json!({ "data": data, "usl": 100.0, "lsl": 1.0 }), "input")
+                .expect("valid input");
+        let dto = super::boxcox_capability_dto(input).expect("skewed data is analysable");
+
+        let native =
+            crate::capability::boxcox_capability(&data, Some(100.0), Some(1.0)).expect("same call");
+        assert!((dto.lambda - native.lambda).abs() < 1e-12);
+        assert_eq!(dto.pp, native.indices.pp);
+        assert_eq!(dto.ppk, native.indices.ppk);
+
+        // A flat vector carries no subgroup structure, so the short-term
+        // indices must stay absent rather than borrow the long-term sigma.
+        assert!(dto.cp.is_none() && dto.cpk.is_none());
+        assert!(
+            dto.ppk.is_some(),
+            "long-term indices are the available ones"
+        );
+    }
+
+    #[test]
+    fn boxcox_refuses_the_inputs_the_transform_cannot_take() {
+        let cases = [
+            json!({ "data": [1.0, 2.0, 0.0, 4.0], "usl": 9.0 }), // non-positive value
+            json!({ "data": [1.0, 2.0, 3.0, 4.0] }),             // no specification limit
+            json!({ "data": [1.0, 2.0, 3.0], "usl": 9.0 }),      // fewer than four points
+        ];
+        for case in cases {
+            let parsed: super::BoxcoxCapabilityInputDto =
+                super::from_json(case.clone(), "input").expect("parses");
+            assert!(
+                super::boxcox_capability_dto(parsed).is_err(),
+                "should be refused: {case}"
+            );
+        }
+    }
+
+    #[test]
+    fn sigma_and_ppm_round_trip_on_the_shifted_convention() {
+        // The 1.5-sigma shift is the whole contract here: an unshifted table
+        // would put six sigma near 0.002 PPM, not 3.4.
+        for sigma in [3.0_f64, 4.5, 6.0] {
+            let ppm = crate::capability::sigma_to_ppm(sigma);
+            let back = crate::capability::ppm_to_sigma(ppm).expect("in range");
+            // The inverse normal CDF here is a rational approximation, so the
+            // round trip closes to ~3e-4, not to machine precision. Pinning the
+            // measured accuracy rather than an aspirational one.
+            assert!((back - sigma).abs() < 1e-3, "{sigma} -> {ppm} -> {back}");
+        }
+        assert!((crate::capability::sigma_to_ppm(6.0) - 3.4).abs() < 1.0);
+        assert!((crate::capability::sigma_to_ppm(3.0) - 66_807.0).abs() < 500.0);
+    }
+
+    #[test]
+    fn ppm_to_sigma_rejects_both_ends_of_the_range() {
+        assert!(crate::capability::ppm_to_sigma(0.0).is_none());
+        assert!(crate::capability::ppm_to_sigma(1_000_000.0).is_none());
+        assert!(crate::capability::ppm_to_sigma(-1.0).is_none());
     }
 
     // ── CUSUM / EWMA ────────────────────────────────────────────────

@@ -103,6 +103,12 @@ pub struct NonNormalCapabilityResult {
     /// λ = 0.5 is approximately a square-root transform.
     pub lambda: f64,
     /// Capability indices computed on the Box-Cox-transformed scale.
+    ///
+    /// Only the **long-term** indices (`pp`, `ppk`, `ppu`, `ppl`) are reported.
+    /// `cp`, `cpk`, `cpu` and `cpl` are always `None`: they are defined against
+    /// a within-subgroup sigma, and a flat observation vector carries no
+    /// subgroup structure to estimate one from. `cpm` follows its usual rule
+    /// (both limits and a target, on the transformed scale).
     pub indices: CapabilityIndices,
 }
 
@@ -112,8 +118,10 @@ pub struct NonNormalCapabilityResult {
 ///
 /// The data are first transformed to approximate normality using the optimal
 /// Box-Cox parameter λ (estimated via maximum likelihood over `[-2, 2]`).
-/// Specification limits are transformed using the same λ. Standard capability
-/// indices (Cp, Cpk, Pp, Ppk) are then computed on the transformed scale.
+/// Specification limits are transformed using the same λ. The **long-term**
+/// capability indices (Pp, Ppk, Ppu, Ppl) are then computed on the transformed
+/// scale. The short-term indices (Cp, Cpk, Cpu, Cpl) are **not** reported —
+/// see [`NonNormalCapabilityResult::indices`] for why.
 ///
 /// # Arguments
 ///
@@ -204,10 +212,19 @@ pub fn boxcox_capability(
     let spec = ProcessCapability::new(usl_t, lsl_t)
         .map_err(|_| NonNormalCapabilityError::CapabilityError)?;
 
-    // compute() uses overall_std_t as sigma_within (no rational subgrouping)
-    let indices = spec
+    // A Box-Cox analysis starts from a flat vector, so there is no rational
+    // subgrouping and therefore no short-term sigma to estimate. Computing the
+    // indices with the overall sigma in both roles and returning all of them
+    // would report Cp == Pp and Cpk == Ppk for every input -- a long-term
+    // number wearing a short-term name, which is the failure mode a null is
+    // there to prevent. The short-term quartet is cleared instead.
+    let mut indices = spec
         .compute(&y_t, overall_std_t)
         .ok_or(NonNormalCapabilityError::CapabilityError)?;
+    indices.cp = None;
+    indices.cpk = None;
+    indices.cpu = None;
+    indices.cpl = None;
 
     Ok(NonNormalCapabilityResult { lambda, indices })
 }
@@ -225,6 +242,19 @@ mod tests {
         let result = boxcox_capability(&data, Some(150.0), Some(1.0)).unwrap();
         assert!(result.lambda.abs() < 0.6, "lambda={}", result.lambda);
         assert!(result.indices.pp.is_some() || result.indices.ppk.is_some());
+    }
+
+    #[test]
+    fn boxcox_capability_reports_no_short_term_indices() {
+        // Cp/Cpk need a within-subgroup sigma; a flat vector has none. Filling
+        // them from the overall sigma would make Cp == Pp for every input.
+        let data: Vec<f64> = (1..=25).map(|i| (i as f64 * 0.2).exp()).collect();
+        let r = boxcox_capability(&data, Some(150.0), Some(1.0)).unwrap();
+        assert!(r.indices.cp.is_none());
+        assert!(r.indices.cpk.is_none());
+        assert!(r.indices.cpu.is_none());
+        assert!(r.indices.cpl.is_none());
+        assert!(r.indices.pp.is_some(), "the long-term indices are reported");
     }
 
     #[test]
@@ -271,13 +301,16 @@ mod tests {
 
     #[test]
     fn boxcox_capability_two_sided() {
-        // Both USL and LSL provided → pp, ppk, cp, cpk all Some
+        // Both limits present → the long-term pair is reported. The short-term
+        // pair is not: this assertion used to require `cp`/`cpk` to be `Some`,
+        // which pinned the very behaviour that made Cp equal Pp for every
+        // input. See `boxcox_capability_reports_no_short_term_indices`.
         let data: Vec<f64> = (1..=30).map(|i| (i as f64 * 0.1).exp()).collect();
         let result = boxcox_capability(&data, Some(20.0), Some(1.0)).unwrap();
         assert!(result.indices.pp.is_some());
         assert!(result.indices.ppk.is_some());
-        assert!(result.indices.cp.is_some());
-        assert!(result.indices.cpk.is_some());
+        assert!(result.indices.cp.is_none());
+        assert!(result.indices.cpk.is_none());
     }
 
     #[test]
