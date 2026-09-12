@@ -304,6 +304,56 @@ size of zero, `units` that are not positive -- is rejected with its index. The
 charts would otherwise drop it, and every later point would carry the index of
 the wrong row.
 
+### CUSUM and EWMA — sequential shift detection
+
+The Shewhart charts above judge each point on its own, which makes them slow to
+notice a **small but persistent** shift. These two accumulate evidence across
+points instead, and are the standard answer for that case.
+
+```ts
+cusum(input: {
+  data: number[],          // observations, in order; must be non-empty
+  target: number,          // process target mean (mu_0)
+  sigma: number,           // known process sigma; must be > 0
+  k?: number,              // reference value / allowance, default 0.5
+  h?: number,              // decision interval, default 5.0
+}): {
+  h: number,               // echoed, so the boundary can be drawn without restating the input
+  points: { index: number, s_upper: number, s_lower: number, signal: boolean }[],
+  signal_indices: number[],
+  in_control: boolean,
+}
+
+ewma(input: {
+  data: number[],
+  target: number,
+  sigma: number,
+  lambda?: number,         // smoothing constant in (0, 1], default 0.2
+  l_factor?: number,       // limit width factor, default 3.0
+}): {
+  points: { index: number, ewma: number, ucl: number, lcl: number, signal: boolean }[],
+  signal_indices: number[],
+  in_control: boolean,
+}
+```
+
+```js
+// A 2-sigma shift that begins at observation 10
+const data = [...Array(10).fill(10), ...Array(10).fill(12)];
+cusum({ data, target: 10, sigma: 1 }).signal_indices;  // → indices inside the shifted half
+```
+
+**CUSUM's limit is a single number, EWMA's is per point.** Both cumulative sums
+are on the standardized scale (`z = (x - target) / sigma`) and start at zero, so
+they compare against `h` directly — hence `h` on the chart rather than on each
+point. EWMA's limits are the exact (not asymptotic) ones, so they **widen with
+the index** and are returned per point.
+
+The defaults are the values their sources recommend: `k = 0.5` is optimal for a
+1-sigma shift and `h = 5` gives ARL_0 ≈ 465 (Page 1954); `lambda = 0.2` with
+`L = 3` is sensitive across 0.5–2.0 sigma shifts (Roberts 1959). Both reject an
+empty `data` and any parameter outside its domain, naming the offending one.
+
 ## Test Status
 
 ```text

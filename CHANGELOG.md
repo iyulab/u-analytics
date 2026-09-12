@@ -8,6 +8,23 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- **WASM bindings for `cusum` and `ewma`** (docket #220 group ②). The crate has
+  had both charts since before the bindings existed; only the exposure was
+  missing, so JS/TS consumers reimplemented sequential shift detection that the
+  crate already performs. `#[wasm_bindgen]` exports go from 19 to 21.
+  - `cusum({ data, target, sigma, k?, h? })` → `{ h, points, signal_indices, in_control }`
+  - `ewma({ data, target, sigma, lambda?, l_factor? })` → `{ points, signal_indices, in_control }`
+  - Defaults follow the sources rather than the binding's convenience: `k = 0.5` /
+    `h = 5.0` (Page 1954), `lambda = 0.2` / `l_factor = 3.0` (Roberts 1959).
+  - `h` is echoed on the CUSUM result because its decision interval is constant,
+    while EWMA's limits widen with the index and are therefore per point.
+  - Both reject an empty `data` and out-of-domain parameters with a message
+    naming the offending parameter, instead of returning an empty or silently
+    degraded series.
+
+
 ## [0.9.0] - 2026-09-12
 
 ### Changed

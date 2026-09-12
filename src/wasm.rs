@@ -1482,6 +1482,236 @@ pub fn percentile_capability(input: JsValue) -> Result<JsValue, JsValue> {
     to_js(&dto)
 }
 
+// ---------------------------------------------------------------------------
+// CUSUM / EWMA -- online (sequential) shift detection
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CusumInputDto {
+    data: Vec<f64>,
+    target: f64,
+    sigma: f64,
+    #[serde(default = "default_cusum_k")]
+    k: f64,
+    #[serde(default = "default_cusum_h")]
+    h: f64,
+}
+
+fn default_cusum_k() -> f64 {
+    0.5
+}
+
+fn default_cusum_h() -> f64 {
+    5.0
+}
+
+#[derive(Serialize, Debug)]
+struct CusumPointDto {
+    index: usize,
+    s_upper: f64,
+    s_lower: f64,
+    signal: bool,
+}
+
+#[derive(Serialize, Debug)]
+struct CusumDto {
+    /// Decision interval actually used, echoed so a caller can draw the
+    /// boundary without restating its own input. Unlike EWMA's widening
+    /// limits this one is constant, so it belongs to the chart, not the point.
+    h: f64,
+    points: Vec<CusumPointDto>,
+    signal_indices: Vec<usize>,
+    in_control: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EwmaInputDto {
+    data: Vec<f64>,
+    target: f64,
+    sigma: f64,
+    #[serde(default = "default_ewma_lambda")]
+    lambda: f64,
+    #[serde(default = "default_ewma_l_factor")]
+    l_factor: f64,
+}
+
+fn default_ewma_lambda() -> f64 {
+    0.2
+}
+
+fn default_ewma_l_factor() -> f64 {
+    3.0
+}
+
+#[derive(Serialize, Debug)]
+struct EwmaPointDto {
+    index: usize,
+    ewma: f64,
+    ucl: f64,
+    lcl: f64,
+    signal: bool,
+}
+
+#[derive(Serialize, Debug)]
+struct EwmaDto {
+    points: Vec<EwmaPointDto>,
+    signal_indices: Vec<usize>,
+    in_control: bool,
+}
+
+/// CUSUM chart (Page, 1954) -- detects small persistent shifts in the mean.
+///
+/// # Input JSON
+///
+/// ```json
+/// { "data": [10.1, 9.8, 12.0], "target": 10.0, "sigma": 1.0, "k": 0.5, "h": 5.0 }
+/// ```
+///
+/// - `data` (required): observations, in order. Must be non-empty.
+/// - `target` (required): process target mean (mu_0).
+/// - `sigma` (required): known process standard deviation. Must be positive.
+/// - `k` (optional): reference value / allowance, default `0.5` (optimal for a
+///   1-sigma shift). Must be non-negative.
+/// - `h` (optional): decision interval, default `5.0` (ARL_0 ~ 465). Must be positive.
+///
+/// # Output JSON
+///
+/// ```json
+/// {
+///   "h": 5.0,
+///   "points": [{ "index": 0, "s_upper": 0.0, "s_lower": 0.0, "signal": false }],
+///   "signal_indices": [],
+///   "in_control": true
+/// }
+/// ```
+///
+/// Both cumulative sums are on the **standardized** scale (`z = (x - target) / sigma`)
+/// and start at zero, so they compare against `h` directly.
+#[wasm_bindgen]
+pub fn cusum(input: JsValue) -> Result<JsValue, JsValue> {
+    let input: CusumInputDto = from_js(input, "input")?;
+    let dto = cusum_dto(input).map_err(js_err)?;
+    to_js(&dto)
+}
+
+/// The half of [`cusum`] below the `JsValue` boundary, so the contract is
+/// testable off `wasm32`.
+fn cusum_dto(input: CusumInputDto) -> Result<CusumDto, String> {
+    if input.data.is_empty() {
+        return Err("data must not be empty".to_owned());
+    }
+
+    let chart = crate::detection::Cusum::with_params(input.target, input.sigma, input.k, input.h)
+        .ok_or_else(|| {
+        format!(
+            "invalid parameters (target must be finite, sigma > 0, k >= 0, h > 0); \
+                 got target={}, sigma={}, k={}, h={}",
+            input.target, input.sigma, input.k, input.h
+        )
+    })?;
+
+    let results = chart.analyze(&input.data);
+    let signal_indices: Vec<usize> = results
+        .iter()
+        .filter(|r| r.signal)
+        .map(|r| r.index)
+        .collect();
+
+    Ok(CusumDto {
+        h: input.h,
+        in_control: signal_indices.is_empty(),
+        signal_indices,
+        points: results
+            .into_iter()
+            .map(|r| CusumPointDto {
+                index: r.index,
+                s_upper: r.s_upper,
+                s_lower: r.s_lower,
+                signal: r.signal,
+            })
+            .collect(),
+    })
+}
+
+/// EWMA chart (Roberts, 1959) -- exponentially weighted moving average of the mean.
+///
+/// # Input JSON
+///
+/// ```json
+/// { "data": [10.1, 9.8, 12.0], "target": 10.0, "sigma": 1.0, "lambda": 0.2, "l_factor": 3.0 }
+/// ```
+///
+/// - `data` (required): observations, in order. Must be non-empty.
+/// - `target` (required): process target mean (mu_0).
+/// - `sigma` (required): known process standard deviation. Must be positive.
+/// - `lambda` (optional): smoothing constant, default `0.2`. Must be in `(0, 1]`.
+/// - `l_factor` (optional): control-limit width factor, default `3.0`. Must be positive.
+///
+/// # Output JSON
+///
+/// ```json
+/// {
+///   "points": [{ "index": 0, "ewma": 10.02, "ucl": 10.6, "lcl": 9.4, "signal": false }],
+///   "signal_indices": [],
+///   "in_control": true
+/// }
+/// ```
+///
+/// The limits **widen with the observation index** (they are exact, not asymptotic),
+/// so they are returned per point rather than once for the chart.
+#[wasm_bindgen]
+pub fn ewma(input: JsValue) -> Result<JsValue, JsValue> {
+    let input: EwmaInputDto = from_js(input, "input")?;
+    let dto = ewma_dto(input).map_err(js_err)?;
+    to_js(&dto)
+}
+
+/// The half of [`ewma`] below the `JsValue` boundary, so the contract is
+/// testable off `wasm32`.
+fn ewma_dto(input: EwmaInputDto) -> Result<EwmaDto, String> {
+    if input.data.is_empty() {
+        return Err("data must not be empty".to_owned());
+    }
+
+    let chart = crate::detection::Ewma::with_params(
+        input.target,
+        input.sigma,
+        input.lambda,
+        input.l_factor,
+    )
+    .ok_or_else(|| {
+        format!(
+            "invalid parameters (target must be finite, sigma > 0, 0 < lambda <= 1, \
+             l_factor > 0); got target={}, sigma={}, lambda={}, l_factor={}",
+            input.target, input.sigma, input.lambda, input.l_factor
+        )
+    })?;
+
+    let results = chart.analyze(&input.data);
+    let signal_indices: Vec<usize> = results
+        .iter()
+        .filter(|r| r.signal)
+        .map(|r| r.index)
+        .collect();
+
+    Ok(EwmaDto {
+        in_control: signal_indices.is_empty(),
+        signal_indices,
+        points: results
+            .into_iter()
+            .map(|r| EwmaPointDto {
+                index: r.index,
+                ewma: r.ewma,
+                ucl: r.ucl,
+                lcl: r.lcl,
+                signal: r.signal,
+            })
+            .collect(),
+    })
+}
+
 // ── Wire-schema strictness tests ─────────────────────────────────────
 
 #[cfg(test)]
@@ -1520,6 +1750,20 @@ mod dto_strictness_tests {
     fn gage_rr_input_rejects_unknown_keys() {
         assert_rejects_unknown::<super::GageRRInputDto>(
             json!({ "measurements": [[[1.0]]], "tol": 0.5 }),
+        );
+    }
+
+    #[test]
+    fn cusum_input_rejects_unknown_keys() {
+        assert_rejects_unknown::<super::CusumInputDto>(
+            json!({ "data": [1.0, 2.0], "target": 1.0, "sigma": 1.0, "H": 5.0 }),
+        );
+    }
+
+    #[test]
+    fn ewma_input_rejects_unknown_keys() {
+        assert_rejects_unknown::<super::EwmaInputDto>(
+            json!({ "data": [1.0, 2.0], "target": 1.0, "sigma": 1.0, "lFactor": 3.0 }),
         );
     }
 
@@ -2020,6 +2264,133 @@ mod binding_contract_tests {
         assert!(e.contains("samples[1]"), "{e}");
         let ok = p_chart_dto(&[[3, 100], [5, 120], [2, 80]]).expect("valid");
         assert_eq!(ok.points.len(), 3);
+    }
+
+    // ── CUSUM / EWMA ────────────────────────────────────────────────
+
+    fn cusum_in(data: &[f64], target: f64, sigma: f64) -> super::CusumInputDto {
+        super::from_json(
+            json!({ "data": data, "target": target, "sigma": sigma }),
+            "input",
+        )
+        .expect("valid cusum input")
+    }
+
+    fn ewma_in(data: &[f64], target: f64, sigma: f64) -> super::EwmaInputDto {
+        super::from_json(
+            json!({ "data": data, "target": target, "sigma": sigma }),
+            "input",
+        )
+        .expect("valid ewma input")
+    }
+
+    #[test]
+    fn cusum_defaults_match_the_crate_and_stay_in_control_on_stable_data() {
+        let data = [10.1, 9.8, 10.2, 9.9, 10.0, 10.1, 9.7, 10.3];
+        let dto = super::cusum_dto(cusum_in(&data, 10.0, 1.0)).expect("in-control run");
+
+        // The binding must not invent its own defaults: k=0.5, h=5.0 (Page 1954).
+        assert_eq!(dto.h, 5.0);
+        assert_eq!(dto.points.len(), data.len());
+        assert!(dto.in_control);
+        assert!(dto.signal_indices.is_empty());
+
+        // Same numbers the crate produces, point for point.
+        let native = crate::detection::Cusum::new(10.0, 1.0)
+            .expect("valid chart")
+            .analyze(&data);
+        for (p, n) in dto.points.iter().zip(native.iter()) {
+            assert_eq!(p.index, n.index);
+            assert!((p.s_upper - n.s_upper).abs() < 1e-12);
+            assert!((p.s_lower - n.s_lower).abs() < 1e-12);
+            assert_eq!(p.signal, n.signal);
+        }
+    }
+
+    #[test]
+    fn cusum_signals_a_sustained_upward_shift_and_reports_where() {
+        let mut data = vec![10.0; 10];
+        data.extend(vec![12.0; 10]);
+        let dto = super::cusum_dto(cusum_in(&data, 10.0, 1.0)).expect("shifted run");
+
+        assert!(!dto.in_control);
+        assert!(!dto.signal_indices.is_empty());
+        // Every flagged index is inside the shifted half, and signal_indices
+        // agrees with the per-point flags (the redundancy must not drift).
+        assert!(
+            dto.signal_indices.iter().all(|&i| i >= 10),
+            "{:?}",
+            dto.signal_indices
+        );
+        let from_points: Vec<usize> = dto
+            .points
+            .iter()
+            .filter(|p| p.signal)
+            .map(|p| p.index)
+            .collect();
+        assert_eq!(from_points, dto.signal_indices);
+    }
+
+    #[test]
+    fn cusum_refuses_empty_data_and_invalid_parameters() {
+        let empty: super::CusumInputDto =
+            super::from_json(json!({ "data": [], "target": 1.0, "sigma": 1.0 }), "input")
+                .expect("parses");
+        assert!(super::cusum_dto(empty)
+            .expect_err("empty")
+            .contains("empty"));
+
+        let bad: super::CusumInputDto = super::from_json(
+            json!({ "data": [1.0], "target": 1.0, "sigma": 0.0 }),
+            "input",
+        )
+        .expect("parses");
+        let e = super::cusum_dto(bad).expect_err("sigma must be > 0");
+        assert!(e.contains("sigma"), "{e}");
+    }
+
+    #[test]
+    fn ewma_limits_widen_with_the_index_and_match_the_crate() {
+        let data = [10.1, 9.8, 10.2, 9.9, 10.0, 10.1];
+        let dto = super::ewma_dto(ewma_in(&data, 10.0, 1.0)).expect("in-control run");
+
+        assert_eq!(dto.points.len(), data.len());
+        assert!(dto.in_control);
+
+        // Exact (not asymptotic) limits: the half-width grows monotonically.
+        let widths: Vec<f64> = dto.points.iter().map(|p| p.ucl - p.lcl).collect();
+        for w in widths.windows(2) {
+            assert!(w[1] > w[0], "limits must widen: {widths:?}");
+        }
+
+        let native = crate::detection::Ewma::new(10.0, 1.0)
+            .expect("valid chart")
+            .analyze(&data);
+        for (p, n) in dto.points.iter().zip(native.iter()) {
+            assert_eq!(p.index, n.index);
+            assert!((p.ewma - n.ewma).abs() < 1e-12);
+            assert!((p.ucl - n.ucl).abs() < 1e-12);
+            assert!((p.lcl - n.lcl).abs() < 1e-12);
+            assert_eq!(p.signal, n.signal);
+        }
+    }
+
+    #[test]
+    fn ewma_refuses_empty_data_and_a_lambda_outside_zero_to_one() {
+        let empty: super::EwmaInputDto =
+            super::from_json(json!({ "data": [], "target": 1.0, "sigma": 1.0 }), "input")
+                .expect("parses");
+        assert!(super::ewma_dto(empty).expect_err("empty").contains("empty"));
+
+        for lambda in [0.0, 1.5] {
+            let bad: super::EwmaInputDto = super::from_json(
+                json!({ "data": [1.0, 2.0], "target": 1.0, "sigma": 1.0, "lambda": lambda }),
+                "input",
+            )
+            .expect("parses");
+            let e = super::ewma_dto(bad).expect_err("lambda out of range");
+            assert!(e.contains("lambda"), "{e}");
+        }
     }
 
     #[test]
