@@ -81,7 +81,17 @@ let indices = spec.compute(&data, 0.15).unwrap();
 
 println!("Cp = {:.2}, Cpk = {:.2}", indices.cp.unwrap(), indices.cpk.unwrap());
 println!("6σ PPM = {:.1}", sigma_to_ppm(6.0)); // 3.4
+
+// No within-subgroup sigma (a flat vector): long-term indices only.
+let overall = spec.compute_overall(&data).unwrap();
+assert!(overall.pp.is_some() && overall.cp.is_none());
 ```
+
+`compute` takes the within-subgroup sigma from a control chart (`R-bar/d2`,
+`S-bar/c4`, `MR-bar/d2`); `compute_overall` has none and so reports only
+Pp/Ppk/Ppu/Ppl and Cpm, leaving `cp`, `cpk`, `cpu`, `cpl` and `std_dev_within`
+`None`. Filling the short-term names from the overall sigma would make `cp`
+equal `pp` for every input.
 
 ```rust
 use u_analytics::capability::boxcox_capability;

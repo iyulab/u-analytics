@@ -201,30 +201,17 @@ pub fn boxcox_capability(
         })
         .transpose()?;
 
-    // Compute overall std of transformed data (for Pp/Ppk)
-    let n = y_t.len();
-    let mean_t = y_t.iter().sum::<f64>() / n as f64;
-    let overall_std_t =
-        (y_t.iter().map(|&v| (v - mean_t).powi(2)).sum::<f64>() / (n - 1) as f64).sqrt();
-
     // Build ProcessCapability on transformed scale
     // ProcessCapability::new validates usl > lsl when both present
     let spec = ProcessCapability::new(usl_t, lsl_t)
         .map_err(|_| NonNormalCapabilityError::CapabilityError)?;
 
     // A Box-Cox analysis starts from a flat vector, so there is no rational
-    // subgrouping and therefore no short-term sigma to estimate. Computing the
-    // indices with the overall sigma in both roles and returning all of them
-    // would report Cp == Pp and Cpk == Ppk for every input -- a long-term
-    // number wearing a short-term name, which is the failure mode a null is
-    // there to prevent. The short-term quartet is cleared instead.
-    let mut indices = spec
-        .compute(&y_t, overall_std_t)
+    // subgrouping and therefore no short-term sigma to estimate: only the
+    // long-term indices are reported, which is what `compute_overall` does.
+    let indices = spec
+        .compute_overall(&y_t)
         .ok_or(NonNormalCapabilityError::CapabilityError)?;
-    indices.cp = None;
-    indices.cpk = None;
-    indices.cpu = None;
-    indices.cpl = None;
 
     Ok(NonNormalCapabilityResult { lambda, indices })
 }

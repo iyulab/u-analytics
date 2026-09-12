@@ -41,8 +41,11 @@ pub struct ProcessCapability {
 
 /// Computed capability indices.
 ///
-/// Fields are `Option<f64>` because not all indices can be computed for
-/// one-sided specifications. For example, Cp requires both USL and LSL.
+/// Fields are `Option<f64>` because not every index can be computed for
+/// every input. Cp requires both USL and LSL; the short-term quartet
+/// (`cp`, `cpk`, `cpu`, `cpl`) requires a within-subgroup sigma, so it is
+/// `None` from [`ProcessCapability::compute_overall`], which has none. A
+/// long-term number is never reported under a short-term name.
 ///
 /// # Index interpretation
 ///
@@ -88,8 +91,11 @@ pub struct CapabilityIndices {
     pub cpm: Option<f64>,
     /// Sample mean of the data.
     pub mean: f64,
-    /// Short-term (within-group) standard deviation.
-    pub std_dev_within: f64,
+    /// Short-term (within-group) standard deviation -- the value the caller
+    /// supplied to [`ProcessCapability::compute`]. `None` from
+    /// [`ProcessCapability::compute_overall`], along with the four indices
+    /// that would be computed from it.
+    pub std_dev_within: Option<f64>,
     /// Long-term (overall) standard deviation.
     pub std_dev_overall: f64,
 }
@@ -212,15 +218,20 @@ impl ProcessCapability {
         let x_bar = stats::mean(data)?;
         let sigma_overall = stats::std_dev(data)?;
 
-        Some(self.compute_indices(data, x_bar, sigma_within, sigma_overall))
+        Some(self.compute_indices(data, x_bar, Some(sigma_within), sigma_overall))
     }
 
-    /// Computes capability indices using overall sigma for both short-term
-    /// and long-term estimates.
+    /// Computes the long-term (performance) indices only.
     ///
-    /// Use this when no within-group sigma estimate is available (e.g., no
-    /// rational subgrouping). Both Cp/Cpk and Pp/Ppk will use the same
-    /// sigma, so Cp == Pp and Cpk == Ppk.
+    /// Use this when no within-subgroup sigma is available -- a flat vector
+    /// with no rational subgrouping. Pp/Ppk/Ppu/Ppl come from the overall
+    /// sample standard deviation, and Cpm from the spread about the target,
+    /// as in [`ProcessCapability::compute`]. The short-term quartet
+    /// (`cp`, `cpk`, `cpu`, `cpl`) and `std_dev_within` are `None`: filling
+    /// them from the overall sigma would make `cp` equal `pp` for every
+    /// input, a long-term number under a short-term name. To report Cp/Cpk,
+    /// estimate the within sigma from a control chart (R-bar/d2, S-bar/c4 or
+    /// MR-bar/d2) and call [`ProcessCapability::compute`].
     ///
     /// # Returns
     ///
@@ -237,30 +248,32 @@ impl ProcessCapability {
     /// let data = [9.5, 10.0, 10.2, 9.8, 10.1, 10.3, 9.9, 10.0];
     ///
     /// let indices = spec.compute_overall(&data).unwrap();
-    /// // When using overall sigma for both, Cp == Pp
-    /// assert!((indices.cp.unwrap() - indices.pp.unwrap()).abs() < 1e-15);
+    /// assert!(indices.pp.unwrap() > 0.0);
+    /// // No within sigma, so no short-term index is claimed.
+    /// assert!(indices.cp.is_none());
+    /// assert!(indices.std_dev_within.is_none());
     /// ```
     pub fn compute_overall(&self, data: &[f64]) -> Option<CapabilityIndices> {
         let x_bar = stats::mean(data)?;
         let sigma_overall = stats::std_dev(data)?;
 
-        Some(self.compute_indices(data, x_bar, sigma_overall, sigma_overall))
+        Some(self.compute_indices(data, x_bar, None, sigma_overall))
     }
 
-    /// Internal computation of all indices given the data, its mean and the
-    /// two sigma values.
+    /// Internal computation of all indices given the data, its mean, the
+    /// overall sigma and -- when the caller has one -- the within sigma.
     fn compute_indices(
         &self,
         data: &[f64],
         x_bar: f64,
-        sigma_within: f64,
+        sigma_within: Option<f64>,
         sigma_overall: f64,
     ) -> CapabilityIndices {
-        // Short-term indices (within-group sigma)
-        let cpu = self.usl.map(|u| (u - x_bar) / (3.0 * sigma_within));
-        let cpl = self.lsl.map(|l| (x_bar - l) / (3.0 * sigma_within));
-        let cp = match (self.usl, self.lsl) {
-            (Some(u), Some(l)) => Some((u - l) / (6.0 * sigma_within)),
+        // Short-term indices (within-group sigma) -- only with a within sigma.
+        let cpu = sigma_within.and_then(|s| self.usl.map(|u| (u - x_bar) / (3.0 * s)));
+        let cpl = sigma_within.and_then(|s| self.lsl.map(|l| (x_bar - l) / (3.0 * s)));
+        let cp = match (sigma_within, self.usl, self.lsl) {
+            (Some(s), Some(u), Some(l)) => Some((u - l) / (6.0 * s)),
             _ => None,
         };
         let cpk = match (cpu, cpl) {
@@ -479,26 +492,32 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn compute_overall_matches_pp_equals_cp() {
+    fn compute_overall_reports_no_short_term_index() {
+        // The previous version of this test asserted cp == pp here, pinning
+        // the overall sigma being reported under the short-term names. A
+        // flat vector has no within sigma, so nothing short-term is claimed.
         let spec = ProcessCapability::new(Some(220.0), Some(200.0)).unwrap();
         let data = [
             208.0, 209.0, 210.0, 211.0, 212.0, 208.5, 209.5, 210.5, 211.5, 210.0,
         ];
         let indices = spec.compute_overall(&data).unwrap();
 
-        let cp = indices.cp.unwrap();
-        let pp = indices.pp.unwrap();
-        assert!(
-            (cp - pp).abs() < 1e-15,
-            "Cp should equal Pp in compute_overall"
-        );
+        assert!(indices.cp.is_none());
+        assert!(indices.cpk.is_none());
+        assert!(indices.cpu.is_none());
+        assert!(indices.cpl.is_none());
+        assert!(indices.std_dev_within.is_none());
+        assert!(indices.pp.unwrap() > 0.0);
+        assert!(indices.ppk.unwrap() > 0.0);
+        assert!(indices.ppu.unwrap() > 0.0);
+        assert!(indices.ppl.unwrap() > 0.0);
 
-        let cpk = indices.cpk.unwrap();
-        let ppk = indices.ppk.unwrap();
-        assert!(
-            (cpk - ppk).abs() < 1e-15,
-            "Cpk should equal Ppk in compute_overall"
-        );
+        // The long-term indices are the same ones `compute` reports.
+        let with_within = spec.compute(&data, 1.0).unwrap();
+        assert_eq!(indices.pp, with_within.pp);
+        assert_eq!(indices.ppk, with_within.ppk);
+        assert_eq!(indices.std_dev_overall, with_within.std_dev_overall);
+        assert_eq!(with_within.std_dev_within, Some(1.0));
     }
 
     // -----------------------------------------------------------------------

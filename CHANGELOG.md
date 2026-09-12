@@ -66,6 +66,19 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   moving-range `sigma_hat` that the capability entry point used to compute on
   its own, and a test pins that feeding it back yields the same number.
 
+- **`ProcessCapability::compute_overall` reports the long-term indices
+  only**, and `CapabilityIndices::std_dev_within` is now `Option<f64>`. The
+  method computed the short-term quartet from the overall sigma and returned
+  it under the short-term names -- `cp == pp` for every input, by design and
+  as documented -- which is the same shape as the `boxcox_capability` fix
+  below and the `process_capability` binding change above, now closed at the
+  crate: `cp`, `cpk`, `cpu`, `cpl` and `std_dev_within` are `None` when no
+  within sigma was supplied, and `boxcox_capability` and both bindings get
+  that behaviour from the crate instead of clearing the fields themselves.
+  **Breaking** for Rust callers reading `std_dev_within` as `f64` or the
+  short-term indices from `compute_overall`; the numbers they were reading
+  were long-term ones.
+
 ### Fixed
 
 - The `rules: unknown rule …` error message carried a run of literal spaces in

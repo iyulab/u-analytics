@@ -350,58 +350,42 @@ pub(crate) fn capability_dto(input: CapabilityInputDto) -> Result<CapabilityDto,
         spec = spec.with_target(target);
     }
 
-    let dto = match input.sigma_within {
+    // The crate decides what a missing within sigma means: `compute_overall`
+    // reports the long-term indices only, so the short-term quartet and
+    // `std_dev_within` arrive as `None` and are passed through as such.
+    let indices = match input.sigma_within {
         Some(sigma_within) => {
             if !sigma_within.is_finite() || sigma_within <= 0.0 {
                 return Err("sigma_within must be a positive, finite number \
                      (R-bar/d2 or S-bar/c4 from the control chart)"
                     .to_string());
             }
-            let indices = spec
-                .compute(&input.data, sigma_within)
-                .ok_or("insufficient or invalid data (need >= 2 finite values)")?;
-            CapabilityDto {
-                mean: indices.mean,
-                sigma_source: "within",
-                std_dev_within: Some(indices.std_dev_within),
-                std_dev_overall: indices.std_dev_overall,
-                cp: indices.cp,
-                cpk: indices.cpk,
-                cpu: indices.cpu,
-                cpl: indices.cpl,
-                pp: indices.pp,
-                ppk: indices.ppk,
-                ppu: indices.ppu,
-                ppl: indices.ppl,
-                cpm: indices.cpm,
-            }
+            spec.compute(&input.data, sigma_within)
         }
-        None => {
-            // No short-term sigma: report the long-term indices only. The
-            // crate computes both from the same sigma in this mode, so
-            // carrying the short-term names through would publish Pp under the
-            // name Cp for every input.
-            let indices = spec
-                .compute_overall(&input.data)
-                .ok_or("insufficient or invalid data (need >= 2 finite values)")?;
-            CapabilityDto {
-                mean: indices.mean,
-                sigma_source: "overall",
-                std_dev_within: None,
-                std_dev_overall: indices.std_dev_overall,
-                cp: None,
-                cpk: None,
-                cpu: None,
-                cpl: None,
-                pp: indices.pp,
-                ppk: indices.ppk,
-                ppu: indices.ppu,
-                ppl: indices.ppl,
-                // Not a short-term index: Cpm is the spread about the target,
-                // the same whichever sigma the caller could supply.
-                cpm: indices.cpm,
-            }
-        }
+        None => spec.compute_overall(&input.data),
+    }
+    .ok_or("insufficient or invalid data (need >= 2 finite values)")?;
+
+    let dto = CapabilityDto {
+        mean: indices.mean,
+        sigma_source: if indices.std_dev_within.is_some() {
+            "within"
+        } else {
+            "overall"
+        },
+        std_dev_within: indices.std_dev_within,
+        std_dev_overall: indices.std_dev_overall,
+        cp: indices.cp,
+        cpk: indices.cpk,
+        cpu: indices.cpu,
+        cpl: indices.cpl,
+        pp: indices.pp,
+        ppk: indices.ppk,
+        ppu: indices.ppu,
+        ppl: indices.ppl,
+        // Not a short-term index: Cpm is the spread about the target, the
+        // same whichever sigma the caller could supply.
+        cpm: indices.cpm,
     };
     Ok(dto)
 }
