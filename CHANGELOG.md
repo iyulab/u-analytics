@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.5.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Added
+
+- `seasonality` module -- `periodogram` (linearly detrended, zero-padded to a
+  power of two >= 4n, `|X_k|^2 / n`) and `estimate_period`, the dominant
+  period of a univariate series by AutoPeriod (Vlachos, Yu & Castelli 2005):
+  periodogram peaks above a permutation threshold (99th percentile of the
+  largest ordinate over 100 seeded shuffles, so the estimate is a
+  deterministic function of the series) are refined on the autocorrelation
+  function to the integer lag that is a local maximum above the `1.96/sqrt(n)`
+  bound, with the biased estimator's `(n - lag)/n` shrinkage corrected before
+  the comparison. The result says explicitly when there is no period
+  (`period: None`) and lists every validated candidate. Recovers every period
+  from 2 to 20 from sines and sawtooths of 4, 7 and 13 cycles, including the
+  40-row `i % 7` sawtooth a well-known library answers with "none". Exposed on
+  every transport: WASM `estimate_period`, C FFI `uanalytics_estimate_period`,
+  C# `EstimatePeriod`. Requires `u-numflow` 0.5 (its new `fourier` module).
+
 ## [0.10.0] - 2026-09-12
 
 ### Changed

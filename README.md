@@ -18,6 +18,7 @@ hypothesis testing for industrial quality engineering.
 | `weibull` | Weibull parameter estimation (MLE, MRR) and reliability analysis (R(t), MTBF, B-life) |
 | `detection` | Change-point detection (CUSUM, EWMA) |
 | `smoothing` | Time series smoothing (SES, Holt linear trend, Holt-Winters seasonal) |
+| `seasonality` | Periodogram (zero-padded FFT) and dominant-period estimation — AutoPeriod: permutation-thresholded peaks refined on the ACF |
 | `correlation` | Correlation analysis (Pearson, Spearman, Kendall, partial, correlation matrices) |
 | `regression` | Regression analysis (simple OLS, multiple OLS, VIF multicollinearity) |
 | `distribution` | Distribution analysis (ECDF, histogram bins — Sturges/Scott/FD/Fixed, QQ-plot, KS test) |
@@ -136,6 +137,32 @@ let cusum = Cusum::new(10.0, 1.0).unwrap();
 let data = [10.1, 9.9, 10.0, 10.2, 12.0, 12.1, 11.9, 12.3];
 let signals = cusum.signal_points(&data);
 ```
+
+### Seasonality — which period does the series repeat on?
+
+Holt-Winters needs the seasonal period as an input; `estimate_period` finds it
+from the data. Two stages (Vlachos, Yu & Castelli 2005, *AutoPeriod*): the
+linearly detrended, zero-padded periodogram is searched for peaks above what
+the same values in random order produce (99th percentile over 100 seeded
+permutations — deterministic), then each peak's frequency band is refined on the
+autocorrelation function to the integer lag that is a local maximum above the
+`1.96/√n` white-noise bound. The answer says explicitly when there is no period.
+
+```rust
+use u_analytics::seasonality::estimate_period;
+
+let sawtooth: Vec<f64> = (0..40).map(|i| (i % 7) as f64).collect();
+let r = estimate_period(&sawtooth).unwrap();
+assert_eq!(r.period, Some(7));            // every validated candidate is in r.candidates
+
+let line: Vec<f64> = (0..40).map(|i| 2.0 * i as f64).collect();
+assert_eq!(estimate_period(&line).unwrap().period, None);
+```
+
+Only periods from 2 to `n/2` are admissible — a cycle has to be seen twice —
+and a series shorter than 8 points is refused (`None` from the function, as
+opposed to `period: None` inside a result). Series under ~16 points rarely beat
+the permutation threshold: too few orderings differ from the observed one.
 
 ## JavaScript / WASM (npm)
 
@@ -432,6 +459,13 @@ detect_changepoints(input: {
 detect_changepoints_multi(input: { signals: number[][], cost?, penalty?, min_segment_len? }):
   { changepoints: number[], n_segments: number }   // channels of equal length
 
+// Seasonality — AutoPeriod (Vlachos et al., 2005); >= 8 finite values
+estimate_period(input: { data: number[] }): {
+  period: number | null,          // null = no periodicity passed both stages (explicit, not an error)
+  candidates: { period: number, acf: number, bin: number, power: number, power_share: number }[],
+  n: number, acf_threshold: number, power_threshold: number,
+}
+
 // Gage R&R — measurements[part][operator][trial]
 gage_rr_xbar_r(input: { measurements: number[][][], tolerance?: number }): {
   ev, av, grr, pv, tv, percent_ev, percent_av, percent_grr, percent_pv: number,
@@ -502,6 +536,7 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_gage_rr_xbar_r` | `gage_rr_xbar_r(input)` | `input` as is |
 | `uanalytics_gage_rr_anova` | `gage_rr_anova(input)` | `input` as is |
 | `uanalytics_detect_changepoints` | `detect_changepoints(input)` | `input` as is |
+| `uanalytics_estimate_period` | `estimate_period(input)` | `input` as is |
 
 The composition documented for JavaScript holds here too: `imr_chart` (or
 `xbar_s_chart`) returns `sigma_hat`, which is what `process_capability` needs as

@@ -753,3 +753,60 @@ pub(crate) fn run_rules_dto(
     }
     Ok(point_dtos(&points))
 }
+
+// ── Seasonality ──────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SeasonalityInputDto {
+    pub(crate) data: Vec<f64>,
+}
+
+#[derive(Serialize, Debug)]
+pub(crate) struct PeriodCandidateDto {
+    pub(crate) period: usize,
+    pub(crate) acf: f64,
+    pub(crate) bin: usize,
+    pub(crate) power: f64,
+    pub(crate) power_share: f64,
+}
+
+#[derive(Serialize, Debug)]
+pub(crate) struct SeasonalityDto {
+    /// `null` when no periodicity passed both stages.
+    pub(crate) period: Option<usize>,
+    pub(crate) candidates: Vec<PeriodCandidateDto>,
+    pub(crate) n: usize,
+    pub(crate) acf_threshold: f64,
+    pub(crate) power_threshold: f64,
+}
+
+pub(crate) fn seasonality_dto(input: SeasonalityInputDto) -> Result<SeasonalityDto, String> {
+    if let Some(i) = input.data.iter().position(|x| !x.is_finite()) {
+        return Err(format!("data[{i}] is not a finite number"));
+    }
+    let r = crate::seasonality::estimate_period(&input.data).ok_or_else(|| {
+        format!(
+            "data must have at least {} observations, got {}",
+            crate::seasonality::MIN_OBSERVATIONS,
+            input.data.len()
+        )
+    })?;
+    Ok(SeasonalityDto {
+        period: r.period,
+        candidates: r
+            .candidates
+            .into_iter()
+            .map(|c| PeriodCandidateDto {
+                period: c.period,
+                acf: c.acf,
+                bin: c.bin,
+                power: c.power,
+                power_share: c.power_share,
+            })
+            .collect(),
+        n: r.n,
+        acf_threshold: r.acf_threshold,
+        power_threshold: r.power_threshold,
+    })
+}

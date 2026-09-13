@@ -137,6 +137,17 @@ public sealed class AnalyticsClient : IDisposable
                 ? new { data, cost, min_segment_len = minSegmentLen }
                 : (object)new { data, cost, penalty, min_segment_len = minSegmentLen });
 
+    // ── Seasonality ──
+
+    /// <summary>
+    /// Estimates the dominant period of a univariate series (AutoPeriod:
+    /// permutation-thresholded periodogram peaks refined on the ACF). The
+    /// response's <c>period</c> is <c>null</c>, not an error, when no
+    /// periodicity is found; <c>candidates</c> lists every validated period.
+    /// </summary>
+    public JsonElement EstimatePeriod(double[] data)
+        => CallNative(NativeInterop.uanalytics_estimate_period, new { data });
+
     // ── Correlation ──
 
     public JsonElement CorrelationMatrix(double[][] variables)

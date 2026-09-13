@@ -21,7 +21,7 @@ use crate::wire::{
     gage_rr_anova_dto, gage_rr_xbar_r_dto, imr_dto, laney_p_dto, laney_point_dtos, p_chart_dto,
     pelt_dto, percentile_capability_dto, rules_from_json, run_rules_dto, xbar_r_dto, xbar_s_dto,
     AttributeChartPointDto, CapabilityInputDto, GageRRInputDto, LimitsInputDto, PeltInputDto,
-    PeltPenaltyDto, PeltResultDto, PercentileCapabilityInputDto,
+    PeltPenaltyDto, PeltResultDto, PercentileCapabilityInputDto, SeasonalityInputDto,
 };
 
 // ---------------------------------------------------------------------------
@@ -1059,6 +1059,46 @@ fn boxcox_capability_dto(input: BoxcoxCapabilityInputDto) -> Result<BoxcoxCapabi
         ppl: i.ppl,
         cpm: i.cpm,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Seasonality
+// ---------------------------------------------------------------------------
+
+/// Estimate the dominant period of a univariate series.
+///
+/// Two stages (AutoPeriod, Vlachos et al. 2005): the linearly detrended,
+/// zero-padded periodogram is searched for peaks above a permutation
+/// threshold (99th percentile of the largest ordinate over 100 seeded
+/// shuffles), and each peak's frequency band is refined on the
+/// autocorrelation function to an integer lag that is a local maximum above
+/// the `1.96/√n` white-noise bound. Deterministic for a given series.
+///
+/// # Input JSON
+///
+/// ```json
+/// { "data": [0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 0, 1] }
+/// ```
+///
+/// - `data` (required): at least 8 finite values.
+///
+/// # Output JSON
+///
+/// ```json
+/// { "period": 7,
+///   "candidates": [{ "period": 7, "acf": 0.71, "bin": 18, "power": 21.3, "power_share": 0.62 }],
+///   "n": 16, "acf_threshold": 0.49, "power_threshold": 6.8 }
+/// ```
+///
+/// `period` is `null` — explicitly, not an error — when no periodicity passes
+/// both stages: a constant, a pure trend, white noise. Only periods from 2 to
+/// `n / 2` are admissible. Each candidate carries the ACF at its lag (its
+/// strength), the periodogram bin that produced it (1-based, of the padded
+/// transform), that bin's power and share of the total.
+#[wasm_bindgen]
+pub fn estimate_period(input: JsValue) -> Result<JsValue, JsValue> {
+    let input: SeasonalityInputDto = from_js(input, "input")?;
+    to_js(&crate::wire::seasonality_dto(input).map_err(js_err)?)
 }
 
 /// Converts a sigma quality level to a defect rate in parts per million.

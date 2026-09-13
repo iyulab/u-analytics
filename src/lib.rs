@@ -14,6 +14,7 @@
 //! - [`weibull`] — Weibull parameter estimation (MLE, MRR) and reliability analysis
 //! - [`detection`] — Change-point detection (CUSUM, EWMA, PELT)
 //! - [`smoothing`] — Time series smoothing (SES, Holt, Holt-Winters)
+//! - [`seasonality`] — Periodogram and dominant-period estimation (AutoPeriod)
 //! - [`correlation`] — Correlation analysis (Pearson, Spearman, Kendall, matrices)
 //! - [`regression`] — Regression analysis (simple, multiple OLS, VIF)
 //! - [`distribution`] — Distribution analysis (ECDF, histogram bins, QQ-plot, KS test)
@@ -32,6 +33,7 @@ pub mod detection;
 pub mod distribution;
 pub mod msa;
 pub mod regression;
+pub mod seasonality;
 pub mod smoothing;
 pub mod spc;
 pub mod testing;

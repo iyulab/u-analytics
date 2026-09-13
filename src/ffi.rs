@@ -585,6 +585,42 @@ pub unsafe extern "C" fn uanalytics_detect_changepoints(
     })
 }
 
+// ── Seasonality ─────────────────────────────────────────────
+
+/// Dominant-period estimation (AutoPeriod)
+///
+/// Request `{ "data": [...] }` (at least 8 finite values); response
+/// `{ "period": 7 | null, "candidates": [...], "n", "acf_threshold",
+/// "power_threshold" }` — the same shape as the WASM `estimate_period`.
+///
+/// # Safety
+///
+/// `request_json` must be null or point to a NUL-terminated string, and
+/// `result_ptr` must be null or valid for writing one pointer. A string written
+/// there is owned by the caller and must be released with
+/// [`uanalytics_free_string`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn uanalytics_estimate_period(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+) -> i32 {
+    ffi_catch(result_ptr, || {
+        let json = match unsafe { read_json(request_json) } {
+            Ok(j) => j,
+            Err(e) => return e,
+        };
+        let req: crate::wire::SeasonalityInputDto = match parse_request(&json, result_ptr) {
+            Ok(r) => r,
+            Err(status) => return status,
+        };
+        match crate::wire::seasonality_dto(req) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
+        }
+    })
+}
+
 // ── Correlation Matrix ──────────────────────────────────────
 
 #[cfg(feature = "ffi")]
@@ -1047,6 +1083,22 @@ mod tests {
         assert_eq!(code, 0, "{body}");
         let wire = crate::wire::pelt_dto(serde_json::from_value(pelt).unwrap()).unwrap();
         assert_eq!(body, serde_json::to_value(&wire).unwrap());
+
+        // -- seasonality: the sawtooth a well-known library answers with "none" --
+        let saw =
+            serde_json::json!({ "data": (0..40).map(|i| (i % 7) as f64).collect::<Vec<_>>() });
+        let (code, body) = call(uanalytics_estimate_period, &saw.to_string());
+        assert_eq!(code, 0, "{body}");
+        assert_eq!(body["period"], 7, "{body}");
+        let wire = crate::wire::seasonality_dto(serde_json::from_value(saw).unwrap()).unwrap();
+        assert_eq!(body, serde_json::to_value(&wire).unwrap());
+        let line = serde_json::json!({ "data": (0..40).map(|i| i as f64).collect::<Vec<_>>() });
+        let (code, body) = call(uanalytics_estimate_period, &line.to_string());
+        assert_eq!(code, 0, "{body}");
+        assert!(body["period"].is_null(), "a line has no period: {body}");
+        let short = serde_json::json!({ "data": [1.0, 2.0, 3.0] });
+        let (code, body) = call(uanalytics_estimate_period, &short.to_string());
+        assert_eq!(code, ERR_COMPUTE, "{body}");
 
         // -- X-bar/S, I-MR, run rules --
         let groups: Vec<Vec<f64>> = (0..6)
