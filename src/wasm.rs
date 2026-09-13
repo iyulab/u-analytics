@@ -22,6 +22,7 @@ use crate::wire::{
     pelt_dto, percentile_capability_dto, rules_from_json, run_rules_dto, xbar_r_dto, xbar_s_dto,
     AttributeChartPointDto, CapabilityInputDto, GageRRInputDto, LimitsInputDto, PeltInputDto,
     PeltPenaltyDto, PeltResultDto, PercentileCapabilityInputDto, SeasonalityInputDto,
+    SpectralResidualInputDto,
 };
 
 // ---------------------------------------------------------------------------
@@ -1099,6 +1100,49 @@ fn boxcox_capability_dto(input: BoxcoxCapabilityInputDto) -> Result<BoxcoxCapabi
 pub fn estimate_period(input: JsValue) -> Result<JsValue, JsValue> {
     let input: SeasonalityInputDto = from_js(input, "input")?;
     to_js(&crate::wire::seasonality_dto(input).map_err(js_err)?)
+}
+
+/// Score every point of a series for anomalies by spectral residual saliency.
+///
+/// Ren et al. (2019): the log amplitude spectrum minus its moving average,
+/// transformed back with the original phase, is large where the series has a
+/// feature its regular structure does not explain — a spike, a step, a
+/// dropout. No model is trained and no period is assumed.
+///
+/// # Input JSON
+///
+/// ```json
+/// { "data": [1.0, 1.1, 0.9, 1.0, 6.0, 1.0, 1.1, 0.9, 1.0, 1.0, 1.1, 0.9],
+///   "averaging_window": 3, "judgement_window": 40, "threshold": 3.0,
+///   "min_zscore": 1.5, "sensitivity": 70, "batch_size": null }
+/// ```
+///
+/// - `data` (required): at least 12 finite values.
+/// - `averaging_window` (optional, default 3): moving average width on the log spectrum (`q`).
+/// - `judgement_window` (optional, default 40): preceding saliencies a point is scored against (`z`).
+/// - `threshold` (optional, default 3): score above which a point is an anomaly (`τ`).
+/// - `min_zscore` (optional, default 1.5): the point must also stand this many
+///   standard deviations from the level of the window before it; `0` disables.
+/// - `sensitivity` (optional, default 70): coverage in percent of the band around
+///   the expected value.
+/// - `batch_size` (optional): score in consecutive batches of this size (>= 12).
+///
+/// # Output JSON
+///
+/// ```json
+/// { "points": [{ "index": 4, "value": 6.0, "saliency": 2.1, "score": 5.3,
+///                "expected": 1.0, "lower": 0.9, "upper": 1.1, "is_anomaly": true }],
+///   "anomalies": [4] }
+/// ```
+///
+/// `expected` is the low-frequency reconstruction of the series with its
+/// anomalies replaced by their neighbours; `lower`/`upper` is the band
+/// around it. The band is chart information — the anomaly decision is the
+/// `score`.
+#[wasm_bindgen]
+pub fn spectral_residual(input: JsValue) -> Result<JsValue, JsValue> {
+    let input: SpectralResidualInputDto = from_js(input, "input")?;
+    to_js(&crate::wire::spectral_residual_dto(input).map_err(js_err)?)
 }
 
 /// Converts a sigma quality level to a defect rate in parts per million.

@@ -810,3 +810,98 @@ pub(crate) fn seasonality_dto(input: SeasonalityInputDto) -> Result<SeasonalityD
         power_threshold: r.power_threshold,
     })
 }
+
+// ── Spectral residual ────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SpectralResidualInputDto {
+    pub(crate) data: Vec<f64>,
+    #[serde(default)]
+    pub(crate) averaging_window: Option<usize>,
+    #[serde(default)]
+    pub(crate) judgement_window: Option<usize>,
+    #[serde(default)]
+    pub(crate) threshold: Option<f64>,
+    #[serde(default)]
+    pub(crate) min_zscore: Option<f64>,
+    #[serde(default)]
+    pub(crate) sensitivity: Option<f64>,
+    #[serde(default)]
+    pub(crate) batch_size: Option<usize>,
+}
+
+#[derive(Serialize, Debug)]
+pub(crate) struct SrPointDto {
+    pub(crate) index: usize,
+    pub(crate) value: f64,
+    pub(crate) saliency: f64,
+    pub(crate) score: f64,
+    pub(crate) expected: f64,
+    pub(crate) lower: f64,
+    pub(crate) upper: f64,
+    pub(crate) is_anomaly: bool,
+}
+
+#[derive(Serialize, Debug)]
+pub(crate) struct SpectralResidualDto {
+    pub(crate) points: Vec<SrPointDto>,
+    pub(crate) anomalies: Vec<usize>,
+}
+
+pub(crate) fn spectral_residual_dto(
+    input: SpectralResidualInputDto,
+) -> Result<SpectralResidualDto, String> {
+    if let Some(i) = input.data.iter().position(|x| !x.is_finite()) {
+        return Err(format!("data[{i}] is not a finite number"));
+    }
+    let mut sr = crate::detection::SpectralResidual::new();
+    if let Some(q) = input.averaging_window {
+        sr = sr.with_averaging_window(q);
+    }
+    if let Some(z) = input.judgement_window {
+        sr = sr.with_judgement_window(z);
+    }
+    if let Some(t) = input.threshold {
+        sr = sr.with_threshold(t);
+    }
+    if let Some(z) = input.min_zscore {
+        sr = sr.with_min_zscore(z);
+    }
+    if let Some(s) = input.sensitivity {
+        sr = sr.with_sensitivity(s);
+    }
+    if input.batch_size.is_some() {
+        sr = sr.with_batch_size(input.batch_size);
+    }
+    let points = sr.analyze(&input.data).ok_or_else(|| {
+        format!(
+            "invalid configuration or data (need at least {} finite values; averaging_window >= 1, \
+             judgement_window >= 1, threshold > 0, min_zscore >= 0, 0 < sensitivity < 100, \
+             batch_size >= {})",
+            crate::detection::SR_MIN_OBSERVATIONS,
+            crate::detection::SR_MIN_OBSERVATIONS
+        )
+    })?;
+    let anomalies = points
+        .iter()
+        .filter(|p| p.is_anomaly)
+        .map(|p| p.index)
+        .collect();
+    Ok(SpectralResidualDto {
+        points: points
+            .into_iter()
+            .map(|p| SrPointDto {
+                index: p.index,
+                value: p.value,
+                saliency: p.saliency,
+                score: p.score,
+                expected: p.expected,
+                lower: p.lower,
+                upper: p.upper,
+                is_anomaly: p.is_anomaly,
+            })
+            .collect(),
+        anomalies,
+    })
+}

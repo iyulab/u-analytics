@@ -148,6 +148,26 @@ public sealed class AnalyticsClient : IDisposable
     public JsonElement EstimatePeriod(double[] data)
         => CallNative(NativeInterop.uanalytics_estimate_period, new { data });
 
+    /// <summary>
+    /// Scores every point for anomalies by spectral residual saliency (Ren et
+    /// al. 2019). Optional arguments left <c>null</c> take the paper's
+    /// defaults (q = 3, z = 40, τ = 3, z-score gate 1.5, 70% band, no
+    /// batching). The response's <c>anomalies</c> lists the flagged indices.
+    /// </summary>
+    public JsonElement SpectralResidual(double[] data, int? averagingWindow = null, int? judgementWindow = null,
+        double? threshold = null, double? minZscore = null, double? sensitivity = null, int? batchSize = null)
+        => CallNative(NativeInterop.uanalytics_spectral_residual,
+            new
+            {
+                data,
+                averaging_window = averagingWindow,
+                judgement_window = judgementWindow,
+                threshold,
+                min_zscore = minZscore,
+                sensitivity,
+                batch_size = batchSize
+            });
+
     // ── Correlation ──
 
     public JsonElement CorrelationMatrix(double[][] variables)

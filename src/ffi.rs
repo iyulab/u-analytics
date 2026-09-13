@@ -621,6 +621,41 @@ pub unsafe extern "C" fn uanalytics_estimate_period(
     })
 }
 
+/// Spectral residual anomaly scoring (Ren et al. 2019)
+///
+/// Request `{ "data": [...], "averaging_window"?, "judgement_window"?,
+/// "threshold"?, "min_zscore"?, "sensitivity"?, "batch_size"? }`; response
+/// `{ "points": [...], "anomalies": [...] }` — the same shape as the WASM
+/// `spectral_residual`.
+///
+/// # Safety
+///
+/// `request_json` must be null or point to a NUL-terminated string, and
+/// `result_ptr` must be null or valid for writing one pointer. A string written
+/// there is owned by the caller and must be released with
+/// [`uanalytics_free_string`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn uanalytics_spectral_residual(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+) -> i32 {
+    ffi_catch(result_ptr, || {
+        let json = match unsafe { read_json(request_json) } {
+            Ok(j) => j,
+            Err(e) => return e,
+        };
+        let req: crate::wire::SpectralResidualInputDto = match parse_request(&json, result_ptr) {
+            Ok(r) => r,
+            Err(status) => return status,
+        };
+        match crate::wire::spectral_residual_dto(req) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
+        }
+    })
+}
+
 // ── Correlation Matrix ──────────────────────────────────────
 
 #[cfg(feature = "ffi")]
@@ -1098,6 +1133,20 @@ mod tests {
         assert!(body["period"].is_null(), "a line has no period: {body}");
         let short = serde_json::json!({ "data": [1.0, 2.0, 3.0] });
         let (code, body) = call(uanalytics_estimate_period, &short.to_string());
+        assert_eq!(code, ERR_COMPUTE, "{body}");
+
+        // -- spectral residual: a spike on a flat series --
+        let mut spiked = vec![1.0; 40];
+        spiked[25] = 9.0;
+        let sr = serde_json::json!({ "data": spiked, "sensitivity": 90 });
+        let (code, body) = call(uanalytics_spectral_residual, &sr.to_string());
+        assert_eq!(code, 0, "{body}");
+        assert_eq!(body["anomalies"], serde_json::json!([25]), "{body}");
+        assert_eq!(body["points"].as_array().unwrap().len(), 40);
+        let wire = crate::wire::spectral_residual_dto(serde_json::from_value(sr).unwrap()).unwrap();
+        assert_eq!(body, serde_json::to_value(&wire).unwrap());
+        let bad = serde_json::json!({ "data": vec![1.0; 40], "threshold": 0.0 });
+        let (code, body) = call(uanalytics_spectral_residual, &bad.to_string());
         assert_eq!(code, ERR_COMPUTE, "{body}");
 
         // -- X-bar/S, I-MR, run rules --

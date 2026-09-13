@@ -16,7 +16,7 @@ hypothesis testing for industrial quality engineering.
 | `spc` | Control charts (X̄-R, X̄-S, I-MR, P, NP, C, U, Laney P'/U', G, T) with selectable run tests (`RuleSet`; Nelson/WE presets), subgroups n=2..=25 |
 | `capability` | Process capability indices (Cp, Cpk, Pp, Ppk, Cpm), sigma level, and Box-Cox non-normal capability |
 | `weibull` | Weibull parameter estimation (MLE, MRR) and reliability analysis (R(t), MTBF, B-life) |
-| `detection` | Change-point detection (CUSUM, EWMA) |
+| `detection` | Change-point detection (CUSUM, EWMA, PELT) and one-shot anomaly scoring by spectral residual saliency (Ren et al. 2019) |
 | `smoothing` | Time series smoothing (SES, Holt linear trend, Holt-Winters seasonal) |
 | `seasonality` | Periodogram (zero-padded FFT) and dominant-period estimation — AutoPeriod: permutation-thresholded peaks refined on the ACF |
 | `correlation` | Correlation analysis (Pearson, Spearman, Kendall, partial, correlation matrices) |
@@ -137,6 +137,35 @@ let cusum = Cusum::new(10.0, 1.0).unwrap();
 let data = [10.1, 9.9, 10.0, 10.2, 12.0, 12.1, 11.9, 12.3];
 let signals = cusum.signal_points(&data);
 ```
+
+### Spectral residual — where does the series do something its structure does not explain?
+
+`SpectralResidual` scores every point without a trained model and without
+assuming a period (Ren et al. 2019, the method behind the Microsoft anomaly
+service): the log amplitude spectrum minus its moving average, transformed
+back with the original phase, is the *saliency map*, large at spikes, steps
+and dropouts. A point's `score` is its saliency relative to the judgement
+window before it; it is an anomaly above the threshold (τ = 3) when it also
+stands `min_zscore` standard deviations from the level before it. Each point
+also carries an `expected` value — the series with anomalies replaced by
+their neighbours, reconstructed from its low frequencies — and a
+`lower`/`upper` band whose coverage is `sensitivity` percent; the band is for
+the chart, the decision is the score.
+
+```rust
+use u_analytics::detection::SpectralResidual;
+
+let mut series: Vec<f64> = (0..60).map(|t| (t as f64 * 0.3).sin()).collect();
+series[40] += 4.0;
+let points = SpectralResidual::new().analyze(&series).unwrap();
+assert!(points[40].is_anomaly);
+let flagged: Vec<usize> = points.iter().filter(|p| p.is_anomaly).map(|p| p.index).collect();
+assert_eq!(flagged, vec![40]);
+```
+
+Defaults are the paper's (q = 3, z = 40, τ = 3, gate 1.5, 70% band); `with_*`
+builders change them, and `with_batch_size` scores a long series in
+consecutive batches against their own context. At least 12 points.
 
 ### Seasonality — which period does the series repeat on?
 
@@ -466,6 +495,20 @@ estimate_period(input: { data: number[] }): {
   n: number, acf_threshold: number, power_threshold: number,
 }
 
+// Spectral residual anomaly scoring — Ren et al. (2019); >= 12 finite values
+spectral_residual(input: {
+  data: number[],
+  averaging_window?: number,      // default 3  (q)
+  judgement_window?: number,      // default 40 (z)
+  threshold?: number,             // default 3  (τ, on the relative saliency score)
+  min_zscore?: number,            // default 1.5; 0 disables the gate
+  sensitivity?: number,           // default 70: coverage % of the expected-value band
+  batch_size?: number,            // score in consecutive batches (>= 12)
+}): {
+  points: { index, value, saliency, score, expected, lower, upper: number, is_anomaly: boolean }[],
+  anomalies: number[],            // indices with is_anomaly
+}
+
 // Gage R&R — measurements[part][operator][trial]
 gage_rr_xbar_r(input: { measurements: number[][][], tolerance?: number }): {
   ev, av, grr, pv, tv, percent_ev, percent_av, percent_grr, percent_pv: number,
@@ -537,6 +580,7 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_gage_rr_anova` | `gage_rr_anova(input)` | `input` as is |
 | `uanalytics_detect_changepoints` | `detect_changepoints(input)` | `input` as is |
 | `uanalytics_estimate_period` | `estimate_period(input)` | `input` as is |
+| `uanalytics_spectral_residual` | `spectral_residual(input)` | `input` as is |
 
 The composition documented for JavaScript holds here too: `imr_chart` (or
 `xbar_s_chart`) returns `sigma_hat`, which is what `process_capability` needs as

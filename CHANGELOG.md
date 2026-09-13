@@ -24,6 +24,18 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   40-row `i % 7` sawtooth a well-known library answers with "none". Exposed on
   every transport: WASM `estimate_period`, C FFI `uanalytics_estimate_period`,
   C# `EstimatePeriod`. Requires `u-numflow` 0.5 (its new `fourier` module).
+- `detection::SpectralResidual` -- one-shot anomaly scoring by spectral
+  residual saliency (Ren et al. 2019): the series is extended along its
+  final slope, its log amplitude spectrum has a moving average subtracted,
+  and the residual is transformed back with the original phase; each point's
+  score is its saliency relative to the judgement window before it, and it is
+  an anomaly above the threshold when it also stands `min_zscore` standard
+  deviations from the level of that window. Each point carries an expected
+  value (the low-frequency reconstruction of the series with anomalies
+  replaced by their neighbours) and a band of `sensitivity` percent coverage
+  around it. Defaults are the paper's; `batch_size` scores a long series in
+  consecutive batches. Exposed on every transport: WASM `spectral_residual`,
+  C FFI `uanalytics_spectral_residual`, C# `SpectralResidual`.
 
 ## [0.10.0] - 2026-09-12
 
