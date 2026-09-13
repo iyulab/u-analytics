@@ -35,7 +35,8 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   replaced by their neighbours) and a band of `sensitivity` percent coverage
   around it. Defaults are the paper's; `batch_size` scores a long series in
   consecutive batches. Exposed on every transport: WASM `spectral_residual`,
-  C FFI `uanalytics_spectral_residual`, C# `SpectralResidual`.
+  C FFI `uanalytics_spectral_residual`, C# `SpectralResidual`. `UAnalytics` NuGet
+  0.5.0 → **0.6.0** (two new client methods, `EstimatePeriod` and `SpectralResidual`).
 
 ## [0.10.0] - 2026-09-12
 
