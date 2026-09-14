@@ -160,12 +160,145 @@ pub(crate) fn point_dtos(points: &[crate::spc::ChartPoint]) -> Vec<ChartPointDto
 /// the crate's factor tables left the binding rejecting sizes the crate had
 /// just learned to handle -- a disagreement no test in either crate could see,
 /// because each one was right about its own copy.
-pub(crate) fn subgroup_size(subgroups: &[Vec<f64>]) -> Result<usize, String> {
-    let n = subgroups
+pub(crate) fn subgroup_size(subgroups: &[Vec<f64>]) -> Result<usize, WireError> {
+    subgroups
         .first()
         .map(Vec::len)
-        .ok_or("at least one subgroup required")?;
-    Ok(n)
+        .ok_or_else(|| WireError::too_few_samples("subgroups: at least one subgroup required"))
+}
+
+/// A refused input, in the one shape every transport reports.
+///
+/// A consumer with a data grid has to tell its user *which* row to fix and
+/// *why*, in its own words. Free text carries neither in a form a program can
+/// use -- and a count that failed to deserialize carried no row at all -- so
+/// every consumer ended up re-validating the rules the crate already enforces.
+/// `code` is stable across releases; `message` is for people and may change.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub(crate) struct WireError {
+    /// Stable, machine-readable reason (see the constants below).
+    pub(crate) code: &'static str,
+    /// Position of the offending element in its input array, when there is one.
+    pub(crate) index: Option<usize>,
+    /// Human-readable description.
+    pub(crate) message: String,
+}
+
+/// Error codes. Kept as constants so the transports and their tests name the
+/// same strings.
+pub(crate) mod code {
+    /// Any refusal without a more specific code.
+    pub(crate) const INVALID_INPUT: &str = "invalid_input";
+    /// The input is not the shape the function takes (not an array, a pair
+    /// with the wrong arity, a value of the wrong type).
+    pub(crate) const MALFORMED_INPUT: &str = "malformed_input";
+    /// A count that is not a whole number >= 0.
+    pub(crate) const COUNT_NOT_WHOLE: &str = "count_not_whole";
+    /// A sample size of zero.
+    pub(crate) const SAMPLE_SIZE_NOT_POSITIVE: &str = "sample_size_not_positive";
+    /// More defectives than the sample has items.
+    pub(crate) const DEFECTIVES_EXCEED_SAMPLE: &str = "defectives_exceed_sample";
+    /// Units inspected that are not a positive, finite number.
+    pub(crate) const UNITS_NOT_POSITIVE: &str = "units_not_positive";
+    /// A subgroup whose length differs from the first subgroup's.
+    pub(crate) const SUBGROUP_LENGTH_MISMATCH: &str = "subgroup_length_mismatch";
+    /// A subgroup size outside the factor tables.
+    pub(crate) const SUBGROUP_SIZE_OUT_OF_RANGE: &str = "subgroup_size_out_of_range";
+    /// A NaN or an infinity where a measurement belongs.
+    pub(crate) const VALUE_NOT_FINITE: &str = "value_not_finite";
+    /// Fewer samples than the chart needs.
+    pub(crate) const TOO_FEW_SAMPLES: &str = "too_few_samples";
+}
+
+impl WireError {
+    pub(crate) fn new(
+        code: &'static str,
+        index: Option<usize>,
+        message: impl Into<String>,
+    ) -> Self {
+        WireError {
+            code,
+            index,
+            message: message.into(),
+        }
+    }
+
+    /// A refusal without a more specific code.
+    pub(crate) fn invalid_input(message: impl Into<String>) -> Self {
+        Self::new(code::INVALID_INPUT, None, message)
+    }
+
+    /// Too few samples, with the message naming how many are needed.
+    pub(crate) fn too_few_samples(message: impl Into<String>) -> Self {
+        Self::new(code::TOO_FEW_SAMPLES, None, message)
+    }
+
+    /// A chart's refusal of one element, placed at `label[index]`, or of the
+    /// input as a whole when `index` is `None`.
+    pub(crate) fn chart(
+        label: &str,
+        index: Option<usize>,
+        error: &crate::spc::ControlChartError,
+    ) -> Self {
+        let message = match index {
+            Some(i) => format!("{label}[{i}]: {error}"),
+            None => error.to_string(),
+        };
+        Self::new(chart_error_code(error), index, message)
+    }
+
+    /// A whole-slice chart's refusal.
+    pub(crate) fn chart_input(label: &str, error: &crate::spc::ChartInputError) -> Self {
+        use crate::spc::ChartInputError;
+        match error {
+            ChartInputError::Sample { index, error } => Self::chart(label, Some(*index), error),
+            ChartInputError::TooFewSamples { .. } => {
+                Self::too_few_samples(format!("{label}: {error}"))
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for WireError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl From<String> for WireError {
+    fn from(message: String) -> Self {
+        Self::invalid_input(message)
+    }
+}
+
+impl From<&String> for WireError {
+    fn from(message: &String) -> Self {
+        Self::invalid_input(message.as_str())
+    }
+}
+
+impl From<&WireError> for WireError {
+    fn from(error: &WireError) -> Self {
+        error.clone()
+    }
+}
+
+impl From<&str> for WireError {
+    fn from(message: &str) -> Self {
+        Self::invalid_input(message)
+    }
+}
+
+pub(crate) fn chart_error_code(error: &crate::spc::ControlChartError) -> &'static str {
+    use crate::spc::ControlChartError as E;
+    match error {
+        E::SampleLengthMismatch { .. } => code::SUBGROUP_LENGTH_MISMATCH,
+        E::NonFiniteValue => code::VALUE_NOT_FINITE,
+        E::DefectivesExceedSampleSize { .. } => code::DEFECTIVES_EXCEED_SAMPLE,
+        E::NonPositiveUnits => code::UNITS_NOT_POSITIVE,
+        E::SubgroupSizeOutOfRange { .. } => code::SUBGROUP_SIZE_OUT_OF_RANGE,
+        E::ZeroSampleSize => code::SAMPLE_SIZE_NOT_POSITIVE,
+    }
 }
 
 /// Feeds rows to a chart, naming the row a rejection came from. The chart
@@ -174,11 +307,127 @@ pub(crate) fn add_rows<T>(
     rows: impl IntoIterator<Item = T>,
     label: &str,
     mut add: impl FnMut(T) -> Result<(), crate::spc::ControlChartError>,
-) -> Result<(), String> {
+) -> Result<(), WireError> {
     for (i, row) in rows.into_iter().enumerate() {
-        add(row).map_err(|e| format!("{label}[{i}]: {e}"))?;
+        add(row).map_err(|e| WireError::chart(label, Some(i), &e))?;
     }
     Ok(())
+}
+
+/// Largest count a JSON number carries exactly (2^53).
+const MAX_EXACT_COUNT: f64 = 9_007_199_254_740_992.0;
+
+/// A count: a whole number >= 0. Read from a JSON number of either kind, so a
+/// fractional or negative count is refused *here*, with its position, rather
+/// than by a deserializer that knows neither.
+fn whole_count(
+    value: &serde_json::Value,
+    at: &str,
+    index: Option<usize>,
+) -> Result<u64, WireError> {
+    if let Some(n) = value.as_u64() {
+        return Ok(n);
+    }
+    let refuse = |shown: String| {
+        WireError::new(
+            code::COUNT_NOT_WHOLE,
+            index,
+            format!("{at}: a count must be a whole number of at least 0, got {shown}"),
+        )
+    };
+    match value.as_f64() {
+        Some(x) if x >= 0.0 && x.fract() == 0.0 && x <= MAX_EXACT_COUNT => Ok(x as u64),
+        Some(x) => Err(refuse(x.to_string())),
+        None => Err(refuse(value.to_string())),
+    }
+}
+
+fn as_array<'a>(
+    value: &'a serde_json::Value,
+    at: &str,
+    expected: &str,
+) -> Result<&'a Vec<serde_json::Value>, WireError> {
+    value.as_array().ok_or_else(|| {
+        WireError::new(
+            code::MALFORMED_INPUT,
+            None,
+            format!("{at}: expected {expected}"),
+        )
+    })
+}
+
+/// The `[a, b]` pair at `label[i]`.
+fn pair<'a>(
+    row: &'a serde_json::Value,
+    label: &str,
+    i: usize,
+    expected: &str,
+) -> Result<(&'a serde_json::Value, &'a serde_json::Value), WireError> {
+    match row.as_array().map(Vec::as_slice) {
+        Some([a, b]) => Ok((a, b)),
+        _ => Err(WireError::new(
+            code::MALFORMED_INPUT,
+            Some(i),
+            format!("{label}[{i}]: expected a pair {expected}, got {row}"),
+        )),
+    }
+}
+
+/// `[c1, c2, ...]` counts.
+pub(crate) fn count_rows(value: &serde_json::Value, label: &str) -> Result<Vec<u64>, WireError> {
+    as_array(value, label, "an array of counts")?
+        .iter()
+        .enumerate()
+        .map(|(i, v)| whole_count(v, &format!("{label}[{i}]"), Some(i)))
+        .collect()
+}
+
+/// A single count that is not an element of an array (e.g. a sample size).
+pub(crate) fn count_value(value: &serde_json::Value, label: &str) -> Result<u64, WireError> {
+    whole_count(value, label, None)
+}
+
+/// `[[defectives, sample_size], ...]` pairs.
+pub(crate) fn count_pairs(
+    value: &serde_json::Value,
+    label: &str,
+) -> Result<Vec<(u64, u64)>, WireError> {
+    const SHAPE: &str = "[defectives, sample_size]";
+    as_array(value, label, &format!("an array of {SHAPE} pairs"))?
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let (d, n) = pair(row, label, i, SHAPE)?;
+            Ok((
+                whole_count(d, &format!("{label}[{i}][0] (defectives)"), Some(i))?,
+                whole_count(n, &format!("{label}[{i}][1] (sample size)"), Some(i))?,
+            ))
+        })
+        .collect()
+}
+
+/// `[[defects, units], ...]` pairs; `units` may be fractional.
+pub(crate) fn rate_pairs(
+    value: &serde_json::Value,
+    label: &str,
+) -> Result<Vec<(u64, f64)>, WireError> {
+    const SHAPE: &str = "[defects, units]";
+    as_array(value, label, &format!("an array of {SHAPE} pairs"))?
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let (d, u) = pair(row, label, i, SHAPE)?;
+            let defects = whole_count(d, &format!("{label}[{i}][0] (defects)"), Some(i))?;
+            let units = u.as_f64().ok_or_else(|| {
+                WireError::new(
+                    code::UNITS_NOT_POSITIVE,
+                    Some(i),
+                    format!("{label}[{i}][1] (units): expected a positive number, got {u}"),
+                )
+            })?;
+            Ok((defects, units))
+        })
+        .collect()
 }
 
 pub(crate) fn attribute_point_dtos(
@@ -213,33 +462,15 @@ pub(crate) fn laney_point_dtos(
         .collect()
 }
 
-/// `[defectives, sample_size]` pairs as `(defectives, sample_size)`, refusing
-/// a pair that has no proportion.
-pub(crate) fn proportion_samples(raw: &[[u64; 2]]) -> Result<Vec<(u64, u64)>, String> {
-    raw.iter()
-        .enumerate()
-        .map(|(i, &[d, n])| {
-            if n == 0 || d > n {
-                Err(format!(
-                    "samples[{i}]: {d} defectives out of {n} -- each sample needs a size \
-                     above 0 and at most that many defectives"
-                ))
-            } else {
-                Ok((d, n))
-            }
-        })
-        .collect()
-}
-
 pub(crate) fn xbar_r_dto(
     subgroups: Vec<Vec<f64>>,
     rules: crate::spc::RuleSet,
-) -> Result<XbarRChartDto, String> {
+) -> Result<XbarRChartDto, WireError> {
     use crate::spc::{ControlChart, XBarRChart};
 
     let n = subgroup_size(&subgroups)?;
     let mut chart = XBarRChart::new(n)
-        .map_err(|e| e.to_string())?
+        .map_err(|e| WireError::chart("subgroups", None, &e))?
         .with_rules(rules);
     add_rows(&subgroups, "subgroups", |g| chart.add_sample(g))?;
     let x = chart
@@ -262,13 +493,14 @@ pub(crate) fn xbar_r_dto(
     })
 }
 
-pub(crate) fn p_chart_dto(raw: &[[u64; 2]]) -> Result<PChartDto, String> {
+pub(crate) fn p_chart_dto(samples: &[(u64, u64)]) -> Result<PChartDto, WireError> {
     use crate::spc::PChart;
 
-    let samples = proportion_samples(raw)?;
     let mut chart = PChart::new();
-    add_rows(&samples, "samples", |&(d, n)| chart.add_sample(d, n))?;
-    let p_bar = chart.p_bar().ok_or("no samples provided")?;
+    add_rows(samples, "samples", |&(d, n)| chart.add_sample(d, n))?;
+    let p_bar = chart
+        .p_bar()
+        .ok_or_else(|| WireError::too_few_samples("samples: at least 1 sample is needed"))?;
     Ok(PChartDto {
         p_bar,
         points: attribute_point_dtos(chart.points()),
@@ -276,9 +508,9 @@ pub(crate) fn p_chart_dto(raw: &[[u64; 2]]) -> Result<PChartDto, String> {
     })
 }
 
-pub(crate) fn laney_p_dto(raw: &[[u64; 2]]) -> Result<LaneyPChartDto, String> {
-    let samples = proportion_samples(raw)?;
-    let chart = crate::spc::laney_p_chart(&samples).ok_or("at least 3 samples are needed")?;
+pub(crate) fn laney_p_dto(samples: &[(u64, u64)]) -> Result<LaneyPChartDto, WireError> {
+    let chart =
+        crate::spc::laney_p_chart(samples).map_err(|e| WireError::chart_input("samples", &e))?;
     Ok(LaneyPChartDto {
         p_bar: chart.p_bar,
         phi: chart.phi,
@@ -664,12 +896,12 @@ pub(crate) struct LimitsInputDto {
 pub(crate) fn xbar_s_dto(
     subgroups: Vec<Vec<f64>>,
     rules: crate::spc::RuleSet,
-) -> Result<XbarSChartDto, String> {
+) -> Result<XbarSChartDto, WireError> {
     use crate::spc::{ControlChart, XBarSChart};
 
     let n = subgroup_size(&subgroups)?;
     let mut chart = XBarSChart::new(n)
-        .map_err(|e| e.to_string())?
+        .map_err(|e| WireError::chart("subgroups", None, &e))?
         .with_rules(rules);
     add_rows(&subgroups, "subgroups", |g| chart.add_sample(g))?;
     let x = chart
@@ -692,7 +924,10 @@ pub(crate) fn xbar_s_dto(
     })
 }
 
-pub(crate) fn imr_dto(values: Vec<f64>, rules: crate::spc::RuleSet) -> Result<ImrChartDto, String> {
+pub(crate) fn imr_dto(
+    values: Vec<f64>,
+    rules: crate::spc::RuleSet,
+) -> Result<ImrChartDto, WireError> {
     use crate::spc::{ControlChart, IndividualMRChart};
 
     let mut chart = IndividualMRChart::new().with_rules(rules);
@@ -904,4 +1139,95 @@ pub(crate) fn spectral_residual_dto(
             .collect(),
         anomalies,
     })
+}
+
+#[cfg(test)]
+mod input_error_tests {
+    use super::code;
+    use super::*;
+    use serde_json::json;
+
+    fn err<T: std::fmt::Debug>(r: Result<T, WireError>) -> (&'static str, Option<usize>, String) {
+        let e = r.expect_err("must be refused");
+        (e.code, e.index, e.message)
+    }
+
+    /// A count that failed to deserialize used to carry no row at all
+    /// (`invalid type: floating point 1.5, expected u64`): the count is now
+    /// read as a JSON number and refused with its position.
+    #[test]
+    fn a_count_that_is_not_a_whole_number_is_refused_with_its_row() {
+        for bad in [json!(1.5), json!(-1), json!("3"), json!(null), json!(1e300)] {
+            let (c, i, m) = err(count_rows(&json!([2, 0, bad]), "defects"));
+            assert_eq!((c, i), (code::COUNT_NOT_WHOLE, Some(2)), "{m}");
+            assert!(m.starts_with("defects[2]"), "{m}");
+        }
+        let (c, i, _) = err(count_pairs(&json!([[1, 10], [2.5, 10]]), "samples"));
+        assert_eq!((c, i), (code::COUNT_NOT_WHOLE, Some(1)));
+        let (c, i, m) = err(count_pairs(&json!([[1, 10], [2, 10], [3, -4]]), "samples"));
+        assert_eq!((c, i), (code::COUNT_NOT_WHOLE, Some(2)));
+        assert!(m.contains("sample size"), "{m}");
+        let (c, i, _) = err(rate_pairs(&json!([[1, 1.0], [0.5, 2.0]]), "samples"));
+        assert_eq!((c, i), (code::COUNT_NOT_WHOLE, Some(1)));
+        // A value that is not an element carries no position.
+        let (c, i, _) = err(count_value(&json!(10.5), "sample_size"));
+        assert_eq!((c, i), (code::COUNT_NOT_WHOLE, None));
+    }
+
+    #[test]
+    fn whole_counts_written_as_floats_are_accepted() {
+        // A JS number is a double; 3 and 3.0 are the same value.
+        assert_eq!(
+            count_rows(&json!([3.0, 0, 7]), "c").expect("whole"),
+            vec![3, 0, 7]
+        );
+        assert_eq!(count_value(&json!(100.0), "n").expect("whole"), 100);
+    }
+
+    #[test]
+    fn a_row_that_is_not_a_pair_is_malformed_at_its_row() {
+        let (c, i, _) = err(count_pairs(&json!([[1, 10], [1, 2, 3]]), "samples"));
+        assert_eq!((c, i), (code::MALFORMED_INPUT, Some(1)));
+        let (c, i, _) = err(rate_pairs(&json!([[1, 1.0], 4]), "samples"));
+        assert_eq!((c, i), (code::MALFORMED_INPUT, Some(1)));
+        let (c, i, _) = err(count_pairs(&json!({ "samples": [] }), "samples"));
+        assert_eq!((c, i), (code::MALFORMED_INPUT, None));
+        let (c, i, _) = err(rate_pairs(&json!([[1, 1.0], [2, "x"]]), "samples"));
+        assert_eq!((c, i), (code::UNITS_NOT_POSITIVE, Some(1)));
+    }
+
+    #[test]
+    fn every_chart_error_has_its_own_code() {
+        use crate::spc::ControlChartError as E;
+        let all = [
+            E::SampleLengthMismatch {
+                expected: 2,
+                got: 3,
+            },
+            E::NonFiniteValue,
+            E::DefectivesExceedSampleSize {
+                defectives: 2,
+                sample_size: 1,
+            },
+            E::NonPositiveUnits,
+            E::SubgroupSizeOutOfRange {
+                got: 1,
+                min: 2,
+                max: 25,
+            },
+            E::ZeroSampleSize,
+        ];
+        let codes: std::collections::HashSet<_> = all.iter().map(chart_error_code).collect();
+        assert_eq!(codes.len(), all.len(), "codes must tell the reasons apart");
+        assert!(!codes.contains(code::INVALID_INPUT));
+    }
+
+    #[test]
+    fn the_error_serializes_as_code_index_message() {
+        let e = WireError::new(code::COUNT_NOT_WHOLE, Some(4), "defects[4]: nope");
+        assert_eq!(
+            serde_json::to_value(&e).expect("serializable"),
+            json!({ "code": "count_not_whole", "index": 4, "message": "defects[4]: nope" })
+        );
+    }
 }

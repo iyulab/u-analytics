@@ -19,6 +19,35 @@
 //!   Chapter 7: Control Charts for Attributes.
 //! - ASTM E2587 — Standard Practice for Use of Control Charts
 
+use super::chart::{ChartInputError, ControlChartError};
+
+/// Fewest samples a Laney chart takes: φ is a mean of moving ranges, and one
+/// moving range is not a spread estimate.
+const LANEY_MIN_SAMPLES: usize = 3;
+
+/// A sample with a proportion: at least one item, at most that many defectives.
+fn check_proportion(defectives: u64, sample_size: u64) -> Result<(), ControlChartError> {
+    if sample_size == 0 {
+        return Err(ControlChartError::ZeroSampleSize);
+    }
+    if defectives > sample_size {
+        return Err(ControlChartError::DefectivesExceedSampleSize {
+            defectives,
+            sample_size,
+        });
+    }
+    Ok(())
+}
+
+/// An area of opportunity: a positive, finite number of units.
+fn check_units(units: f64) -> Result<(), ControlChartError> {
+    if units.is_finite() && units > 0.0 {
+        Ok(())
+    } else {
+        Err(ControlChartError::NonPositiveUnits)
+    }
+}
+
 /// A single data point on an attributes control chart.
 ///
 /// Contains the computed statistic, its control limits (which may vary
@@ -105,17 +134,8 @@ impl PChart {
         &mut self,
         defectives: u64,
         sample_size: u64,
-    ) -> Result<(), super::chart::ControlChartError> {
-        use super::chart::ControlChartError;
-        if sample_size == 0 {
-            return Err(ControlChartError::ZeroSampleSize);
-        }
-        if defectives > sample_size {
-            return Err(ControlChartError::DefectivesExceedSampleSize {
-                defectives,
-                sample_size,
-            });
-        }
+    ) -> Result<(), ControlChartError> {
+        check_proportion(defectives, sample_size)?;
         self.samples.push((defectives, sample_size));
         self.recompute();
         Ok(())
@@ -218,9 +238,9 @@ impl NPChart {
     /// when `sample_size == 0`. The size usually comes from data, so this is an
     /// ordinary outcome rather than a contract violation -- and a boundary that
     /// cannot unwind, such as the WebAssembly entry points, needs it as a value.
-    pub fn new(sample_size: u64) -> Result<Self, super::chart::ControlChartError> {
+    pub fn new(sample_size: u64) -> Result<Self, ControlChartError> {
         if sample_size == 0 {
-            return Err(super::chart::ControlChartError::ZeroSampleSize);
+            return Err(ControlChartError::ZeroSampleSize);
         }
         Ok(Self {
             sample_size,
@@ -237,14 +257,12 @@ impl NPChart {
     /// [`ControlChartError::DefectivesExceedSampleSize`](crate::spc::ControlChartError::DefectivesExceedSampleSize)
     /// if `defectives` exceeds the chart's sample size. The chart is left
     /// unchanged.
-    pub fn add_sample(&mut self, defectives: u64) -> Result<(), super::chart::ControlChartError> {
+    pub fn add_sample(&mut self, defectives: u64) -> Result<(), ControlChartError> {
         if defectives > self.sample_size {
-            return Err(
-                super::chart::ControlChartError::DefectivesExceedSampleSize {
-                    defectives,
-                    sample_size: self.sample_size,
-                },
-            );
+            return Err(ControlChartError::DefectivesExceedSampleSize {
+                defectives,
+                sample_size: self.sample_size,
+            });
         }
         self.defective_counts.push(defectives);
         self.recompute();
@@ -457,10 +475,8 @@ impl UChart {
         &mut self,
         defects: u64,
         units_inspected: f64,
-    ) -> Result<(), super::chart::ControlChartError> {
-        if !units_inspected.is_finite() || units_inspected <= 0.0 {
-            return Err(super::chart::ControlChartError::NonPositiveUnits);
-        }
+    ) -> Result<(), ControlChartError> {
+        check_units(units_inspected)?;
         self.samples.push((defects, units_inspected));
         self.recompute();
         Ok(())
@@ -598,26 +614,36 @@ pub struct LaneyUChart {
 /// 5. UCLᵢ = p̄ + 3·φ·√(p̄·(1−p̄)/nᵢ)
 /// 6. LCLᵢ = max(0, p̄ − 3·φ·√(p̄·(1−p̄)/nᵢ))
 ///
-/// # Returns
+/// When p̄ is 0 or 1 there is no variation to scale (σ = 0): the chart comes
+/// back with φ = 0 and every limit on the centre line.
 ///
-/// `None` if fewer than 3 subgroups are provided, or if any sample has a size
-/// of zero or more defectives than its size. When p̄ is 0 or 1 there is no
-/// variation to scale (σ = 0): the chart comes back with φ = 0 and every limit
-/// on the centre line.
+/// # Errors
+///
+/// - [`ChartInputError::TooFewSamples`] for fewer than 3 samples (φ needs at
+///   least two moving ranges).
+/// - [`ChartInputError::Sample`] with
+///   [`ControlChartError::ZeroSampleSize`] or
+///   [`ControlChartError::DefectivesExceedSampleSize`] for the first sample
+///   that has no proportion, with its position.
 ///
 /// # Reference
 ///
 /// Laney, D.B. (2002). "Improved control charts for attributes",
 /// *Quality Engineering* 14(4), pp. 531-537.
-pub fn laney_p_chart(samples: &[(u64, u64)]) -> Option<LaneyPChart> {
-    if samples.len() < 3 {
-        return None;
+pub fn laney_p_chart(samples: &[(u64, u64)]) -> Result<LaneyPChart, ChartInputError> {
+    if samples.len() < LANEY_MIN_SAMPLES {
+        return Err(ChartInputError::TooFewSamples {
+            got: samples.len(),
+            min: LANEY_MIN_SAMPLES,
+        });
     }
     // Checked per sample, not only in total: one sample with nothing inspected
     // makes its z-score NaN, and a NaN phi puts every limit at NaN -- where no
     // point compares as out of control and the chart reads as in control.
-    if samples.iter().any(|&(d, n)| n == 0 || d > n) {
-        return None;
+    for (index, &(defectives, sample_size)) in samples.iter().enumerate() {
+        if let Err(error) = check_proportion(defectives, sample_size) {
+            return Err(ChartInputError::Sample { index, error });
+        }
     }
 
     let total_defectives: u64 = samples.iter().map(|&(d, _)| d).sum();
@@ -643,7 +669,7 @@ pub fn laney_p_chart(samples: &[(u64, u64)]) -> Option<LaneyPChart> {
                 }
             })
             .collect();
-        return Some(LaneyPChart {
+        return Ok(LaneyPChart {
             p_bar,
             phi: 0.0,
             points,
@@ -690,7 +716,7 @@ pub fn laney_p_chart(samples: &[(u64, u64)]) -> Option<LaneyPChart> {
         })
         .collect();
 
-    Some(LaneyPChart { p_bar, phi, points })
+    Ok(LaneyPChart { p_bar, phi, points })
 }
 
 /// Compute the Laney U' chart from `(defect_count, inspection_units)` pairs.
@@ -708,30 +734,34 @@ pub fn laney_p_chart(samples: &[(u64, u64)]) -> Option<LaneyPChart> {
 /// 5. UCLᵢ = ū + 3·φ·√(ū / unitsᵢ)
 /// 6. LCLᵢ = max(0, ū − 3·φ·√(ū / unitsᵢ))
 ///
-/// # Returns
+/// # Errors
 ///
-/// `None` if fewer than 3 subgroups, if total units are zero, or if any
-/// `units` entry is non-positive.
+/// - [`ChartInputError::TooFewSamples`] for fewer than 3 samples.
+/// - [`ChartInputError::Sample`] with [`ControlChartError::NonPositiveUnits`]
+///   for the first sample whose units are not a positive, finite number, with
+///   its position.
 ///
 /// # Reference
 ///
 /// Laney, D.B. (2002). "Improved control charts for attributes",
 /// *Quality Engineering* 14(4), pp. 531-537.
-pub fn laney_u_chart(samples: &[(u64, f64)]) -> Option<LaneyUChart> {
-    if samples.len() < 3 {
-        return None;
+pub fn laney_u_chart(samples: &[(u64, f64)]) -> Result<LaneyUChart, ChartInputError> {
+    if samples.len() < LANEY_MIN_SAMPLES {
+        return Err(ChartInputError::TooFewSamples {
+            got: samples.len(),
+            min: LANEY_MIN_SAMPLES,
+        });
     }
 
-    // Validate: all units must be positive and finite.
-    if samples.iter().any(|&(_, n)| !n.is_finite() || n <= 0.0) {
-        return None;
+    for (index, &(_, units)) in samples.iter().enumerate() {
+        if let Err(error) = check_units(units) {
+            return Err(ChartInputError::Sample { index, error });
+        }
     }
 
     let total_defects: u64 = samples.iter().map(|&(d, _)| d).sum();
+    // Every term is positive and finite, so the total is too.
     let total_units: f64 = samples.iter().map(|&(_, n)| n).sum();
-    if total_units <= 0.0 {
-        return None;
-    }
 
     let u_bar = total_defects as f64 / total_units;
 
@@ -752,7 +782,7 @@ pub fn laney_u_chart(samples: &[(u64, f64)]) -> Option<LaneyUChart> {
                 }
             })
             .collect();
-        return Some(LaneyUChart {
+        return Ok(LaneyUChart {
             u_bar: 0.0,
             phi: 0.0,
             points,
@@ -799,7 +829,7 @@ pub fn laney_u_chart(samples: &[(u64, f64)]) -> Option<LaneyUChart> {
         })
         .collect();
 
-    Some(LaneyUChart { u_bar, phi, points })
+    Ok(LaneyUChart { u_bar, phi, points })
 }
 
 // ---------------------------------------------------------------------------
@@ -1385,7 +1415,7 @@ mod tests {
     #[test]
     fn laney_p_basic() {
         let samples: Vec<(u64, u64)> = (0..10).map(|i| (i % 5 + 2, 200)).collect();
-        let chart = laney_p_chart(&samples).expect("chart should be Some");
+        let chart = laney_p_chart(&samples).expect("valid samples");
         assert!(chart.phi > 0.0);
         assert!(chart.p_bar > 0.0 && chart.p_bar < 1.0);
         assert_eq!(chart.points.len(), 10);
@@ -1395,7 +1425,7 @@ mod tests {
     fn laney_p_constant_proportion_phi_near_zero() {
         // All samples identical → all z-scores = 0 → MR = 0 → phi = 0
         let samples: Vec<(u64, u64)> = vec![(10, 1000); 20];
-        let chart = laney_p_chart(&samples).expect("chart should be Some");
+        let chart = laney_p_chart(&samples).expect("valid samples");
         assert!((chart.p_bar - 0.01).abs() < 1e-10);
         assert!(chart.phi >= 0.0);
     }
@@ -1403,7 +1433,7 @@ mod tests {
     #[test]
     fn laney_p_ucl_above_lcl() {
         let samples: Vec<(u64, u64)> = vec![(5, 100), (8, 100), (3, 100), (6, 100), (4, 100)];
-        let chart = laney_p_chart(&samples).expect("chart should be Some");
+        let chart = laney_p_chart(&samples).expect("valid samples");
         for p in &chart.points {
             assert!(p.ucl >= p.lcl);
             assert!((p.cl - chart.p_bar).abs() < 1e-10);
@@ -1413,7 +1443,10 @@ mod tests {
     #[test]
     fn laney_p_insufficient_data() {
         let samples: Vec<(u64, u64)> = vec![(2, 100), (3, 100)];
-        assert!(laney_p_chart(&samples).is_none());
+        assert_eq!(
+            laney_p_chart(&samples).unwrap_err(),
+            ChartInputError::TooFewSamples { got: 2, min: 3 }
+        );
     }
 
     #[test]
@@ -1421,14 +1454,45 @@ mod tests {
         // One sample with nothing inspected divides by zero: its z-score is not
         // a number, so phi and every limit become NaN, no point compares as out
         // of control, and the chart reads as in control.
-        assert!(laney_p_chart(&[(3, 100), (0, 0), (4, 100), (2, 100)]).is_none());
-        // More defectives than inspected is not a proportion either.
-        assert!(laney_p_chart(&[(3, 100), (12, 10), (4, 100), (2, 100)]).is_none());
+        assert_eq!(
+            laney_p_chart(&[(3, 100), (0, 0), (4, 100), (2, 100)]).unwrap_err(),
+            ChartInputError::Sample {
+                index: 1,
+                error: ControlChartError::ZeroSampleSize
+            }
+        );
+        // More defectives than inspected is not a proportion either — and the
+        // position reported is that sample's, not the first sample's.
+        assert_eq!(
+            laney_p_chart(&[(3, 100), (4, 100), (12, 10), (2, 100)]).unwrap_err(),
+            ChartInputError::Sample {
+                index: 2,
+                error: ControlChartError::DefectivesExceedSampleSize {
+                    defectives: 12,
+                    sample_size: 10
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn laney_u_rejects_units_by_position() {
+        assert_eq!(
+            laney_u_chart(&[(3, 10.0), (4, 10.0), (2, 10.0), (5, 0.0)]).unwrap_err(),
+            ChartInputError::Sample {
+                index: 3,
+                error: ControlChartError::NonPositiveUnits
+            }
+        );
+        assert_eq!(
+            laney_u_chart(&[(3, 10.0)]).unwrap_err(),
+            ChartInputError::TooFewSamples { got: 1, min: 3 }
+        );
     }
     #[test]
     fn laney_u_basic() {
         let samples: Vec<(u64, f64)> = vec![(5, 10.0); 10];
-        let chart = laney_u_chart(&samples).expect("chart should be Some");
+        let chart = laney_u_chart(&samples).expect("valid samples");
         assert!((chart.u_bar - 0.5).abs() < 1e-10);
         assert!(chart.phi >= 0.0);
     }
@@ -1436,7 +1500,7 @@ mod tests {
     #[test]
     fn laney_u_ucl_above_cl() {
         let samples: Vec<(u64, f64)> = (0..8).map(|i| ((i % 4 + 2) as u64, 10.0)).collect();
-        let chart = laney_u_chart(&samples).expect("chart should be Some");
+        let chart = laney_u_chart(&samples).expect("valid samples");
         for p in &chart.points {
             assert!(p.ucl > p.cl || (p.ucl - p.cl).abs() < 1e-10);
         }
@@ -1594,7 +1658,7 @@ mod tests {
     #[test]
     fn g_chart_ucl_above_cl() {
         let gaps = vec![100.0, 120.0, 95.0, 110.0, 105.0];
-        let chart = g_chart(&gaps).expect("chart should be Some");
+        let chart = g_chart(&gaps).expect("valid samples");
         assert!(chart.points[0].ucl > chart.points[0].cl);
         assert!(chart.points[0].lcl >= 0.0);
     }
@@ -1606,7 +1670,7 @@ mod tests {
 
     #[test]
     fn g_chart_all_same() {
-        let chart = g_chart(&[50.0; 8]).expect("chart should be Some");
+        let chart = g_chart(&[50.0; 8]).expect("valid samples");
         assert!((chart.g_bar - 50.0).abs() < 1e-10);
         assert!(chart.points[0].ucl > chart.points[0].cl);
     }
@@ -1617,7 +1681,7 @@ mod tests {
     fn t_chart_ucl_factor() {
         // UCL = t_bar * (-ln(0.00135)) ≈ t_bar * 6.6077
         let times = vec![100.0; 10];
-        let chart = t_chart(&times).expect("chart should be Some");
+        let chart = t_chart(&times).expect("valid samples");
         let ratio = chart.points[0].ucl / chart.t_bar;
         assert!((ratio - 6.6077).abs() < 0.01, "ratio={ratio}");
     }
@@ -1652,7 +1716,7 @@ mod tests {
             (6, 150),
             (4, 150),
         ];
-        let chart = laney_p_chart(&samples).expect("chart should be Some");
+        let chart = laney_p_chart(&samples).expect("valid samples");
 
         for (i, (&(d, n), pt)) in samples.iter().zip(&chart.points).enumerate() {
             let p_i = d as f64 / n as f64;
@@ -1713,7 +1777,7 @@ mod tests {
             (d_low, n),
         ];
 
-        let laney = laney_p_chart(&samples).expect("chart should be Some");
+        let laney = laney_p_chart(&samples).expect("valid samples");
 
         // φ should be close to 1 (within 1%).
         assert!(
@@ -1765,7 +1829,7 @@ mod tests {
             (20, 100),
         ];
 
-        let laney = laney_p_chart(&samples).expect("chart should be Some");
+        let laney = laney_p_chart(&samples).expect("valid samples");
         assert!(
             laney.phi > 1.0,
             "φ expected > 1 for overdispersed data, got {}",
@@ -1805,7 +1869,7 @@ mod tests {
     #[test]
     fn laney_p_numerical_reference() {
         let samples: Vec<(u64, u64)> = vec![(3, 50), (7, 50), (2, 50), (8, 50), (4, 50)];
-        let chart = laney_p_chart(&samples).expect("chart should be Some");
+        let chart = laney_p_chart(&samples).expect("valid samples");
 
         let p_bar = 24.0_f64 / 250.0;
         assert!(
@@ -1859,7 +1923,7 @@ mod tests {
             (13, 10.0),
         ];
 
-        let laney = laney_u_chart(&samples).expect("chart should be Some");
+        let laney = laney_u_chart(&samples).expect("valid samples");
         assert!(
             laney.phi > 1.0,
             "φ expected > 1 for overdispersed data, got {}",
@@ -1894,7 +1958,7 @@ mod tests {
     fn g_chart_formula_verification() {
         // 8 identical observations so ḡ = 50.0 exactly.
         let gaps = vec![50.0_f64; 8];
-        let chart = g_chart(&gaps).expect("chart should be Some");
+        let chart = g_chart(&gaps).expect("valid samples");
 
         let g_bar = 50.0_f64;
         assert!(
@@ -1933,7 +1997,7 @@ mod tests {
     fn g_chart_lcl_always_zero() {
         for &g in &[1.0_f64, 5.0, 20.0, 100.0, 500.0] {
             let gaps = vec![g; 5];
-            let chart = g_chart(&gaps).expect("chart should be Some");
+            let chart = g_chart(&gaps).expect("valid samples");
             assert!(
                 (chart.points[0].lcl - 0.0).abs() < 1e-10,
                 "LCL must be 0 for ḡ={g}, got {}",
@@ -1955,7 +2019,7 @@ mod tests {
     #[test]
     fn t_chart_lcl_factor_verification() {
         let times = vec![100.0_f64; 10];
-        let chart = t_chart(&times).expect("chart should be Some");
+        let chart = t_chart(&times).expect("valid samples");
 
         let ucl_factor = chart.points[0].ucl / chart.t_bar;
         let lcl_factor = chart.points[0].lcl / chart.t_bar;
@@ -1986,7 +2050,7 @@ mod tests {
 
         for &t_bar in &[10.0_f64, 100.0, 1000.0] {
             let times = vec![t_bar; 10];
-            let chart = t_chart(&times).expect("chart should be Some");
+            let chart = t_chart(&times).expect("valid samples");
             let ratio = chart.points[0].ucl / chart.points[0].lcl;
             assert!(
                 (ratio - expected_ratio).abs() < 0.01,

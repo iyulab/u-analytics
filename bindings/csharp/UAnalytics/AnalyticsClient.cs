@@ -205,7 +205,7 @@ public sealed class AnalyticsClient : IDisposable
                 throw new AnalyticsException(code, "Empty result from engine");
 
             if (code != 0)
-                throw new AnalyticsException(code, resultJson);
+                throw AnalyticsException.FromErrorBody(code, resultJson);
 
             return JsonDocument.Parse(resultJson).RootElement.Clone();
         }
@@ -226,12 +226,59 @@ public sealed class AnalyticsClient : IDisposable
     }
 }
 
+/// <summary>
+/// A call the engine refused. <see cref="Exception.Message"/> is human-readable;
+/// <see cref="Reason"/> and <see cref="Index"/> are for programs.
+/// </summary>
 public class AnalyticsException : Exception
 {
+    /// <summary>Native status: -1 null pointer, -2 malformed request, -3 refused input, -4 internal panic.</summary>
     public int Code { get; }
+
+    /// <summary>
+    /// Stable, machine-readable reason, e.g. <c>count_not_whole</c>,
+    /// <c>sample_size_not_positive</c>, <c>defectives_exceed_sample</c>,
+    /// <c>units_not_positive</c>, <c>too_few_samples</c>, <c>malformed_input</c>,
+    /// <c>invalid_input</c>. <c>null</c> when the engine returned no body.
+    /// </summary>
+    public string? Reason { get; }
+
+    /// <summary>Zero-based position of the offending element in its input array, when there is one.</summary>
+    public int? Index { get; }
 
     public AnalyticsException(int code, string message) : base(message)
     {
         Code = code;
+    }
+
+    public AnalyticsException(int code, string message, string? reason, int? index) : base(message)
+    {
+        Code = code;
+        Reason = reason;
+        Index = index;
+    }
+
+    /// <summary>Reads the engine's <c>{"error", "code", "index"}</c> error body.</summary>
+    internal static AnalyticsException FromErrorBody(int code, string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            var message = root.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.String
+                ? e.GetString()!
+                : body;
+            string? reason = root.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String
+                ? c.GetString()
+                : null;
+            int? index = root.TryGetProperty("index", out var i) && i.ValueKind == JsonValueKind.Number
+                ? i.GetInt32()
+                : null;
+            return new AnalyticsException(code, message, reason, index);
+        }
+        catch (JsonException)
+        {
+            return new AnalyticsException(code, body);
+        }
     }
 }

@@ -53,14 +53,24 @@ const ERR_PARSE: i32 = -2;
 #[cfg(feature = "ffi")]
 const ERR_COMPUTE: i32 = -3;
 
-/// Writes `{"error": msg}` and returns `status`.
+/// Writes `{"error": message, "code": code, "index": index}` and returns
+/// `status`.
+///
+/// `error` keeps the human-readable text the body has always carried; `code`
+/// (stable) and `index` (the offending array position, or `null`) are the
+/// shape every transport reports -- see [`crate::wire::WireError`].
 ///
 /// The status is the caller's to choose and is returned as given: the error
 /// body is a diagnostic, not a result, so writing it successfully must not
 /// turn the call into a success.
 #[cfg(feature = "ffi")]
-fn write_error(result_ptr: *mut *mut libc::c_char, status: i32, msg: &str) -> i32 {
-    let err = serde_json::json!({ "error": msg });
+fn write_error(
+    result_ptr: *mut *mut libc::c_char,
+    status: i32,
+    error: impl Into<crate::wire::WireError>,
+) -> i32 {
+    let e = error.into();
+    let err = serde_json::json!({ "error": e.message, "code": e.code, "index": e.index });
     match write_json(result_ptr, &err) {
         0 => status,
         write_failure => write_failure,
@@ -73,8 +83,17 @@ fn parse_request<T: serde::de::DeserializeOwned>(
     json: &str,
     result_ptr: *mut *mut libc::c_char,
 ) -> Result<T, i32> {
-    serde_json::from_str(json)
-        .map_err(|e| write_error(result_ptr, ERR_PARSE, &format!("Invalid JSON: {e}")))
+    serde_json::from_str(json).map_err(|e| {
+        write_error(
+            result_ptr,
+            ERR_PARSE,
+            crate::wire::WireError::new(
+                crate::wire::code::MALFORMED_INPUT,
+                None,
+                format!("Invalid JSON: {e}"),
+            ),
+        )
+    })
 }
 
 /// Wraps an FFI body in `catch_unwind`, initializing `result_ptr` to null.
@@ -296,7 +315,9 @@ pub unsafe extern "C" fn uanalytics_run_rules(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProportionSamplesRequest {
-    samples: Vec<[u64; 2]>,
+    /// `[[defectives, sample_size], ...]`, read as JSON numbers so a count that
+    /// is not a whole number is refused with its row rather than by the parser.
+    samples: serde_json::Value,
 }
 
 /// SPC P chart.
@@ -326,7 +347,9 @@ pub unsafe extern "C" fn uanalytics_p_chart(
             Ok(r) => r,
             Err(status) => return status,
         };
-        match crate::wire::p_chart_dto(&req.samples) {
+        match crate::wire::count_pairs(&req.samples, "samples")
+            .and_then(|s| crate::wire::p_chart_dto(&s))
+        {
             Ok(dto) => write_json(result_ptr, &dto),
             Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
         }
@@ -359,7 +382,9 @@ pub unsafe extern "C" fn uanalytics_laney_p_chart(
             Ok(r) => r,
             Err(status) => return status,
         };
-        match crate::wire::laney_p_dto(&req.samples) {
+        match crate::wire::count_pairs(&req.samples, "samples")
+            .and_then(|s| crate::wire::laney_p_dto(&s))
+        {
             Ok(dto) => write_json(result_ptr, &dto),
             Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
         }
@@ -1011,8 +1036,33 @@ mod tests {
         // proportion. Computing one anyway produced p > 1 or NaN.
         let (code, body) = call(uanalytics_p_chart, r#"{"samples": [[100, 3], [10, 12]]}"#);
         assert_eq!(code, -3, "{body}");
-        let (code, body) = call(uanalytics_p_chart, r#"{"samples": [[100, 3], [0, 0]]}"#);
+        let (code, body) = call(uanalytics_p_chart, r#"{"samples": [[3, 100], [0, 0]]}"#);
         assert_eq!(code, -3, "{body}");
+        assert_eq!(body["code"], "sample_size_not_positive", "{body}");
+        assert_eq!(body["index"], 1, "{body}");
+    }
+
+    #[test]
+    fn error_bodies_carry_a_code_and_the_row() {
+        // A fractional count used to fail in the request parser with no row.
+        let (code, body) = call(uanalytics_p_chart, r#"{"samples": [[3, 100], [1.5, 100]]}"#);
+        assert_eq!(code, -3, "{body}");
+        assert_eq!(body["code"], "count_not_whole", "{body}");
+        assert_eq!(body["index"], 1, "{body}");
+        assert!(
+            body["error"].as_str().unwrap().contains("samples[1]"),
+            "{body}"
+        );
+
+        let (code, body) = call(uanalytics_laney_p_chart, r#"{"samples": [[3, 100]]}"#);
+        assert_eq!(code, -3, "{body}");
+        assert_eq!(body["code"], "too_few_samples", "{body}");
+        assert!(body["index"].is_null(), "{body}");
+
+        // A request that is not JSON at all keeps its parse status.
+        let (code, body) = call(uanalytics_p_chart, "{");
+        assert_eq!(code, -2, "{body}");
+        assert_eq!(body["code"], "malformed_input", "{body}");
     }
 
     #[test]
@@ -1066,7 +1116,8 @@ mod tests {
             &serde_json::json!({ "samples": samples }).to_string(),
         );
         assert_eq!(code, 0, "{body}");
-        let wire = crate::wire::p_chart_dto(&samples).expect("chart");
+        let pairs: Vec<(u64, u64)> = samples.iter().map(|&[d, n]| (d, n)).collect();
+        let wire = crate::wire::p_chart_dto(&pairs).expect("chart");
         assert_eq!(body, serde_json::to_value(&wire).unwrap());
 
         let (code, body) = call(
@@ -1074,7 +1125,7 @@ mod tests {
             &serde_json::json!({ "samples": samples }).to_string(),
         );
         assert_eq!(code, 0, "{body}");
-        let wire = crate::wire::laney_p_dto(&samples).expect("chart");
+        let wire = crate::wire::laney_p_dto(&pairs).expect("chart");
         assert_eq!(body, serde_json::to_value(&wire).unwrap());
 
         // -- capability, percentile, gage R&R (both methods), changepoints --

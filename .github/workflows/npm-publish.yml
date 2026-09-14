@@ -131,6 +131,19 @@ jobs:
           try { m.process_capability(JSON.stringify({ data, usl: 11 })) } catch { threw = true }
           ok(threw, 'a JSON string must be rejected, not parsed')
 
+          // A refusal is an Error carrying a stable code and the offending row,
+          // so a caller can say "row 2: not a whole number" without parsing text.
+          // Only observable here: the host tests never build a JS Error.
+          const refusal = (f) => { try { f() } catch (e) { return e } return null }
+          let e = refusal(() => m.c_chart([1, 2, 2.5]))
+          ok(e instanceof Error, 'a refusal must be an Error')
+          ok(e.code === 'count_not_whole' && e.index === 2, `code=${e.code} index=${e.index}`)
+          ok(typeof e.message === 'string' && e.message.includes('defects[2]'), `message=${e.message}`)
+          e = refusal(() => m.p_chart([[3, 100], [0, 0]]))
+          ok(e.code === 'sample_size_not_positive' && e.index === 1, `code=${e.code} index=${e.index}`)
+          e = refusal(() => m.np_chart([1, 2], 10.5))
+          ok(e.code === 'count_not_whole' && e.index === null, `code=${e.code} index=${e.index}`)
+
           console.log('binding behaviour gate: ok')
           EOF
           PKG_NAME="$PKG_NAME" node gate.mjs

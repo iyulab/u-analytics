@@ -220,6 +220,30 @@ anderson_darling_normality(new Float64Array([4.9, 5.1, 5.0, 5.2, 4.8, 5.05]));
 // → { statistic, statistic_modified, p_value }
 ```
 
+**Errors.** A refused input throws an `Error` with two extra properties:
+
+```ts
+interface AnalyticsError extends Error {
+  code: string          // stable reason — branch on this, not on `message`
+  index: number | null  // position of the offending element in its input array
+}
+// try { c_chart([1, 2, 2.5]) } catch (e) { e.code === "count_not_whole"; e.index === 2 }
+```
+
+| `code` | Meaning |
+|---|---|
+| `count_not_whole` | a count (defects, defectives, sample size) is not a whole number ≥ 0 |
+| `sample_size_not_positive` | a sample size of 0 |
+| `defectives_exceed_sample` | more defectives than the sample has items |
+| `units_not_positive` | units inspected that are not a positive number |
+| `subgroup_length_mismatch` | a subgroup of a different length than the first |
+| `subgroup_size_out_of_range` | a subgroup size the factor tables do not cover |
+| `too_few_samples` | fewer samples than the chart needs (`index: null`) |
+| `malformed_input` | not the shape the function takes — a row that is not a pair, an unknown field |
+| `invalid_input` | any other refusal; the message says what |
+
+`message` is written for people and may change between releases; `code` does not.
+
 ### `process_capability(input)`
 
 ```ts
@@ -369,8 +393,9 @@ laney_u_chart(samples: [defects: number, units: number][]):   // at least 3 samp
 charts judge each point against its limits only; to apply the run tests to an
 NP or C chart, whose limits are constant, pass its points to `run_rules`.
 
-A row the chart cannot use -- more defectives than the sample size, a sample
-size of zero, `units` that are not positive -- is rejected with its index. The
+A row the chart cannot use -- a count that is not a whole number, more
+defectives than the sample size, a sample size of zero, `units` that are not
+positive -- is rejected with its `code` and `index` (see **Errors** above). The
 charts would otherwise drop it, and every later point would carry the index of
 the wrong row.
 
@@ -557,9 +582,12 @@ char   *uanalytics_version(void);            // crate version; free with uanalyt
 |---|---|---|
 | `0` | success | the response JSON |
 | `-1` | `request_json` or `result_ptr` was null | null |
-| `-2` | the request did not parse into the expected shape | `{"error": "..."}` naming the field |
-| `-3` | the request parsed, and the computation rejected it | `{"error": "..."}` |
-| `-4` | internal panic (caught; never unwinds across the boundary) | `{"error": "..."}` |
+| `-2` | the request did not parse into the expected shape | `{"error": "...", "code": "malformed_input", "index": null}` |
+| `-3` | the request parsed, and the computation rejected it | `{"error": "...", "code": "...", "index": ...}` |
+| `-4` | internal panic (caught; never unwinds across the boundary) | `{"error": "...", "code": "invalid_input", "index": null}` |
+
+`code` and `index` are the same values the JavaScript `Error` carries (see
+**Errors** in the JavaScript section).
 
 Unknown request fields are rejected (`-2`, naming the field) rather than
 ignored, so a misspelt option cannot silently change which analysis you get.
@@ -609,7 +637,8 @@ The .NET client (`bindings/csharp/UAnalytics`, package `UAnalytics`) wraps each
 entry point as a method on `AnalyticsClient` — `XbarRChart`, `ImrChart`,
 `ProcessCapability`, `DetectChangepoints`, … — serialising the arguments to the
 request above and returning the response as a `JsonElement`. A non-zero status
-surfaces as `AnalyticsException` carrying the code and the `error` message. The
+surfaces as `AnalyticsException` carrying the status (`Code`), the `error`
+message, and the body's `code` and `index` as `Reason` and `Index`. The
 package follows its own version line (it is a binding, not the crate), noted
 in the CHANGELOG entry that changes it.
 

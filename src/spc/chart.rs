@@ -223,6 +223,50 @@ impl fmt::Display for ControlChartError {
 
 impl std::error::Error for ControlChartError {}
 
+/// Why a chart computed from a whole slice of samples refused that slice.
+///
+/// Carries the position of the refused sample, which a sample-by-sample
+/// [`ControlChartError`] cannot: the chart functions that take every sample
+/// at once are the only place that position is known.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ChartInputError {
+    /// The sample at `index` cannot be charted.
+    Sample {
+        /// Zero-based position of the sample in the input slice.
+        index: usize,
+        /// What is wrong with it.
+        error: ControlChartError,
+    },
+    /// Fewer samples than the chart needs.
+    TooFewSamples {
+        /// Samples given.
+        got: usize,
+        /// Samples required.
+        min: usize,
+    },
+}
+
+impl fmt::Display for ChartInputError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ChartInputError::Sample { index, error } => write!(f, "sample {index}: {error}"),
+            ChartInputError::TooFewSamples { got, min } => {
+                write!(f, "at least {min} samples are needed, got {got}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ChartInputError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ChartInputError::Sample { error, .. } => Some(error),
+            ChartInputError::TooFewSamples { .. } => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -24,6 +24,22 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 - WASM `boxcox_capability` accepts `lambda_range?: [min, max]`, returns
   `lambda_at_bound`, and no longer requires `usl`/`lsl` (all indices `null`
   without them).
+- **Refusals carry a stable code and the offending position.** A consumer could
+  not tell its user which row to fix: the reason was free text, and a count
+  that was fractional or negative failed in deserialization with no row at all.
+  - WASM: every export throws an `Error` with `code` and `index`
+    (previously a bare string). `err.message` keeps the text.
+  - C FFI: error bodies are `{"error", "code", "index"}` (`error` unchanged).
+  - C# `UAnalytics`: `AnalyticsException.Message` is the `error` text (was the
+    raw JSON body), with `Reason` and `Index`.
+  - Attribute-chart counts (`p_chart`, `laney_p_chart`, `np_chart`, `c_chart`,
+    `u_chart`, `laney_u_chart`) are read as JSON numbers and refused as
+    `count_not_whole` with their row; a whole number written as `3.0` is
+    accepted.
+- **`spc::laney_p_chart` / `spc::laney_u_chart` return
+  `Result<_, ChartInputError>`** instead of `Option`: `TooFewSamples { got, min }`
+  or `Sample { index, error: ControlChartError }` naming the first sample that
+  cannot be charted.
 
 ### Fixed
 

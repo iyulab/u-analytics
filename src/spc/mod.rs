@@ -39,8 +39,8 @@ pub use attributes::{
     TChartPoint, UChart,
 };
 pub use chart::{
-    ChartPoint, ControlChart, ControlChartError, ControlLimits, Violation, ViolationType,
-    MAX_SUBGROUP_SIZE, MIN_SUBGROUP_SIZE,
+    ChartInputError, ChartPoint, ControlChart, ControlChartError, ControlLimits, Violation,
+    ViolationType, MAX_SUBGROUP_SIZE, MIN_SUBGROUP_SIZE,
 };
 pub use rules::{NelsonRules, RuleSet, RunRule, WesternElectricRules};
 pub use variables::{IndividualMRChart, XBarRChart, XBarSChart};
