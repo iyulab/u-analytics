@@ -41,21 +41,32 @@ public sealed class AnalyticsClient : IDisposable
     /// <summary>
     /// P chart. Each sample is <c>[defectives, sampleSize]</c> -- the order the
     /// chart's own <c>add_sample</c> takes, and the order the WASM binding uses.
-    /// Returns <c>p_bar</c>, per-point <c>points</c> (<c>index</c>, <c>value</c>,
-    /// <c>ucl</c>, <c>cl</c>, <c>lcl</c>, <c>out_of_control</c>) and <c>in_control</c>.
-    /// A sample with more defectives than its size, or a size of zero, is rejected
-    /// by its row rather than dropped.
+    /// Returns <c>p_bar</c> (the centre line used), per-point <c>points</c>
+    /// (<c>index</c>, <c>value</c>, <c>ucl</c>, <c>cl</c>, <c>lcl</c>, <c>out_of_control</c>,
+    /// and <c>z</c> -- the point in its own standard errors, on which every limit is ±3,
+    /// so <see cref="RunRules"/> with limits (3, 0, −3) applies zone tests when sizes vary)
+    /// and <c>in_control</c>. A sample with more defectives than its size, or a size of
+    /// zero, is rejected by its row (<see cref="AnalyticsException.Index"/>) rather than dropped.
     /// </summary>
-    public JsonElement PChart(ulong[][] samples)
-        => CallNative(NativeInterop.uanalytics_p_chart, new { samples });
+    /// <param name="samples"><c>[defectives, sampleSize]</c> pairs.</param>
+    /// <param name="pBar">A known centre line from a Phase I study (Phase II): every limit
+    /// uses it with each sample's own size instead of re-estimating p-bar from
+    /// <paramref name="samples"/>. Strictly between 0 and 1.</param>
+    public JsonElement PChart(ulong[][] samples, double? pBar = null)
+        => CallNative(NativeInterop.uanalytics_p_chart, new { samples, pBar });
 
     /// <summary>
     /// Laney P' chart for over- or under-dispersed proportions. Same
-    /// <c>[defectives, sampleSize]</c> samples as <see cref="PChart"/>; at least three.
-    /// Returns <c>p_bar</c>, <c>phi</c> and per-point <c>points</c>.
+    /// <c>[defectives, sampleSize]</c> samples as <see cref="PChart"/>; at least three
+    /// when p-bar and phi are estimated, one when they are given.
+    /// Returns <c>p_bar</c>, <c>phi</c> (the values used) and per-point <c>points</c>
+    /// (with <c>z</c>, as for <see cref="PChart"/>).
     /// </summary>
-    public JsonElement LaneyPChart(ulong[][] samples)
-        => CallNative(NativeInterop.uanalytics_laney_p_chart, new { samples });
+    /// <param name="samples"><c>[defectives, sampleSize]</c> pairs.</param>
+    /// <param name="pBar">Phase I p-bar; given together with <paramref name="phi"/> or not at all.</param>
+    /// <param name="phi">Phase I sigma-inflation factor (≥ 0); given together with <paramref name="pBar"/>.</param>
+    public JsonElement LaneyPChart(ulong[][] samples, double? pBar = null, double? phi = null)
+        => CallNative(NativeInterop.uanalytics_laney_p_chart, new { samples, pBar, phi });
 
     /// <summary>
     /// X-bar/S chart. Same request and response shape as <see cref="XbarRChart"/> with

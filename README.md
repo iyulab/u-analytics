@@ -661,7 +661,7 @@ uanalytics_fit_best           { data: number[] }           → { distribution: s
 ```
 
 The .NET client (`bindings/csharp/UAnalytics`, package `UAnalytics`) wraps each
-entry point as a method on `AnalyticsClient` — `XbarRChart`, `ImrChart`,
+entry point as a method on `AnalyticsClient` — `XbarRChart`, `ImrChart`, `PChart(samples, pBar)`, `LaneyPChart(samples, pBar, phi)`,
 `ProcessCapability`, `DetectChangepoints`, … — serialising the arguments to the
 request above and returning the response as a `JsonElement`. A non-zero status
 surfaces as `AnalyticsException` carrying the status (`Code`), the `error`

@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.5.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Added
+
+- C# `UAnalytics` **0.8.0** (binding only; the crate is unchanged):`
+  `AnalyticsClient.PChart(samples, pBar)` and`
+  `LaneyPChart(samples, pBar, phi)` send the Phase II standard the C FFI has`
+  accepted since 0.12.0, which 0.7.0's client had no way to pass.
+
 ## [0.12.0] - 2026-09-15
 
 Requires `u-numflow` 0.6. `UAnalytics` NuGet 0.6.0 → **0.7.0** (`AnalyticsException.Reason` / `Index`).
