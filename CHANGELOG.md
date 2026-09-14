@@ -8,6 +8,23 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Changed (breaking)
+
+- **`boxcox_capability` no longer clamps λ to `[-2, 2]` without saying so.** It
+  takes the search range as a fourth argument — `DEFAULT_LAMBDA_RANGE` is
+  `(-5, 5)`, the range Minitab searches — and the result carries
+  `lambda_at_bound: bool`, `true` when the likelihood was still rising at an end
+  of the range (λ is then that limit exactly). Previously a maximum beyond ±2 came
+  back as `±1.9999996` with the transformed-scale indices computed at that λ and
+  nothing to tell it from an interior estimate.
+- **Specification limits are optional.** With neither, λ is still estimated and
+  `NonNormalCapabilityResult::indices` is `None`; `indices` is now
+  `Option<CapabilityIndices>`. `NonNormalCapabilityError::NoSpecLimits` is removed;
+  `InvalidLambdaRange` is added.
+- WASM `boxcox_capability` accepts `lambda_range?: [min, max]`, returns
+  `lambda_at_bound`, and no longer requires `usl`/`lsl` (all indices `null`
+  without them).
+
 ### Fixed
 
 - **`sigma_to_ppm` / `ppm_to_sigma` lost the tail to subtraction.** PPM was

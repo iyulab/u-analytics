@@ -990,6 +990,9 @@ struct BoxcoxCapabilityInputDto {
     usl: Option<f64>,
     #[serde(default)]
     lsl: Option<f64>,
+    /// `[min, max]` lambda search range; defaults to `[-5, 5]`.
+    #[serde(default)]
+    lambda_range: Option<[f64; 2]>,
 }
 
 #[derive(Serialize, Debug)]
@@ -997,6 +1000,9 @@ struct BoxcoxCapabilityDto {
     /// Estimated optimal Box-Cox parameter. `0` is a log transform, `1` the
     /// identity, `0.5` approximately a square root.
     lambda: f64,
+    /// `true` when the likelihood maximum is on an end of `lambda_range`, so
+    /// `lambda` is that limit rather than an interior estimate.
+    lambda_at_bound: bool,
     /// Every index below is on the **transformed** scale, which is where the
     /// normal-theory formulas are valid -- they are not comparable to indices
     /// computed on the raw non-normal data.
@@ -1016,20 +1022,26 @@ struct BoxcoxCapabilityDto {
 /// # Input JSON
 ///
 /// ```json
-/// { "data": [1.2, 3.4, 9.1, 22.0], "usl": 100.0, "lsl": 1.0 }
+/// { "data": [1.2, 3.4, 9.1, 22.0], "usl": 100.0, "lsl": 1.0, "lambda_range": [-5, 5] }
 /// ```
 ///
 /// - `data` (required): at least 4 observations, **all strictly positive**.
-/// - `usl` / `lsl` (optional): at least one is required; each must be positive.
+/// - `usl` / `lsl` (optional): each must be positive. With neither, only the
+///   lambda estimate is returned and every index is `null`.
+/// - `lambda_range` (optional): `[min, max]` search range, default `[-5, 5]`
+///   (the range Minitab searches).
 ///
 /// # Output JSON
 ///
 /// ```json
-/// { "lambda": 0.13, "cp": null, "cpk": null, "cpu": null, "cpl": null,
+/// { "lambda": 0.13, "lambda_at_bound": false,
+///   "cp": null, "cpk": null, "cpu": null, "cpl": null,
 ///   "pp": 1.42, "ppk": 1.19, "ppu": 1.19, "ppl": 1.65, "cpm": null }
 /// ```
 ///
-/// The optimal lambda is estimated by maximum likelihood over `[-2, 2]`, the
+/// The optimal lambda is estimated by maximum likelihood over `lambda_range`;
+/// `lambda_at_bound: true` means the likelihood was still rising at an end of
+/// the range, so `lambda` is that limit, not an interior optimum. The
 /// specification limits are transformed with that same lambda, and the indices
 /// are computed on the transformed scale. `cp`/`cpk`/`cpu`/`cpl` need a
 /// short-term sigma, which a flat vector cannot carry, so they come back
@@ -1045,20 +1057,24 @@ pub fn boxcox_capability(input: JsValue) -> Result<JsValue, JsValue> {
 /// The half of [`boxcox_capability`] below the `JsValue` boundary, so the
 /// contract is testable off `wasm32`.
 fn boxcox_capability_dto(input: BoxcoxCapabilityInputDto) -> Result<BoxcoxCapabilityDto, String> {
-    let result = crate::capability::boxcox_capability(&input.data, input.usl, input.lsl)
+    let range = input
+        .lambda_range
+        .map_or(crate::capability::DEFAULT_LAMBDA_RANGE, |[lo, hi]| (lo, hi));
+    let result = crate::capability::boxcox_capability(&input.data, input.usl, input.lsl, range)
         .map_err(|e| e.to_string())?;
-    let i = result.indices;
+    let i = result.indices.as_ref();
     Ok(BoxcoxCapabilityDto {
         lambda: result.lambda,
-        cp: i.cp,
-        cpk: i.cpk,
-        cpu: i.cpu,
-        cpl: i.cpl,
-        pp: i.pp,
-        ppk: i.ppk,
-        ppu: i.ppu,
-        ppl: i.ppl,
-        cpm: i.cpm,
+        lambda_at_bound: result.lambda_at_bound,
+        cp: i.and_then(|i| i.cp),
+        cpk: i.and_then(|i| i.cpk),
+        cpu: i.and_then(|i| i.cpu),
+        cpl: i.and_then(|i| i.cpl),
+        pp: i.and_then(|i| i.pp),
+        ppk: i.and_then(|i| i.ppk),
+        ppu: i.and_then(|i| i.ppu),
+        ppl: i.and_then(|i| i.ppl),
+        cpm: i.and_then(|i| i.cpm),
     })
 }
 
@@ -1759,11 +1775,18 @@ mod binding_contract_tests {
                 .expect("valid input");
         let dto = super::boxcox_capability_dto(input).expect("skewed data is analysable");
 
-        let native =
-            crate::capability::boxcox_capability(&data, Some(100.0), Some(1.0)).expect("same call");
+        let native = crate::capability::boxcox_capability(
+            &data,
+            Some(100.0),
+            Some(1.0),
+            crate::capability::DEFAULT_LAMBDA_RANGE,
+        )
+        .expect("same call");
+        let native_i = native.indices.expect("limits given");
         assert!((dto.lambda - native.lambda).abs() < 1e-12);
-        assert_eq!(dto.pp, native.indices.pp);
-        assert_eq!(dto.ppk, native.indices.ppk);
+        assert_eq!(dto.lambda_at_bound, native.lambda_at_bound);
+        assert_eq!(dto.pp, native_i.pp);
+        assert_eq!(dto.ppk, native_i.ppk);
 
         // A flat vector carries no subgroup structure, so the short-term
         // indices must stay absent rather than borrow the long-term sigma.
@@ -1778,8 +1801,8 @@ mod binding_contract_tests {
     fn boxcox_refuses_the_inputs_the_transform_cannot_take() {
         let cases = [
             json!({ "data": [1.0, 2.0, 0.0, 4.0], "usl": 9.0 }), // non-positive value
-            json!({ "data": [1.0, 2.0, 3.0, 4.0] }),             // no specification limit
             json!({ "data": [1.0, 2.0, 3.0], "usl": 9.0 }),      // fewer than four points
+            json!({ "data": [1.0, 2.0, 3.0, 4.0], "lambda_range": [2.0, -2.0] }), // empty range
         ];
         for case in cases {
             let parsed: super::BoxcoxCapabilityInputDto =
@@ -1789,6 +1812,37 @@ mod binding_contract_tests {
                 "should be refused: {case}"
             );
         }
+    }
+
+    #[test]
+    fn boxcox_without_limits_and_with_a_narrow_range_reports_the_bound() {
+        // Normal quantiles through the inverse transform at lambda = 4: the
+        // likelihood peaks near 4, so a [-2, 2] range stops at its upper end.
+        let n = 100;
+        let data: Vec<f64> = (1..=n)
+            .map(|i| {
+                let p = (i as f64 - 0.5) / n as f64;
+                let z = 10.0 + 2.0 * u_numflow::special::inverse_normal_cdf(p);
+                (4.0 * z + 1.0).powf(0.25)
+            })
+            .collect();
+        let narrow: super::BoxcoxCapabilityInputDto = super::from_json(
+            json!({ "data": data, "lambda_range": [-2.0, 2.0] }),
+            "input",
+        )
+        .expect("valid input");
+        let dto = super::boxcox_capability_dto(narrow).expect("no limits is allowed");
+        assert!(dto.lambda_at_bound);
+        assert_eq!(dto.lambda, 2.0);
+        assert!(
+            dto.pp.is_none() && dto.ppk.is_none(),
+            "no limits, no indices"
+        );
+
+        let default: super::BoxcoxCapabilityInputDto =
+            super::from_json(json!({ "data": data }), "input").expect("valid input");
+        let dto = super::boxcox_capability_dto(default).expect("default range");
+        assert!(!dto.lambda_at_bound, "lambda={}", dto.lambda);
     }
 
     #[test]

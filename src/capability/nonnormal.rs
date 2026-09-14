@@ -8,7 +8,8 @@
 //!
 //! # Algorithm
 //!
-//! 1. Estimate the optimal λ via maximum likelihood (`estimate_lambda`).
+//! 1. Estimate the optimal λ via maximum likelihood (`estimate_lambda`) over a
+//!    search range — by default `[-5, 5]`, the range Minitab searches.
 //! 2. Transform the data: `y(λ)`.
 //! 3. Transform the specification limits using the same λ.
 //! 4. Compute capability indices on the transformed scale.
@@ -26,6 +27,14 @@ use u_numflow::transforms::{box_cox, estimate_lambda, TransformError};
 
 use crate::capability::{CapabilityIndices, ProcessCapability};
 
+/// The default λ search range, `[-5, 5]`.
+///
+/// This is the range Minitab searches for the optimal Box-Cox λ. Practice
+/// commonly prefers a λ within `[-2, 2]`; a narrower range can be passed, and
+/// [`NonNormalCapabilityResult::lambda_at_bound`] reports when it cut the
+/// search short.
+pub const DEFAULT_LAMBDA_RANGE: (f64, f64) = (-5.0, 5.0);
+
 // ── Error type ────────────────────────────────────────────────────────────────
 
 /// Errors that can arise from non-normal process capability analysis.
@@ -33,14 +42,16 @@ use crate::capability::{CapabilityIndices, ProcessCapability};
 pub enum NonNormalCapabilityError {
     /// All data values must be strictly positive for Box-Cox transformation.
     NonPositiveData,
+    /// Data contains NaN or an infinity.
+    NonFiniteData,
     /// At least 4 data points are required for reliable capability analysis.
     InsufficientData,
     /// Failed to transform a specification limit (e.g., limit is not positive).
     SpecTransformError,
     /// Capability computation failed (e.g., all transformed data are identical).
     CapabilityError,
-    /// At least one specification limit (USL or LSL) must be provided.
-    NoSpecLimits,
+    /// The λ search range is not finite with `min < max`.
+    InvalidLambdaRange,
 }
 
 impl fmt::Display for NonNormalCapabilityError {
@@ -51,6 +62,9 @@ impl fmt::Display for NonNormalCapabilityError {
                     f,
                     "Box-Cox requires all data values to be strictly positive"
                 )
+            }
+            NonNormalCapabilityError::NonFiniteData => {
+                write!(f, "data must not contain NaN or infinite values")
             }
             NonNormalCapabilityError::InsufficientData => {
                 write!(
@@ -70,11 +84,8 @@ impl fmt::Display for NonNormalCapabilityError {
                     "capability computation failed — check that data has non-zero variance"
                 )
             }
-            NonNormalCapabilityError::NoSpecLimits => {
-                write!(
-                    f,
-                    "at least one specification limit (USL or LSL) must be provided"
-                )
+            NonNormalCapabilityError::InvalidLambdaRange => {
+                write!(f, "lambda range must be finite with min < max")
             }
         }
     }
@@ -86,8 +97,10 @@ impl From<TransformError> for NonNormalCapabilityError {
     fn from(e: TransformError) -> Self {
         match e {
             TransformError::NonPositiveData => NonNormalCapabilityError::NonPositiveData,
+            TransformError::NonFiniteData => NonNormalCapabilityError::NonFiniteData,
             TransformError::InsufficientData => NonNormalCapabilityError::InsufficientData,
             TransformError::InvalidInverse => NonNormalCapabilityError::SpecTransformError,
+            TransformError::InvalidLambdaRange => NonNormalCapabilityError::InvalidLambdaRange,
         }
     }
 }
@@ -102,14 +115,22 @@ pub struct NonNormalCapabilityResult {
     /// λ ≈ 0 corresponds to a log transform; λ = 1 is the identity (no transform);
     /// λ = 0.5 is approximately a square-root transform.
     pub lambda: f64,
-    /// Capability indices computed on the Box-Cox-transformed scale.
+    /// `true` when the likelihood maximum lies on an end of the λ search range:
+    /// the likelihood was still rising there, so `lambda` is that range limit
+    /// (exactly) rather than an interior estimate, and the transformed-scale
+    /// indices are computed at a λ the data did not choose. Widen the range to
+    /// find the unconstrained optimum.
+    pub lambda_at_bound: bool,
+    /// Capability indices computed on the Box-Cox-transformed scale, or `None`
+    /// when no specification limit was given (the transform alone was asked
+    /// for).
     ///
     /// Only the **long-term** indices (`pp`, `ppk`, `ppu`, `ppl`) are reported.
     /// `cp`, `cpk`, `cpu` and `cpl` are always `None`: they are defined against
     /// a within-subgroup sigma, and a flat observation vector carries no
     /// subgroup structure to estimate one from. `cpm` follows its usual rule
     /// (both limits and a target, on the transformed scale).
-    pub indices: CapabilityIndices,
+    pub indices: Option<CapabilityIndices>,
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -117,89 +138,96 @@ pub struct NonNormalCapabilityResult {
 /// Compute process capability indices for non-normal data via Box-Cox transformation.
 ///
 /// The data are first transformed to approximate normality using the optimal
-/// Box-Cox parameter λ (estimated via maximum likelihood over `[-2, 2]`).
-/// Specification limits are transformed using the same λ. The **long-term**
-/// capability indices (Pp, Ppk, Ppu, Ppl) are then computed on the transformed
-/// scale. The short-term indices (Cp, Cpk, Cpu, Cpl) are **not** reported —
-/// see [`NonNormalCapabilityResult::indices`] for why.
+/// Box-Cox parameter λ, estimated via maximum likelihood over `lambda_range`
+/// (usually [`DEFAULT_LAMBDA_RANGE`]). Specification limits are transformed
+/// using the same λ. The **long-term** capability indices (Pp, Ppk, Ppu, Ppl)
+/// are then computed on the transformed scale. The short-term indices
+/// (Cp, Cpk, Cpu, Cpl) are **not** reported — see
+/// [`NonNormalCapabilityResult::indices`] for why.
+///
+/// Specification limits are optional: without either, λ and
+/// [`NonNormalCapabilityResult::lambda_at_bound`] are still estimated and
+/// `indices` is `None` — the "does a transform achieve normality" half of a
+/// non-normal capability workflow comes before the limits are known.
 ///
 /// # Arguments
 ///
 /// * `data` — Process observations. All values must be strictly positive.
 /// * `usl` — Upper specification limit (optional). Must be positive if provided.
 /// * `lsl` — Lower specification limit (optional). Must be positive if provided.
+/// * `lambda_range` — `(min, max)` λ search range, finite with `min < max`.
 ///
 /// # Errors
 ///
 /// Returns [`NonNormalCapabilityError`] if:
 /// - Fewer than 4 data points are provided.
 /// - Any data value is ≤ 0 (Box-Cox requires strictly positive data).
-/// - Neither `usl` nor `lsl` is provided.
+/// - `lambda_range` is not finite with `min < max`.
 /// - A specification limit is ≤ 0 (cannot be Box-Cox transformed).
 /// - Capability computation fails (e.g., zero variance in transformed data).
 ///
 /// # Examples
 ///
 /// ```
-/// use u_analytics::capability::boxcox_capability;
+/// use u_analytics::capability::{boxcox_capability, DEFAULT_LAMBDA_RANGE};
 ///
 /// // Right-skewed data
 /// let data: Vec<f64> = (1..=20).map(|i| (i as f64 * 0.3_f64).exp()).collect();
-/// let result = boxcox_capability(&data, Some(100.0), Some(1.0)).unwrap();
-/// assert!(result.lambda >= -2.0 && result.lambda <= 2.0);
-/// assert!(result.indices.ppk.is_some());
+/// let result = boxcox_capability(&data, Some(100.0), Some(1.0), DEFAULT_LAMBDA_RANGE).unwrap();
+/// assert!(!result.lambda_at_bound);
+/// assert!(result.indices.expect("limits given").ppk.is_some());
+///
+/// // No limits yet: the transform alone.
+/// let lambda_only = boxcox_capability(&data, None, None, DEFAULT_LAMBDA_RANGE).unwrap();
+/// assert_eq!(lambda_only.lambda, result.lambda);
+/// assert!(lambda_only.indices.is_none());
 /// ```
 pub fn boxcox_capability(
     data: &[f64],
     usl: Option<f64>,
     lsl: Option<f64>,
+    lambda_range: (f64, f64),
 ) -> Result<NonNormalCapabilityResult, NonNormalCapabilityError> {
-    // Validate: at least one spec limit
-    if usl.is_none() && lsl.is_none() {
-        return Err(NonNormalCapabilityError::NoSpecLimits);
-    }
-
     // Validate: sufficient data
     if data.len() < 4 {
         return Err(NonNormalCapabilityError::InsufficientData);
     }
 
-    // Validate: all data must be strictly positive
+    // Validate: finite, then strictly positive
+    if data.iter().any(|v| !v.is_finite()) {
+        return Err(NonNormalCapabilityError::NonFiniteData);
+    }
     if data.iter().any(|&v| v <= 0.0) {
         return Err(NonNormalCapabilityError::NonPositiveData);
     }
 
     // Estimate optimal λ
-    let lambda = estimate_lambda(data, -2.0, 2.0)?;
+    let estimate = estimate_lambda(data, lambda_range.0, lambda_range.1)?;
+    let lambda = estimate.lambda;
+
+    if usl.is_none() && lsl.is_none() {
+        return Ok(NonNormalCapabilityResult {
+            lambda,
+            lambda_at_bound: estimate.at_bound,
+            indices: None,
+        });
+    }
 
     // Transform data
     let y_t = box_cox(data, lambda)?;
 
-    // Transform spec limits (box_cox requires len >= 2, use a dummy second element)
-    let usl_t = usl
-        .map(|u| {
-            if u <= 0.0 {
-                return Err(NonNormalCapabilityError::SpecTransformError);
-            }
-            // pair with data[0] (positive) so box_cox gets len=2
-            let pair = [u, data[0]];
-            box_cox(&pair, lambda)
-                .map(|v| v[0])
-                .map_err(|_| NonNormalCapabilityError::SpecTransformError)
-        })
-        .transpose()?;
-
-    let lsl_t = lsl
-        .map(|l| {
-            if l <= 0.0 {
-                return Err(NonNormalCapabilityError::SpecTransformError);
-            }
-            let pair = [l, data[0]];
-            box_cox(&pair, lambda)
-                .map(|v| v[0])
-                .map_err(|_| NonNormalCapabilityError::SpecTransformError)
-        })
-        .transpose()?;
+    let transform_limit = |limit: f64| {
+        if limit <= 0.0 {
+            return Err(NonNormalCapabilityError::SpecTransformError);
+        }
+        // box_cox needs at least 2 values; pair the limit with data[0] (positive)
+        let pair = [limit, data[0]];
+        box_cox(&pair, lambda)
+            .map(|v| v[0])
+            .map_err(|_| NonNormalCapabilityError::SpecTransformError)
+    };
+    let usl_t = usl.map(transform_limit).transpose()?;
+    let lsl_t = lsl.map(transform_limit).transpose()?;
 
     // Build ProcessCapability on transformed scale
     // ProcessCapability::new validates usl > lsl when both present
@@ -213,7 +241,11 @@ pub fn boxcox_capability(
         .compute_overall(&y_t)
         .ok_or(NonNormalCapabilityError::CapabilityError)?;
 
-    Ok(NonNormalCapabilityResult { lambda, indices })
+    Ok(NonNormalCapabilityResult {
+        lambda,
+        lambda_at_bound: estimate.at_bound,
+        indices: Some(indices),
+    })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -222,13 +254,32 @@ pub fn boxcox_capability(
 mod tests {
     use super::*;
 
+    const R: (f64, f64) = DEFAULT_LAMBDA_RANGE;
+
+    fn indices(r: &NonNormalCapabilityResult) -> &CapabilityIndices {
+        r.indices.as_ref().expect("limits were given")
+    }
+
+    /// Data exactly normal after a Box-Cox transform with `lambda0`: normal
+    /// quantiles pushed through the inverse transform.
+    fn normal_after_boxcox(lambda0: f64, n: usize) -> Vec<f64> {
+        (1..=n)
+            .map(|i| {
+                let p = (i as f64 - 0.5) / n as f64;
+                let z = 10.0 + 2.0 * u_numflow::special::inverse_normal_cdf(p);
+                (lambda0 * z + 1.0).powf(1.0 / lambda0)
+            })
+            .collect()
+    }
+
     #[test]
     fn boxcox_capability_skewed_data() {
         // Right-skewed exponential-like data
         let data: Vec<f64> = (1..=25).map(|i| (i as f64 * 0.2).exp()).collect();
-        let result = boxcox_capability(&data, Some(150.0), Some(1.0)).unwrap();
+        let result = boxcox_capability(&data, Some(150.0), Some(1.0), R).unwrap();
         assert!(result.lambda.abs() < 0.6, "lambda={}", result.lambda);
-        assert!(result.indices.pp.is_some() || result.indices.ppk.is_some());
+        assert!(!result.lambda_at_bound);
+        assert!(indices(&result).pp.is_some() || indices(&result).ppk.is_some());
     }
 
     #[test]
@@ -236,54 +287,97 @@ mod tests {
         // Cp/Cpk need a within-subgroup sigma; a flat vector has none. Filling
         // them from the overall sigma would make Cp == Pp for every input.
         let data: Vec<f64> = (1..=25).map(|i| (i as f64 * 0.2).exp()).collect();
-        let r = boxcox_capability(&data, Some(150.0), Some(1.0)).unwrap();
-        assert!(r.indices.cp.is_none());
-        assert!(r.indices.cpk.is_none());
-        assert!(r.indices.cpu.is_none());
-        assert!(r.indices.cpl.is_none());
-        assert!(r.indices.pp.is_some(), "the long-term indices are reported");
+        let r = boxcox_capability(&data, Some(150.0), Some(1.0), R).unwrap();
+        let i = indices(&r);
+        assert!(i.cp.is_none());
+        assert!(i.cpk.is_none());
+        assert!(i.cpu.is_none());
+        assert!(i.cpl.is_none());
+        assert!(i.pp.is_some(), "the long-term indices are reported");
+    }
+
+    #[test]
+    fn boxcox_capability_says_when_the_range_cut_lambda_short() {
+        // Likelihood peaks near lambda = 4: the default range finds it inside,
+        // a [-2, 2] range stops at 2 and must say so.
+        let data = normal_after_boxcox(4.0, 100);
+        let wide = boxcox_capability(&data, Some(40.0), None, R).unwrap();
+        assert!(!wide.lambda_at_bound, "lambda={}", wide.lambda);
+        assert!((wide.lambda - 4.0).abs() < 0.5, "lambda={}", wide.lambda);
+
+        let narrow = boxcox_capability(&data, Some(40.0), None, (-2.0, 2.0)).unwrap();
+        assert!(narrow.lambda_at_bound);
+        assert_eq!(narrow.lambda, 2.0);
+        // The indices are still computed — at the bound — and they differ from
+        // the ones at the data's own lambda.
+        assert_ne!(indices(&narrow).ppk, indices(&wide).ppk);
+    }
+
+    #[test]
+    fn boxcox_capability_without_limits_estimates_lambda_only() {
+        let data: Vec<f64> = (1..=25).map(|i| (i as f64 * 0.2).exp()).collect();
+        let bare = boxcox_capability(&data, None, None, R).unwrap();
+        let with = boxcox_capability(&data, Some(150.0), Some(1.0), R).unwrap();
+        assert!(bare.indices.is_none());
+        assert_eq!(bare.lambda, with.lambda);
+        assert_eq!(bare.lambda_at_bound, with.lambda_at_bound);
+    }
+
+    #[test]
+    fn boxcox_capability_rejects_an_invalid_lambda_range() {
+        let data: Vec<f64> = (1..=10).map(|i| i as f64).collect();
+        for range in [(2.0, -2.0), (1.0, 1.0), (f64::NAN, 2.0)] {
+            assert_eq!(
+                boxcox_capability(&data, Some(20.0), None, range).unwrap_err(),
+                NonNormalCapabilityError::InvalidLambdaRange,
+                "{range:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn boxcox_capability_non_finite_error() {
+        let data = vec![1.0, f64::NAN, 2.0, 3.0, 4.0];
+        assert_eq!(
+            boxcox_capability(&data, Some(10.0), None, R).unwrap_err(),
+            NonNormalCapabilityError::NonFiniteData
+        );
     }
 
     #[test]
     fn boxcox_capability_non_positive_error() {
         let data = vec![1.0, -1.0, 2.0, 3.0, 4.0, 5.0];
-        assert!(boxcox_capability(&data, Some(10.0), None).is_err());
+        assert!(boxcox_capability(&data, Some(10.0), None, R).is_err());
     }
 
     #[test]
     fn boxcox_capability_insufficient_data() {
         let data = vec![1.0, 2.0, 3.0]; // < 4 points
-        assert!(boxcox_capability(&data, Some(10.0), None).is_err());
+        assert!(boxcox_capability(&data, Some(10.0), None, R).is_err());
     }
 
     #[test]
     fn boxcox_capability_lambda_in_range() {
         let data: Vec<f64> = (1..=20).map(|i| i as f64).collect();
-        let result = boxcox_capability(&data, Some(25.0), Some(0.5)).unwrap();
-        assert!(result.lambda >= -2.0 && result.lambda <= 2.0);
-    }
-
-    #[test]
-    fn boxcox_capability_no_spec_error() {
-        let data: Vec<f64> = (1..=10).map(|i| i as f64).collect();
-        assert!(boxcox_capability(&data, None, None).is_err());
+        let result = boxcox_capability(&data, Some(25.0), Some(0.5), R).unwrap();
+        assert!(result.lambda >= R.0 && result.lambda <= R.1);
     }
 
     #[test]
     fn boxcox_capability_usl_only() {
         let data: Vec<f64> = (1..=20).map(|i| i as f64 * 0.5).collect();
-        let result = boxcox_capability(&data, Some(20.0), None).unwrap();
+        let result = boxcox_capability(&data, Some(20.0), None, R).unwrap();
         // With USL only: pp is None (needs both limits), ppk should be Some
-        assert!(result.indices.ppk.is_some());
-        assert!(result.indices.pp.is_none());
+        assert!(indices(&result).ppk.is_some());
+        assert!(indices(&result).pp.is_none());
     }
 
     #[test]
     fn boxcox_capability_lsl_only() {
         let data: Vec<f64> = (1..=20).map(|i| i as f64).collect();
-        let result = boxcox_capability(&data, None, Some(0.5)).unwrap();
-        assert!(result.indices.ppk.is_some());
-        assert!(result.indices.pp.is_none());
+        let result = boxcox_capability(&data, None, Some(0.5), R).unwrap();
+        assert!(indices(&result).ppk.is_some());
+        assert!(indices(&result).pp.is_none());
     }
 
     #[test]
@@ -293,25 +387,26 @@ mod tests {
         // which pinned the very behaviour that made Cp equal Pp for every
         // input. See `boxcox_capability_reports_no_short_term_indices`.
         let data: Vec<f64> = (1..=30).map(|i| (i as f64 * 0.1).exp()).collect();
-        let result = boxcox_capability(&data, Some(20.0), Some(1.0)).unwrap();
-        assert!(result.indices.pp.is_some());
-        assert!(result.indices.ppk.is_some());
-        assert!(result.indices.cp.is_none());
-        assert!(result.indices.cpk.is_none());
+        let result = boxcox_capability(&data, Some(20.0), Some(1.0), R).unwrap();
+        let i = indices(&result);
+        assert!(i.pp.is_some());
+        assert!(i.ppk.is_some());
+        assert!(i.cp.is_none());
+        assert!(i.cpk.is_none());
     }
 
     #[test]
     fn boxcox_capability_non_positive_spec_error() {
         let data: Vec<f64> = (1..=10).map(|i| i as f64).collect();
         // LSL = -1 is non-positive → SpecTransformError
-        assert!(boxcox_capability(&data, Some(20.0), Some(-1.0)).is_err());
+        assert!(boxcox_capability(&data, Some(20.0), Some(-1.0), R).is_err());
     }
 
     #[test]
     fn boxcox_capability_result_has_valid_lambda() {
         let data: Vec<f64> = (1..=15).map(|i| (i as f64).powi(2)).collect();
-        let result = boxcox_capability(&data, Some(250.0), Some(0.5)).unwrap();
+        let result = boxcox_capability(&data, Some(250.0), Some(0.5), R).unwrap();
         assert!(result.lambda.is_finite());
-        assert!(result.lambda >= -2.0 && result.lambda <= 2.0);
+        assert!(result.lambda >= R.0 && result.lambda <= R.1);
     }
 }

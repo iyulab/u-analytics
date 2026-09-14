@@ -95,12 +95,16 @@ Pp/Ppk/Ppu/Ppl and Cpm, leaving `cp`, `cpk`, `cpu`, `cpl` and `std_dev_within`
 equal `pp` for every input.
 
 ```rust
-use u_analytics::capability::boxcox_capability;
+use u_analytics::capability::{boxcox_capability, DEFAULT_LAMBDA_RANGE};
 
-// Non-normal data: auto-estimate λ, transform spec limits, compute Ppk
+// Non-normal data: estimate λ over [-5, 5], transform spec limits, compute Ppk
 let skewed_data = vec![0.5, 1.2, 0.8, 2.1, 0.3, 1.7, 0.9, 1.4];
-let result = boxcox_capability(&skewed_data, Some(5.0), Some(0.1)).unwrap();
-println!("λ = {:.3}, Ppk = {:.3}", result.lambda, result.indices.ppk.unwrap());
+let result = boxcox_capability(&skewed_data, Some(5.0), Some(0.1), DEFAULT_LAMBDA_RANGE).unwrap();
+if result.lambda_at_bound {
+    // the likelihood was still rising at an end of the range: λ is that limit
+}
+let ppk = result.indices.and_then(|i| i.ppk); // `indices` is None without limits
+println!("λ = {:.3}, Ppk = {:?}", result.lambda, ppk);
 ```
 
 ### Weibull Reliability
@@ -425,10 +429,13 @@ empty `data` and any parameter outside its domain, naming the offending one.
 ```ts
 boxcox_capability(input: {
   data: number[],          // >= 4 observations, all strictly positive
-  usl?: number,            // at least one limit is required; each must be positive
-  lsl?: number,
+  usl?: number,            // optional; each must be positive
+  lsl?: number,            // with neither limit, only lambda is estimated (indices null)
+  lambda_range?: [number, number],  // search range, default [-5, 5] (Minitab's)
 }): {
-  lambda: number,          // ML-estimated optimal Box-Cox parameter over [-2, 2]
+  lambda: number,          // ML-estimated optimal Box-Cox parameter within lambda_range
+  lambda_at_bound: boolean,  // true: likelihood still rising at an end of the range —
+                             // lambda is that limit, not an interior optimum
   pp: number | null, ppk: number | null, ppu: number | null, ppl: number | null,
   cp: null, cpk: null, cpu: null, cpl: null,   // always null — see below
   cpm: number | null,
