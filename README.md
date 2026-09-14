@@ -379,7 +379,7 @@ reported.
 ```ts
 type AttrPoint = { index: number, value: number, ucl: number, cl: number, lcl: number,
                    out_of_control: boolean,
-                   z?: number };   // (value − cl) / σᵢ — absent when σᵢ is 0
+                   z: number | null };   // (value − cl) / σᵢ — null when σᵢ is 0
 
 p_chart(samples: [defectives: number, size: number][], options?: { p_bar?: number }):
   { p_bar: number, points: AttrPoint[], in_control: boolean }

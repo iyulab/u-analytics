@@ -100,6 +100,8 @@ impl From<TransformError> for NonNormalCapabilityError {
             TransformError::NonFiniteData => NonNormalCapabilityError::NonFiniteData,
             TransformError::InsufficientData => NonNormalCapabilityError::InsufficientData,
             TransformError::InvalidInverse => NonNormalCapabilityError::SpecTransformError,
+            // The data at the estimated λ does not fit in f64: nothing to compute on.
+            TransformError::InvalidTransform => NonNormalCapabilityError::CapabilityError,
             TransformError::InvalidLambdaRange => NonNormalCapabilityError::InvalidLambdaRange,
         }
     }

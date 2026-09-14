@@ -6,9 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.5.0 onward; earlier entries list release dates only (see git history).
 
-## [Unreleased]
+## [0.12.0] - 2026-09-15
+
+Requires `u-numflow` 0.6. `UAnalytics` NuGet 0.6.0 → **0.7.0** (`AnalyticsException.Reason` / `Index`).
 
 ### Changed (breaking)
+
+- **WASM responses carry `null` for an absent value**, as documented and as the
+  C FFI's JSON does. serde-wasm-bindgen omitted the key instead, so a field
+  documented `number | null` arrived as `undefined` and the two transports
+  disagreed on every optional field. Code testing `=== undefined` must test
+  `=== null` (or `== null`).
 
 - **`boxcox_capability` no longer clamps λ to `[-2, 2]` without saying so.** It
   takes the search range as a fourth argument — `DEFAULT_LAMBDA_RANGE` is

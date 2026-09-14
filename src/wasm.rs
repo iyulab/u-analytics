@@ -123,8 +123,14 @@ impl From<serde_wasm_bindgen::Error> for WireError {
     }
 }
 
+/// Serializes a response. An absent value (`None`) crosses as `null`, not as a
+/// missing key: the FFI renders the same wire value with `serde_json`, which
+/// writes `null`, and this crate documents `null` -- serde-wasm-bindgen's
+/// default of omitting the key made the two transports disagree on every
+/// optional field.
 fn to_js<T: Serialize>(val: &T) -> Result<JsValue, JsValue> {
-    serde_wasm_bindgen::to_value(val).map_err(js_err)
+    val.serialize(&serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true))
+        .map_err(js_err)
 }
 
 /// Deserialize a native JS value, rejecting JSON strings with an actionable
