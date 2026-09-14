@@ -318,6 +318,23 @@ struct ProportionSamplesRequest {
     /// `[[defectives, sample_size], ...]`, read as JSON numbers so a count that
     /// is not a whole number is refused with its row rather than by the parser.
     samples: serde_json::Value,
+    /// Known centre line (Phase II); see the WASM `p_chart` options.
+    #[serde(default)]
+    p_bar: Option<f64>,
+    /// Known sigma-inflation factor, Laney P' only, together with `p_bar`.
+    #[serde(default)]
+    phi: Option<f64>,
+}
+
+#[cfg(feature = "ffi")]
+impl ProportionSamplesRequest {
+    fn standard(&self) -> crate::wire::AttributeStandardDto {
+        crate::wire::AttributeStandardDto {
+            p_bar: self.p_bar,
+            u_bar: None,
+            phi: self.phi,
+        }
+    }
 }
 
 /// SPC P chart.
@@ -348,7 +365,7 @@ pub unsafe extern "C" fn uanalytics_p_chart(
             Err(status) => return status,
         };
         match crate::wire::count_pairs(&req.samples, "samples")
-            .and_then(|s| crate::wire::p_chart_dto(&s))
+            .and_then(|s| crate::wire::p_chart_dto(&s, &req.standard()))
         {
             Ok(dto) => write_json(result_ptr, &dto),
             Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
@@ -383,7 +400,7 @@ pub unsafe extern "C" fn uanalytics_laney_p_chart(
             Err(status) => return status,
         };
         match crate::wire::count_pairs(&req.samples, "samples")
-            .and_then(|s| crate::wire::laney_p_dto(&s))
+            .and_then(|s| crate::wire::laney_p_dto(&s, &req.standard()))
         {
             Ok(dto) => write_json(result_ptr, &dto),
             Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
@@ -1074,7 +1091,7 @@ mod tests {
         let request = serde_json::json!({ "samples": pairs });
         let (code, body) = call(uanalytics_laney_p_chart, &request.to_string());
         assert_eq!(code, 0, "{body}");
-        let expected = laney_p_chart(&pairs).expect("valid samples");
+        let expected = laney_p_chart(&pairs, None).expect("valid samples");
         assert_eq!(body["p_bar"].as_f64(), Some(expected.p_bar));
         assert_eq!(body["phi"].as_f64(), Some(expected.phi));
 
@@ -1117,7 +1134,7 @@ mod tests {
         );
         assert_eq!(code, 0, "{body}");
         let pairs: Vec<(u64, u64)> = samples.iter().map(|&[d, n]| (d, n)).collect();
-        let wire = crate::wire::p_chart_dto(&pairs).expect("chart");
+        let wire = crate::wire::p_chart_dto(&pairs, &Default::default()).expect("chart");
         assert_eq!(body, serde_json::to_value(&wire).unwrap());
 
         let (code, body) = call(
@@ -1125,7 +1142,7 @@ mod tests {
             &serde_json::json!({ "samples": samples }).to_string(),
         );
         assert_eq!(code, 0, "{body}");
-        let wire = crate::wire::laney_p_dto(&pairs).expect("chart");
+        let wire = crate::wire::laney_p_dto(&pairs, &Default::default()).expect("chart");
         assert_eq!(body, serde_json::to_value(&wire).unwrap());
 
         // -- capability, percentile, gage R&R (both methods), changepoints --

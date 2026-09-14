@@ -36,10 +36,29 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
     `u_chart`, `laney_u_chart`) are read as JSON numbers and refused as
     `count_not_whole` with their row; a whole number written as `3.0` is
     accepted.
+- **Phase II for charts whose limits vary with n.** `PChart::with_center(p_bar)`,
+  `UChart::with_center(u_bar)`, and a second argument
+  `Option<LaneyStandard { center, phi }>` on `spc::laney_p_chart` /
+  `spc::laney_u_chart`: every limit uses the Phase I values with each sample's
+  own size, where re-estimating from Phase I and II together would let a shift
+  pull the centre toward itself and widen its own limits. A standard outside its
+  domain is `ControlChartError::InvalidStandard` (Laney:
+  `ChartInputError::Standard`); with a standard, one sample is enough. WASM
+  `p_chart(samples, { p_bar })`, `laney_p_chart(samples, { p_bar, phi })`,
+  `u_chart(samples, { u_bar })`, `laney_u_chart(samples, { u_bar, phi })`; FFI
+  `p_bar`/`phi` request fields.
 - **`spc::laney_p_chart` / `spc::laney_u_chart` return
   `Result<_, ChartInputError>`** instead of `Option`: `TooFewSamples { got, min }`
   or `Sample { index, error: ControlChartError }` naming the first sample that
   cannot be charted.
+
+### Added
+
+- **`z` on every attributes-chart point** (`AttributeChartPoint::z`,
+  `LaneyAttributePoint::z`, and in WASM/FFI output): the point in its own
+  standard errors from the centre line. When sample sizes vary, zone-based run
+  rules have no single set of zones on the original scale; on this one every
+  limit is ±3 — pass `z` to `run_rules` with limits `(3, 0, −3)`.
 
 ### Fixed
 

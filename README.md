@@ -55,7 +55,7 @@ use u_analytics::spc::{laney_p_chart, g_chart};
 // Laney P' chart for overdispersed proportion data
 // samples: (defective count, subgroup size)
 let samples = vec![(3u64, 100u64), (5, 120), (2, 95)];
-let chart = laney_p_chart(&samples).unwrap();
+let chart = laney_p_chart(&samples, None).unwrap(); // Some(LaneyStandard { .. }) for Phase II
 println!("p̄ = {:.4}, φ = {:.4}", chart.p_bar, chart.phi);
 
 // G chart for rare events (e.g., days between nonconformances)
@@ -239,6 +239,7 @@ interface AnalyticsError extends Error {
 | `subgroup_length_mismatch` | a subgroup of a different length than the first |
 | `subgroup_size_out_of_range` | a subgroup size the factor tables do not cover |
 | `too_few_samples` | fewer samples than the chart needs (`index: null`) |
+| `standard_out_of_range` | a Phase I `p_bar`/`u_bar`/`phi` outside its domain |
 | `malformed_input` | not the shape the function takes — a row that is not a pair, an unknown field |
 | `invalid_input` | any other refusal; the message says what |
 
@@ -377,21 +378,54 @@ reported.
 
 ```ts
 type AttrPoint = { index: number, value: number, ucl: number, cl: number, lcl: number,
-                   out_of_control: boolean };
+                   out_of_control: boolean,
+                   z?: number };   // (value − cl) / σᵢ — absent when σᵢ is 0
 
+p_chart(samples: [defectives: number, size: number][], options?: { p_bar?: number }):
+  { p_bar: number, points: AttrPoint[], in_control: boolean }
+laney_p_chart(samples: [defectives: number, size: number][],
+              options?: { p_bar?: number, phi?: number }):   // both or neither
+  { p_bar: number, phi: number, points: AttrPoint[] }
 np_chart(defectives: number[], sample_size: number):
   { cl: number, ucl: number, lcl: number, points: AttrPoint[], in_control: boolean }
 c_chart(defects: number[]):
   { cl: number, ucl: number, lcl: number, points: AttrPoint[], in_control: boolean }
-u_chart(samples: [defects: number, units: number][]):
+u_chart(samples: [defects: number, units: number][], options?: { u_bar?: number }):
   { u_bar: number, points: AttrPoint[], in_control: boolean }
-laney_u_chart(samples: [defects: number, units: number][]):   // at least 3 samples
+laney_u_chart(samples: [defects: number, units: number][],
+              options?: { u_bar?: number, phi?: number }):   // both or neither
   { u_bar: number, phi: number, points: AttrPoint[] }
 ```
 
-`p_chart` and `laney_p_chart` take `[defectives, size]` pairs, as before. These
-charts judge each point against its limits only; to apply the run tests to an
-NP or C chart, whose limits are constant, pass its points to `run_rules`.
+**Phase I and Phase II.** Without options the centre (and φ) are estimated from
+`samples` — a Phase I study. To judge later samples against it, pass that
+study's `p_bar`/`u_bar` (and `phi` for the Laney charts): every limit then uses
+the Phase I values with each sample's own size, and a single sample is enough.
+Charting Phase I and Phase II together instead would let a Phase II shift pull
+the centre toward itself and widen its own limits. A `p_bar` outside (0, 1), a
+`u_bar` ≤ 0 or a negative `phi` is refused as `standard_out_of_range`; a Laney
+standard with only one of its two parts, or a key the chart does not take, is
+refused rather than completed or ignored.
+
+```js
+const phaseOne = laney_p_chart(firstTwelve)              // { p_bar, phi, points }
+laney_p_chart(later, { p_bar: phaseOne.p_bar, phi: phaseOne.phi })
+```
+
+**Run rules when the sample size varies.** P, U and the Laney charts have a
+different pair of limits at every point, so zones on the original scale do not
+exist. Each point carries `z`, its distance from the centre line in its own
+standard errors; on that scale every limit is ±3 (the standardized control
+chart, Montgomery §7.2.2):
+
+```js
+const chart = p_chart(samples)
+run_rules(chart.points.map(p => p.z), { ucl: 3, cl: 0, lcl: -3 })
+```
+
+These charts judge each point against its limits only; for an NP or C chart,
+whose limits are constant, pass `value`s and the chart's limits to `run_rules`
+directly.
 
 A row the chart cannot use -- a count that is not a whole number, more
 defectives than the sample size, a sample size of zero, `units` that are not
@@ -491,17 +525,10 @@ rational approximation).
 ### The remaining exports, briefly
 
 Every export takes plain JSON values and returns one; a rejected input throws
-an `Error` whose message names what was wrong. The shapes below are the ones
+an `Error` carrying `code` and `index` (see **Errors**). The shapes below are the ones
 the sections above have not already spelled out.
 
 ```ts
-// Attributes charts on [defectives, sample_size] pairs (the crate's own order)
-p_chart(samples: [defectives: number, sample_size: number][]):
-  { p_bar: number, points: AttrPoint[], in_control: boolean }
-laney_p_chart(samples: [defectives: number, sample_size: number][]):   // >= 3 samples
-  { p_bar: number, phi: number, points: AttrPoint[] }
-// where AttrPoint = { index, value, ucl, cl, lcl, out_of_control }
-
 // Rare-event charts
 g_chart(gaps: number[]):  { g_bar: number, points: AttrPoint[] }    // events between occurrences
 t_chart(times: number[]): { t_bar: number, points: AttrPoint[] }    // time between occurrences
@@ -607,8 +634,8 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_xbar_s_chart` | `xbar_s_chart(subgroups, { rules? })` | `{ subgroups, rules? }` |
 | `uanalytics_imr_chart` | `imr_chart(values, { rules? })` | `{ values, rules? }` |
 | `uanalytics_run_rules` | `run_rules(values, limits, { rules? })` | `{ values, limits: { ucl, cl, lcl }, rules? }` |
-| `uanalytics_p_chart` | `p_chart(samples)` | `{ samples: [[defectives, sample_size], …] }` |
-| `uanalytics_laney_p_chart` | `laney_p_chart(samples)` | `{ samples: [[defectives, sample_size], …] }` |
+| `uanalytics_p_chart` | `p_chart(samples, { p_bar? })` | `{ samples: [[defectives, sample_size], …], p_bar? }` |
+| `uanalytics_laney_p_chart` | `laney_p_chart(samples, { p_bar?, phi? })` | `{ samples: [[defectives, sample_size], …], p_bar?, phi? }` |
 | `uanalytics_process_capability` | `process_capability(input)` | `input` as is |
 | `uanalytics_percentile_capability` | `percentile_capability(input)` | `input` as is |
 | `uanalytics_gage_rr_xbar_r` | `gage_rr_xbar_r(input)` | `input` as is |

@@ -21,9 +21,9 @@ use crate::wire::{
     default_cost, default_min_seg, default_penalty, gage_rr_anova_dto, gage_rr_xbar_r_dto, imr_dto,
     laney_p_dto, laney_point_dtos, p_chart_dto, pelt_dto, percentile_capability_dto, rate_pairs,
     rules_from_json, run_rules_dto, xbar_r_dto, xbar_s_dto, AttributeChartPointDto,
-    CapabilityInputDto, GageRRInputDto, LimitsInputDto, PeltInputDto, PeltPenaltyDto,
-    PeltResultDto, PercentileCapabilityInputDto, SeasonalityInputDto, SpectralResidualInputDto,
-    WireError,
+    AttributeStandardDto, CapabilityInputDto, GageRRInputDto, LimitsInputDto, PeltInputDto,
+    PeltPenaltyDto, PeltResultDto, PercentileCapabilityInputDto, SeasonalityInputDto,
+    SpectralResidualInputDto, WireError,
 };
 
 // ---------------------------------------------------------------------------
@@ -297,6 +297,14 @@ fn rules_option(options: Option<JsValue>) -> Result<crate::spc::RuleSet, JsValue
     }
 }
 
+/// Reads the optional `{ p_bar?, u_bar?, phi? }` standard of an attributes chart.
+fn standard_option(options: Option<JsValue>) -> Result<AttributeStandardDto, JsValue> {
+    match options {
+        Some(o) if !o.is_undefined() && !o.is_null() => from_js(o, "options"),
+        _ => Ok(AttributeStandardDto::default()),
+    }
+}
+
 /// Compute a P chart from (defectives, sample_size) pairs.
 ///
 /// # Input JSON
@@ -309,16 +317,26 @@ fn rules_option(options: Option<JsValue>) -> Result<crate::spc::RuleSet, JsValue
 /// Throws an `Error` with `code` and `index` (the row): `count_not_whole`
 /// for a count that is not a whole number >= 0, `sample_size_not_positive`,
 /// `defectives_exceed_sample`, `malformed_input` for a row that is not a pair,
-/// `too_few_samples` for an empty array.
+/// `too_few_samples` for an empty array, `standard_out_of_range` for a
+/// `p_bar` outside (0, 1).
+///
+/// # Options
+///
+/// `{ p_bar?: number }` -- a known centre line from a Phase I study. Every
+/// limit then uses it with the sample's own size (Phase II); without it p-bar
+/// is estimated from `samples`.
 ///
 /// # Output JSON
 ///
-/// Object with fields: `p_bar`, `points` (array), `in_control`.
+/// Object with fields: `p_bar` (the centre line used), `points` (array, each
+/// with `z` -- the standardized value, on which every limit is +/-3),
+/// `in_control`.
 #[wasm_bindgen]
-pub fn p_chart(samples: JsValue) -> Result<JsValue, JsValue> {
+pub fn p_chart(samples: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
     let json: serde_json::Value = from_js(samples, "samples")?;
     let samples = count_pairs(&json, "samples").map_err(js_err)?;
-    to_js(&p_chart_dto(&samples).map_err(js_err)?)
+    let standard = standard_option(options)?;
+    to_js(&p_chart_dto(&samples, &standard).map_err(js_err)?)
 }
 /// Compute process capability indices (Cp, Cpk, Pp, Ppk, Cpm).
 ///
@@ -399,16 +417,24 @@ pub fn anderson_darling_normality(data: &[f64]) -> Result<JsValue, JsValue> {
 ///
 /// # Errors
 ///
-/// As [`p_chart`], with `too_few_samples` below 3 samples.
+/// As [`p_chart`], with `too_few_samples` below 3 samples (1 with a standard).
+///
+/// # Options
+///
+/// `{ p_bar?: number, phi?: number }` -- both from a Phase I study, or neither:
+/// phi scales the standard error about that centre, so the two are one
+/// standard.
 ///
 /// # Output JSON
 ///
-/// Object with fields: `p_bar`, `phi`, `points` (array).
+/// Object with fields: `p_bar`, `phi` (the values used), `points` (array, each
+/// with `z`).
 #[wasm_bindgen]
-pub fn laney_p_chart(samples: JsValue) -> Result<JsValue, JsValue> {
+pub fn laney_p_chart(samples: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
     let json: serde_json::Value = from_js(samples, "samples")?;
     let samples = count_pairs(&json, "samples").map_err(js_err)?;
-    to_js(&laney_p_dto(&samples).map_err(js_err)?)
+    let standard = standard_option(options)?;
+    to_js(&laney_p_dto(&samples, &standard).map_err(js_err)?)
 }
 
 /// Compute an NP chart: the count of defectives in samples of one size.
@@ -467,16 +493,22 @@ pub fn c_chart(defects: JsValue) -> Result<JsValue, JsValue> {
 /// # Errors
 ///
 /// Throws an `Error` with `code` and `index` (the row): `count_not_whole`,
-/// `units_not_positive`, `malformed_input`, `too_few_samples`.
+/// `units_not_positive`, `malformed_input`, `too_few_samples`,
+/// `standard_out_of_range`.
+///
+/// # Options
+///
+/// `{ u_bar?: number }` -- a known centre line (Phase II), as for [`p_chart`].
 ///
 /// # Output JSON
 ///
-/// Object with fields: `u_bar`, `points` (array), `in_control`.
+/// Object with fields: `u_bar`, `points` (array, each with `z`), `in_control`.
 #[wasm_bindgen]
-pub fn u_chart(samples: JsValue) -> Result<JsValue, JsValue> {
+pub fn u_chart(samples: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
     let json: serde_json::Value = from_js(samples, "samples")?;
     let samples = rate_pairs(&json, "samples").map_err(js_err)?;
-    to_js(&u_chart_dto(&samples).map_err(js_err)?)
+    let standard = standard_option(options)?;
+    to_js(&u_chart_dto(&samples, &standard).map_err(js_err)?)
 }
 
 /// Compute the Laney U' chart from `[defects, units]` pairs (need >= 3).
@@ -485,16 +517,22 @@ pub fn u_chart(samples: JsValue) -> Result<JsValue, JsValue> {
 ///
 /// # Errors
 ///
-/// As [`u_chart`], with `too_few_samples` below 3 samples.
+/// As [`u_chart`], with `too_few_samples` below 3 samples (1 with a standard).
+///
+/// # Options
+///
+/// `{ u_bar?: number, phi?: number }` -- both or neither, as for
+/// [`laney_p_chart`].
 ///
 /// # Output JSON
 ///
-/// Object with fields: `u_bar`, `phi`, `points` (array).
+/// Object with fields: `u_bar`, `phi`, `points` (array, each with `z`).
 #[wasm_bindgen]
-pub fn laney_u_chart(samples: JsValue) -> Result<JsValue, JsValue> {
+pub fn laney_u_chart(samples: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
     let json: serde_json::Value = from_js(samples, "samples")?;
     let samples = rate_pairs(&json, "samples").map_err(js_err)?;
-    to_js(&laney_u_dto(&samples).map_err(js_err)?)
+    let standard = standard_option(options)?;
+    to_js(&laney_u_dto(&samples, &standard).map_err(js_err)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -542,10 +580,23 @@ fn c_chart_dto(defects: &[u64]) -> Result<FixedLimitChartDto, WireError> {
     })
 }
 
-fn u_chart_dto(raw: &[(u64, f64)]) -> Result<UChartDto, WireError> {
+fn u_chart_dto(
+    raw: &[(u64, f64)],
+    standard: &AttributeStandardDto,
+) -> Result<UChartDto, WireError> {
     use crate::spc::UChart;
 
-    let mut chart = UChart::new();
+    standard.refuse(
+        "u_chart",
+        &[
+            ("p_bar", standard.p_bar.is_some()),
+            ("phi", standard.phi.is_some()),
+        ],
+    )?;
+    let mut chart = match standard.u_bar {
+        Some(u) => UChart::with_center(u).map_err(|e| WireError::chart("options", None, &e))?,
+        None => UChart::new(),
+    };
     add_rows(raw, "samples", |&(d, u)| chart.add_sample(d, u))?;
     let u_bar = chart
         .u_bar()
@@ -557,9 +608,14 @@ fn u_chart_dto(raw: &[(u64, f64)]) -> Result<UChartDto, WireError> {
     })
 }
 
-fn laney_u_dto(raw: &[(u64, f64)]) -> Result<LaneyUChartDto, WireError> {
+fn laney_u_dto(
+    raw: &[(u64, f64)],
+    standard: &AttributeStandardDto,
+) -> Result<LaneyUChartDto, WireError> {
+    standard.refuse("laney_u_chart", &[("p_bar", standard.p_bar.is_some())])?;
+    let laney = standard.laney(standard.u_bar, "u_bar")?;
     let chart =
-        crate::spc::laney_u_chart(raw).map_err(|e| WireError::chart_input("samples", &e))?;
+        crate::spc::laney_u_chart(raw, laney).map_err(|e| WireError::chart_input("samples", &e))?;
     Ok(LaneyUChartDto {
         u_bar: chart.u_bar,
         phi: chart.phi,
@@ -1803,7 +1859,7 @@ mod binding_contract_tests {
     fn u_chart_reports_the_crate_chart_and_refuses_empty_units() {
         use crate::spc::UChart;
         let samples = [(3, 1.0), (5, 1.5), (2, 0.8), (4, 1.2)];
-        let d = u_chart_dto(&samples).expect("valid");
+        let d = u_chart_dto(&samples, &Default::default()).expect("valid");
         let mut chart = UChart::new();
         for &(x, u) in &samples {
             chart.add_sample(x, u).unwrap();
@@ -1811,7 +1867,8 @@ mod binding_contract_tests {
         assert_eq!(Some(d.u_bar), chart.u_bar());
         assert_eq!(d.points.len(), samples.len());
 
-        let e = u_chart_dto(&[(3, 1.0), (5, 0.0), (2, 0.8)]).expect_err("zero units");
+        let e = u_chart_dto(&[(3, 1.0), (5, 0.0), (2, 0.8)], &Default::default())
+            .expect_err("zero units");
         assert!(e.message.contains("samples[1]"), "{e}");
         assert_eq!(
             (e.code, e.index),
@@ -1822,15 +1879,16 @@ mod binding_contract_tests {
     #[test]
     fn laney_u_chart_reports_the_crate_chart() {
         let samples = [(3, 1.0), (5, 1.5), (2, 0.8), (4, 1.2), (6, 1.1)];
-        let d = laney_u_dto(&samples).expect("valid");
-        let expected = crate::spc::laney_u_chart(&samples).expect("valid");
+        let d = laney_u_dto(&samples, &Default::default()).expect("valid");
+        let expected = crate::spc::laney_u_chart(&samples, None).expect("valid");
         assert_eq!((d.u_bar, d.phi), (expected.u_bar, expected.phi));
-        let e = laney_u_dto(&samples[..2]).expect_err("fewer than 3 samples");
+        let e = laney_u_dto(&samples[..2], &Default::default()).expect_err("fewer than 3 samples");
         assert_eq!(
             (e.code, e.index),
             (crate::wire::code::TOO_FEW_SAMPLES, None)
         );
-        let e = laney_u_dto(&[(3, 1.0), (5, -1.0), (2, 0.8)]).expect_err("negative units");
+        let e = laney_u_dto(&[(3, 1.0), (5, -1.0), (2, 0.8)], &Default::default())
+            .expect_err("negative units");
         assert!(e.message.contains("samples[1]"), "{e}");
         assert_eq!(
             (e.code, e.index),
@@ -1843,13 +1901,14 @@ mod binding_contract_tests {
     #[test]
     fn p_chart_refuses_a_sample_with_no_proportion() {
         use crate::wire::code;
-        let e = p_chart_dto(&[(3, 100), (12, 10), (4, 100)]).expect_err("12 of 10");
+        let e = p_chart_dto(&[(3, 100), (12, 10), (4, 100)], &Default::default())
+            .expect_err("12 of 10");
         assert!(e.message.contains("samples[1]"), "{e}");
         assert_eq!((e.code, e.index), (code::DEFECTIVES_EXCEED_SAMPLE, Some(1)));
-        let e = p_chart_dto(&[(3, 100), (0, 0)]).expect_err("0 of 0");
+        let e = p_chart_dto(&[(3, 100), (0, 0)], &Default::default()).expect_err("0 of 0");
         assert!(e.message.contains("samples[1]"), "{e}");
         assert_eq!((e.code, e.index), (code::SAMPLE_SIZE_NOT_POSITIVE, Some(1)));
-        let ok = p_chart_dto(&[(3, 100), (5, 120), (2, 80)]).expect("valid");
+        let ok = p_chart_dto(&[(3, 100), (5, 120), (2, 80)], &Default::default()).expect("valid");
         assert_eq!(ok.points.len(), 3);
     }
 
@@ -2085,10 +2144,12 @@ mod binding_contract_tests {
 
     #[test]
     fn laney_p_chart_refuses_a_sample_with_no_proportion() {
-        let e = laney_p_dto(&[(3, 100), (0, 0), (4, 100), (2, 100)]).expect_err("0 of 0");
+        let e = laney_p_dto(&[(3, 100), (0, 0), (4, 100), (2, 100)], &Default::default())
+            .expect_err("0 of 0");
         assert!(e.message.contains("samples[1]"), "{e}");
         assert_eq!(e.index, Some(1));
-        let e = laney_p_dto(&[(3, 100), (5, 120)]).expect_err("fewer than 3 samples");
+        let e = laney_p_dto(&[(3, 100), (5, 120)], &Default::default())
+            .expect_err("fewer than 3 samples");
         assert_eq!(e.code, crate::wire::code::TOO_FEW_SAMPLES);
     }
 }

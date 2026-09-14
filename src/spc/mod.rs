@@ -35,8 +35,8 @@ mod variables;
 
 pub use attributes::{
     g_chart, laney_p_chart, laney_u_chart, t_chart, AttributeChartPoint, CChart, GChart,
-    GChartPoint, LaneyAttributePoint, LaneyPChart, LaneyUChart, NPChart, PChart, TChart,
-    TChartPoint, UChart,
+    GChartPoint, LaneyAttributePoint, LaneyPChart, LaneyStandard, LaneyUChart, NPChart, PChart,
+    TChart, TChartPoint, UChart,
 };
 pub use chart::{
     ChartInputError, ChartPoint, ControlChart, ControlChartError, ControlLimits, Violation,

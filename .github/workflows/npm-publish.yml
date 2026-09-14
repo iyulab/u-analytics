@@ -144,6 +144,11 @@ jobs:
           e = refusal(() => m.np_chart([1, 2], 10.5))
           ok(e.code === 'count_not_whole' && e.index === null, `code=${e.code} index=${e.index}`)
 
+          // Phase II: a Phase I standard crosses as options and fixes the limits.
+          const p2 = m.laney_p_chart([[11, 170]], { p_bar: 0.0514, phi: 0.236 })
+          ok(p2.p_bar === 0.0514 && p2.points[0].out_of_control, 'Phase II uses the given standard')
+          ok(p2.points[0].z > 3, `z=${p2.points[0].z} must exceed the +3 limit`)
+
           console.log('binding behaviour gate: ok')
           EOF
           PKG_NAME="$PKG_NAME" node gate.mjs

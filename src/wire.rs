@@ -61,6 +61,54 @@ pub(crate) struct AttributeChartPointDto {
     pub(crate) cl: f64,
     pub(crate) lcl: f64,
     pub(crate) out_of_control: bool,
+    /// Standardized value -- the scale on which every limit is +/-3, so zone
+    /// run rules apply to charts whose limits vary with n.
+    pub(crate) z: Option<f64>,
+}
+
+/// Known (Phase I) parameters an attributes chart can be given.
+///
+/// One type for all four charts, checked per chart: a key a chart does not
+/// take is refused rather than ignored.
+#[derive(Deserialize, Default, Debug)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AttributeStandardDto {
+    #[serde(default)]
+    pub(crate) p_bar: Option<f64>,
+    #[serde(default)]
+    pub(crate) u_bar: Option<f64>,
+    #[serde(default)]
+    pub(crate) phi: Option<f64>,
+}
+
+impl AttributeStandardDto {
+    /// Refuses `forbidden` keys: `(name, present)`.
+    pub(crate) fn refuse(&self, chart: &str, forbidden: &[(&str, bool)]) -> Result<(), WireError> {
+        match forbidden.iter().find(|(_, present)| *present) {
+            Some((name, _)) => Err(WireError::new(
+                code::MALFORMED_INPUT,
+                None,
+                format!("options: {chart} does not take `{name}`"),
+            )),
+            None => Ok(()),
+        }
+    }
+
+    /// The Laney standard: both parts or neither.
+    pub(crate) fn laney(
+        &self,
+        center: Option<f64>,
+        center_name: &str,
+    ) -> Result<Option<crate::spc::LaneyStandard>, WireError> {
+        match (center, self.phi) {
+            (Some(center), Some(phi)) => Ok(Some(crate::spc::LaneyStandard { center, phi })),
+            (None, None) => Ok(None),
+            _ => Err(WireError::invalid_input(format!(
+                "options: `{center_name}` and `phi` are given together -- a Phase I standard \
+                 fixes both, since phi scales the error about that centre"
+            ))),
+        }
+    }
 }
 
 #[derive(Serialize, Debug)]
@@ -208,6 +256,8 @@ pub(crate) mod code {
     pub(crate) const VALUE_NOT_FINITE: &str = "value_not_finite";
     /// Fewer samples than the chart needs.
     pub(crate) const TOO_FEW_SAMPLES: &str = "too_few_samples";
+    /// A known (Phase I) parameter outside its domain.
+    pub(crate) const STANDARD_OUT_OF_RANGE: &str = "standard_out_of_range";
 }
 
 impl WireError {
@@ -255,6 +305,7 @@ impl WireError {
             ChartInputError::TooFewSamples { .. } => {
                 Self::too_few_samples(format!("{label}: {error}"))
             }
+            ChartInputError::Standard(error) => Self::chart(label, None, error),
         }
     }
 }
@@ -298,6 +349,7 @@ pub(crate) fn chart_error_code(error: &crate::spc::ControlChartError) -> &'stati
         E::NonPositiveUnits => code::UNITS_NOT_POSITIVE,
         E::SubgroupSizeOutOfRange { .. } => code::SUBGROUP_SIZE_OUT_OF_RANGE,
         E::ZeroSampleSize => code::SAMPLE_SIZE_NOT_POSITIVE,
+        E::InvalidStandard { .. } => code::STANDARD_OUT_OF_RANGE,
     }
 }
 
@@ -442,6 +494,7 @@ pub(crate) fn attribute_point_dtos(
             cl: p.cl,
             lcl: p.lcl,
             out_of_control: p.out_of_control,
+            z: p.z,
         })
         .collect()
 }
@@ -458,6 +511,7 @@ pub(crate) fn laney_point_dtos(
             cl: p.cl,
             lcl: p.lcl,
             out_of_control: p.out_of_control,
+            z: p.z,
         })
         .collect()
 }
@@ -493,10 +547,23 @@ pub(crate) fn xbar_r_dto(
     })
 }
 
-pub(crate) fn p_chart_dto(samples: &[(u64, u64)]) -> Result<PChartDto, WireError> {
+pub(crate) fn p_chart_dto(
+    samples: &[(u64, u64)],
+    standard: &AttributeStandardDto,
+) -> Result<PChartDto, WireError> {
     use crate::spc::PChart;
 
-    let mut chart = PChart::new();
+    standard.refuse(
+        "p_chart",
+        &[
+            ("u_bar", standard.u_bar.is_some()),
+            ("phi", standard.phi.is_some()),
+        ],
+    )?;
+    let mut chart = match standard.p_bar {
+        Some(p) => PChart::with_center(p).map_err(|e| WireError::chart("options", None, &e))?,
+        None => PChart::new(),
+    };
     add_rows(samples, "samples", |&(d, n)| chart.add_sample(d, n))?;
     let p_bar = chart
         .p_bar()
@@ -508,9 +575,14 @@ pub(crate) fn p_chart_dto(samples: &[(u64, u64)]) -> Result<PChartDto, WireError
     })
 }
 
-pub(crate) fn laney_p_dto(samples: &[(u64, u64)]) -> Result<LaneyPChartDto, WireError> {
-    let chart =
-        crate::spc::laney_p_chart(samples).map_err(|e| WireError::chart_input("samples", &e))?;
+pub(crate) fn laney_p_dto(
+    samples: &[(u64, u64)],
+    standard: &AttributeStandardDto,
+) -> Result<LaneyPChartDto, WireError> {
+    standard.refuse("laney_p_chart", &[("u_bar", standard.u_bar.is_some())])?;
+    let laney = standard.laney(standard.p_bar, "p_bar")?;
+    let chart = crate::spc::laney_p_chart(samples, laney)
+        .map_err(|e| WireError::chart_input("samples", &e))?;
     Ok(LaneyPChartDto {
         p_bar: chart.p_bar,
         phi: chart.phi,
@@ -1216,6 +1288,7 @@ mod input_error_tests {
                 max: 25,
             },
             E::ZeroSampleSize,
+            E::InvalidStandard { parameter: "phi" },
         ];
         let codes: std::collections::HashSet<_> = all.iter().map(chart_error_code).collect();
         assert_eq!(codes.len(), all.len(), "codes must tell the reasons apart");
@@ -1229,5 +1302,44 @@ mod input_error_tests {
             serde_json::to_value(&e).expect("serializable"),
             json!({ "code": "count_not_whole", "index": 4, "message": "defects[4]: nope" })
         );
+    }
+
+    fn standard(v: serde_json::Value) -> AttributeStandardDto {
+        serde_json::from_value(v).expect("valid options")
+    }
+
+    #[test]
+    fn phase_two_options_reach_the_chart_and_are_checked() {
+        let samples = [(11_u64, 170_u64)];
+        let d = laney_p_dto(
+            &samples,
+            &standard(json!({ "p_bar": 0.0514, "phi": 0.236 })),
+        )
+        .expect("one sample with a standard");
+        assert_eq!((d.p_bar, d.phi), (0.0514, 0.236));
+        assert!(d.points[0].out_of_control);
+        assert!(d.points[0].z.expect("scaled") > 3.0);
+
+        let d = p_chart_dto(&[(2, 100), (20, 100)], &standard(json!({ "p_bar": 0.05 })))
+            .expect("valid");
+        assert_eq!(d.p_bar, 0.05);
+
+        // Half a Laney standard is refused, not completed by estimation.
+        let (c, _, m) = err(laney_p_dto(&samples, &standard(json!({ "p_bar": 0.05 }))));
+        assert_eq!(c, code::INVALID_INPUT, "{m}");
+        // A key the chart does not take is refused, not ignored.
+        let (c, _, m) = err(p_chart_dto(&samples, &standard(json!({ "phi": 1.0 }))));
+        assert_eq!(c, code::MALFORMED_INPUT, "{m}");
+        assert!(m.contains("phi"), "{m}");
+        // Outside its domain.
+        let (c, i, _) = err(p_chart_dto(&samples, &standard(json!({ "p_bar": 1.5 }))));
+        assert_eq!((c, i), (code::STANDARD_OUT_OF_RANGE, None));
+        let (c, _, _) = err(laney_p_dto(
+            &samples,
+            &standard(json!({ "p_bar": 0.05, "phi": -2.0 })),
+        ));
+        assert_eq!(c, code::STANDARD_OUT_OF_RANGE);
+        // Unknown option keys are refused by the schema.
+        assert!(serde_json::from_value::<AttributeStandardDto>(json!({ "pbar": 0.1 })).is_err());
     }
 }

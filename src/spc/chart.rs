@@ -192,6 +192,11 @@ pub enum ControlChartError {
     },
     /// A sample size of zero: there is nothing to take a proportion of.
     ZeroSampleSize,
+    /// A known (Phase I) parameter outside its domain.
+    InvalidStandard {
+        /// The parameter's name (`p_bar`, `u_bar`, `phi`).
+        parameter: &'static str,
+    },
 }
 
 impl fmt::Display for ControlChartError {
@@ -201,6 +206,10 @@ impl fmt::Display for ControlChartError {
                 write!(f, "subgroup size must be {min}..={max}, got {got}")
             }
             ControlChartError::ZeroSampleSize => write!(f, "sample size must be at least 1"),
+            ControlChartError::InvalidStandard { parameter } => write!(
+                f,
+                "{parameter}: outside its domain (p_bar in (0, 1), u_bar > 0, phi >= 0, all finite)"
+            ),
             ControlChartError::SampleLengthMismatch { expected, got } => {
                 write!(f, "sample has {got} values, expected {expected}")
             }
@@ -245,6 +254,9 @@ pub enum ChartInputError {
         /// Samples required.
         min: usize,
     },
+    /// A known (Phase I) parameter given with the samples is invalid
+    /// ([`ControlChartError::InvalidStandard`]).
+    Standard(ControlChartError),
 }
 
 impl fmt::Display for ChartInputError {
@@ -254,6 +266,7 @@ impl fmt::Display for ChartInputError {
             ChartInputError::TooFewSamples { got, min } => {
                 write!(f, "at least {min} samples are needed, got {got}")
             }
+            ChartInputError::Standard(error) => error.fmt(f),
         }
     }
 }
@@ -261,7 +274,7 @@ impl fmt::Display for ChartInputError {
 impl std::error::Error for ChartInputError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            ChartInputError::Sample { error, .. } => Some(error),
+            ChartInputError::Sample { error, .. } | ChartInputError::Standard(error) => Some(error),
             ChartInputError::TooFewSamples { .. } => None,
         }
     }

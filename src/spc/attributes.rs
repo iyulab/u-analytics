@@ -66,6 +66,53 @@ pub struct AttributeChartPoint {
     pub lcl: f64,
     /// Whether this point is out of control (beyond UCL or below LCL).
     pub out_of_control: bool,
+    /// The point on the standardized scale, `(value − cl) / σᵢ`, where `σᵢ` is
+    /// this point's own standard error (the limits are `cl ± 3σᵢ`, before the
+    /// lower one is clamped at 0). `None` when `σᵢ` is 0.
+    ///
+    /// When sample sizes vary the limits vary with them, so zone-based run
+    /// rules have no single set of zones on the original scale. On this scale
+    /// the limits are ±3 for every point: pass these values to
+    /// [`RunRule`](crate::spc::RunRule)s with limits `(3, 0, −3)` — the
+    /// standardized control chart (Montgomery 2019, §7.2.2).
+    pub z: Option<f64>,
+}
+
+/// A point whose limits are `cl ± 3·sigma` (lower one clamped at 0).
+fn attribute_point(index: usize, value: f64, cl: f64, sigma: f64) -> AttributeChartPoint {
+    let ucl = cl + 3.0 * sigma;
+    let lcl = (cl - 3.0 * sigma).max(0.0);
+    AttributeChartPoint {
+        index,
+        value,
+        ucl,
+        cl,
+        lcl,
+        out_of_control: value > ucl || value < lcl,
+        z: standardized(value, cl, sigma),
+    }
+}
+
+fn standardized(value: f64, cl: f64, sigma: f64) -> Option<f64> {
+    (sigma > 0.0 && sigma.is_finite()).then(|| (value - cl) / sigma)
+}
+
+/// A known proportion: finite and strictly inside (0, 1).
+fn check_proportion_standard(p: f64, parameter: &'static str) -> Result<f64, ControlChartError> {
+    if p.is_finite() && p > 0.0 && p < 1.0 {
+        Ok(p)
+    } else {
+        Err(ControlChartError::InvalidStandard { parameter })
+    }
+}
+
+/// A known rate: finite and strictly positive.
+fn check_rate_standard(u: f64, parameter: &'static str) -> Result<f64, ControlChartError> {
+    if u.is_finite() && u > 0.0 {
+        Ok(u)
+    } else {
+        Err(ControlChartError::InvalidStandard { parameter })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +129,15 @@ pub struct AttributeChartPoint {
 /// - CL = p-bar = total_defectives / total_inspected
 /// - UCL_i = p-bar + 3 * sqrt(p-bar * (1 - p-bar) / n_i)
 /// - LCL_i = max(0, p-bar - 3 * sqrt(p-bar * (1 - p-bar) / n_i))
+///
+/// # Phase I and Phase II
+///
+/// [`PChart::new`] estimates p-bar from the samples it is given (Phase I).
+/// To judge later samples against an established process, build the chart
+/// with [`PChart::with_center`]: every limit then uses that p-bar with each
+/// sample's own n. Re-estimating from Phase I and Phase II samples together
+/// would let a shift in Phase II pull the centre toward itself and widen its
+/// own limits.
 ///
 /// # Examples
 ///
@@ -109,16 +165,34 @@ pub struct PChart {
     chart_points: Vec<AttributeChartPoint>,
     /// Overall proportion defective (p-bar).
     p_bar: Option<f64>,
+    /// A known centre line; `None` estimates it from the samples.
+    center: Option<f64>,
 }
 
 impl PChart {
-    /// Create a new P chart.
+    /// Create a new P chart that estimates p-bar from its samples (Phase I).
     pub fn new() -> Self {
         Self {
             samples: Vec::new(),
             chart_points: Vec::new(),
             p_bar: None,
+            center: None,
         }
+    }
+
+    /// Create a P chart whose centre line is a known p-bar, typically from a
+    /// Phase I study (Phase II).
+    ///
+    /// # Errors
+    ///
+    /// [`ControlChartError::InvalidStandard`] unless `p_bar` is finite and
+    /// strictly between 0 and 1 — at 0 or 1 every limit collapses onto the
+    /// centre line.
+    pub fn with_center(p_bar: f64) -> Result<Self, ControlChartError> {
+        Ok(Self {
+            center: Some(check_proportion_standard(p_bar, "p_bar")?),
+            ..Self::new()
+        })
     }
 
     /// Add a sample with the number of defective items and the total sample size.
@@ -141,7 +215,9 @@ impl PChart {
         Ok(())
     }
 
-    /// Get the overall proportion defective (p-bar), or `None` if no data.
+    /// The centre line in use — the known p-bar for a chart built
+    /// [`with_center`](Self::with_center), otherwise the estimate — or `None`
+    /// if no data.
     pub fn p_bar(&self) -> Option<f64> {
         self.p_bar
     }
@@ -164,9 +240,11 @@ impl PChart {
             return;
         }
 
-        let total_defectives: u64 = self.samples.iter().map(|&(d, _)| d).sum();
-        let total_inspected: u64 = self.samples.iter().map(|&(_, n)| n).sum();
-        let p_bar = total_defectives as f64 / total_inspected as f64;
+        let p_bar = self.center.unwrap_or_else(|| {
+            let total_defectives: u64 = self.samples.iter().map(|&(d, _)| d).sum();
+            let total_inspected: u64 = self.samples.iter().map(|&(_, n)| n).sum();
+            total_defectives as f64 / total_inspected as f64
+        });
         self.p_bar = Some(p_bar);
 
         self.chart_points = self
@@ -175,19 +253,8 @@ impl PChart {
             .enumerate()
             .map(|(i, &(defectives, sample_size))| {
                 let p = defectives as f64 / sample_size as f64;
-                let n = sample_size as f64;
-                let sigma = (p_bar * (1.0 - p_bar) / n).sqrt();
-                let ucl = p_bar + 3.0 * sigma;
-                let lcl = (p_bar - 3.0 * sigma).max(0.0);
-
-                AttributeChartPoint {
-                    index: i,
-                    value: p,
-                    ucl,
-                    cl: p_bar,
-                    lcl,
-                    out_of_control: p > ucl || p < lcl,
-                }
+                let sigma = (p_bar * (1.0 - p_bar) / sample_size as f64).sqrt();
+                attribute_point(i, p, p_bar, sigma)
             })
             .collect();
     }
@@ -299,27 +366,15 @@ impl NPChart {
 
         let np_bar = n * p_bar;
         let sigma = (n * p_bar * (1.0 - p_bar)).sqrt();
-        let ucl = np_bar + 3.0 * sigma;
-        let lcl = (np_bar - 3.0 * sigma).max(0.0);
-
-        self.limits = Some((ucl, np_bar, lcl));
 
         self.chart_points = self
             .defective_counts
             .iter()
             .enumerate()
-            .map(|(i, &count)| {
-                let value = count as f64;
-                AttributeChartPoint {
-                    index: i,
-                    value,
-                    ucl,
-                    cl: np_bar,
-                    lcl,
-                    out_of_control: value > ucl || value < lcl,
-                }
-            })
+            .map(|(i, &count)| attribute_point(i, count as f64, np_bar, sigma))
             .collect();
+        let first = &self.chart_points[0];
+        self.limits = Some((first.ucl, np_bar, first.lcl));
     }
 }
 
@@ -393,27 +448,15 @@ impl CChart {
         let total: u64 = self.defect_counts.iter().sum();
         let c_bar = total as f64 / self.defect_counts.len() as f64;
         let sigma = c_bar.sqrt();
-        let ucl = c_bar + 3.0 * sigma;
-        let lcl = (c_bar - 3.0 * sigma).max(0.0);
-
-        self.limits = Some((ucl, c_bar, lcl));
 
         self.chart_points = self
             .defect_counts
             .iter()
             .enumerate()
-            .map(|(i, &count)| {
-                let value = count as f64;
-                AttributeChartPoint {
-                    index: i,
-                    value,
-                    ucl,
-                    cl: c_bar,
-                    lcl,
-                    out_of_control: value > ucl || value < lcl,
-                }
-            })
+            .map(|(i, &count)| attribute_point(i, count as f64, c_bar, sigma))
             .collect();
+        let first = &self.chart_points[0];
+        self.limits = Some((first.ucl, c_bar, first.lcl));
     }
 }
 
@@ -439,6 +482,9 @@ impl Default for CChart {
 /// - UCL_i = u-bar + 3 * sqrt(u-bar / n_i)
 /// - LCL_i = max(0, u-bar - 3 * sqrt(u-bar / n_i))
 ///
+/// A known u-bar from a Phase I study is given with [`UChart::with_center`];
+/// see [`PChart`] for why it is not re-estimated from later samples.
+///
 /// # Reference
 ///
 /// Montgomery, D.C. (2019). *Introduction to Statistical Quality Control*, 8th ed.,
@@ -450,16 +496,32 @@ pub struct UChart {
     chart_points: Vec<AttributeChartPoint>,
     /// Overall defect rate (u-bar).
     u_bar: Option<f64>,
+    /// A known centre line; `None` estimates it from the samples.
+    center: Option<f64>,
 }
 
 impl UChart {
-    /// Create a new U chart.
+    /// Create a new U chart that estimates u-bar from its samples (Phase I).
     pub fn new() -> Self {
         Self {
             samples: Vec::new(),
             chart_points: Vec::new(),
             u_bar: None,
+            center: None,
         }
+    }
+
+    /// Create a U chart whose centre line is a known u-bar (Phase II).
+    ///
+    /// # Errors
+    ///
+    /// [`ControlChartError::InvalidStandard`] unless `u_bar` is finite and
+    /// positive.
+    pub fn with_center(u_bar: f64) -> Result<Self, ControlChartError> {
+        Ok(Self {
+            center: Some(check_rate_standard(u_bar, "u_bar")?),
+            ..Self::new()
+        })
     }
 
     /// Add a sample with the number of defects and the number of units inspected.
@@ -482,7 +544,9 @@ impl UChart {
         Ok(())
     }
 
-    /// Get the overall defect rate (u-bar), or `None` if no data.
+    /// The centre line in use — the known u-bar for a chart built
+    /// [`with_center`](Self::with_center), otherwise the estimate — or `None`
+    /// if no data.
     pub fn u_bar(&self) -> Option<f64> {
         self.u_bar
     }
@@ -505,9 +569,11 @@ impl UChart {
             return;
         }
 
-        let total_defects: u64 = self.samples.iter().map(|&(d, _)| d).sum();
-        let total_units: f64 = self.samples.iter().map(|&(_, n)| n).sum();
-        let u_bar = total_defects as f64 / total_units;
+        let u_bar = self.center.unwrap_or_else(|| {
+            let total_defects: u64 = self.samples.iter().map(|&(d, _)| d).sum();
+            let total_units: f64 = self.samples.iter().map(|&(_, n)| n).sum();
+            total_defects as f64 / total_units
+        });
         self.u_bar = Some(u_bar);
 
         self.chart_points = self
@@ -515,19 +581,7 @@ impl UChart {
             .iter()
             .enumerate()
             .map(|(i, &(defects, units))| {
-                let u = defects as f64 / units;
-                let sigma = (u_bar / units).sqrt();
-                let ucl = u_bar + 3.0 * sigma;
-                let lcl = (u_bar - 3.0 * sigma).max(0.0);
-
-                AttributeChartPoint {
-                    index: i,
-                    value: u,
-                    ucl,
-                    cl: u_bar,
-                    lcl,
-                    out_of_control: u > ucl || u < lcl,
-                }
+                attribute_point(i, defects as f64 / units, u_bar, (u_bar / units).sqrt())
             })
             .collect();
     }
@@ -567,6 +621,25 @@ pub struct LaneyAttributePoint {
     pub lcl: f64,
     /// Whether this point lies beyond its control limits.
     pub out_of_control: bool,
+    /// The point on the standardized scale, `(value − cl) / (φ·σᵢ)` — the
+    /// scale on which every limit is ±3. `None` when `φ·σᵢ` is 0. See
+    /// [`AttributeChartPoint::z`] for using it with zone-based run rules.
+    pub z: Option<f64>,
+}
+
+/// A centre line and φ established by a Phase I Laney study, to judge later
+/// samples against (Phase II).
+///
+/// Both come from the same study: φ scales the standard error about *that*
+/// centre, so re-estimating either one from Phase II data would let a shift
+/// pull the chart toward itself.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LaneyStandard {
+    /// p̄ for a P′ chart (strictly between 0 and 1), ū for a U′ chart
+    /// (positive).
+    pub center: f64,
+    /// The sigma-inflation factor (finite, ≥ 0).
+    pub phi: f64,
 }
 
 /// Laney P' chart result.
@@ -575,10 +648,12 @@ pub struct LaneyAttributePoint {
 /// and the per-subgroup chart points with adjusted limits.
 #[derive(Debug, Clone)]
 pub struct LaneyPChart {
-    /// Overall proportion defective (p̄ = Σdᵢ / Σnᵢ).
+    /// Proportion defective at the centre line: estimated (p̄ = Σdᵢ / Σnᵢ), or
+    /// the [`LaneyStandard::center`] given.
     pub p_bar: f64,
-    /// Overdispersion/underdispersion correction factor φ = MR̄ / d₂.
-    /// φ = 1.0 means no correction needed (ordinary P chart).
+    /// Overdispersion/underdispersion correction factor φ = MR̄ / d₂, or the
+    /// [`LaneyStandard::phi`] given. φ = 1.0 means no correction (ordinary P
+    /// chart).
     pub phi: f64,
     /// Per-subgroup chart points.
     pub points: Vec<LaneyAttributePoint>,
@@ -590,13 +665,77 @@ pub struct LaneyPChart {
 /// and the per-subgroup chart points with adjusted limits.
 #[derive(Debug, Clone)]
 pub struct LaneyUChart {
-    /// Overall defect rate (ū = Σdefectsᵢ / Σunitsᵢ).
+    /// Defect rate at the centre line: estimated (ū = Σdefectsᵢ / Σunitsᵢ), or
+    /// the [`LaneyStandard::center`] given.
     pub u_bar: f64,
-    /// Overdispersion/underdispersion correction factor φ = MR̄ / d₂.
-    /// φ = 1.0 means no correction needed (ordinary U chart).
+    /// Overdispersion/underdispersion correction factor φ = MR̄ / d₂, or the
+    /// [`LaneyStandard::phi`] given. φ = 1.0 means no correction (ordinary U
+    /// chart).
     pub phi: f64,
     /// Per-subgroup chart points.
     pub points: Vec<LaneyAttributePoint>,
+}
+
+/// d₂ for a moving range of two observations.
+const LANEY_D2: f64 = 1.128;
+
+/// φ = MR̄ / d₂ over the standardized statistics `(value − center) / σᵢ`.
+/// `rows` are `(value, σᵢ)`; φ is 0 when any σᵢ is 0 (no variation to scale).
+fn laney_phi(rows: &[(f64, f64)], center: f64) -> f64 {
+    if rows.iter().any(|&(_, sigma)| sigma <= 0.0) {
+        return 0.0;
+    }
+    let z: Vec<f64> = rows.iter().map(|&(v, s)| (v - center) / s).collect();
+    let mr_bar = z.windows(2).map(|w| (w[1] - w[0]).abs()).sum::<f64>() / (z.len() - 1) as f64;
+    mr_bar / LANEY_D2
+}
+
+/// Points with limits `center ± 3·φ·σᵢ` (lower clamped at 0).
+fn laney_points(rows: &[(f64, f64)], center: f64, phi: f64) -> Vec<LaneyAttributePoint> {
+    rows.iter()
+        .enumerate()
+        .map(|(index, &(value, sigma_i))| {
+            let sigma = phi * sigma_i;
+            let ucl = center + 3.0 * sigma;
+            let lcl = (center - 3.0 * sigma).max(0.0);
+            LaneyAttributePoint {
+                index,
+                value,
+                ucl,
+                cl: center,
+                lcl,
+                out_of_control: value > ucl || value < lcl,
+                z: standardized(value, center, sigma),
+            }
+        })
+        .collect()
+}
+
+/// Validates a Laney standard and the sample count it implies: estimating φ
+/// needs `LANEY_MIN_SAMPLES`, a given φ needs one sample.
+fn laney_preconditions(
+    n: usize,
+    standard: Option<LaneyStandard>,
+    check_center: fn(f64, &'static str) -> Result<f64, ControlChartError>,
+    center_name: &'static str,
+) -> Result<(), ChartInputError> {
+    if let Some(s) = standard {
+        check_center(s.center, center_name).map_err(ChartInputError::Standard)?;
+        if !(s.phi.is_finite() && s.phi >= 0.0) {
+            return Err(ChartInputError::Standard(
+                ControlChartError::InvalidStandard { parameter: "phi" },
+            ));
+        }
+    }
+    let min = if standard.is_some() {
+        1
+    } else {
+        LANEY_MIN_SAMPLES
+    };
+    if n < min {
+        return Err(ChartInputError::TooFewSamples { got: n, min });
+    }
+    Ok(())
 }
 
 /// Compute the Laney P' chart from `(defective_count, sample_size)` pairs.
@@ -614,29 +753,33 @@ pub struct LaneyUChart {
 /// 5. UCLᵢ = p̄ + 3·φ·√(p̄·(1−p̄)/nᵢ)
 /// 6. LCLᵢ = max(0, p̄ − 3·φ·√(p̄·(1−p̄)/nᵢ))
 ///
+/// With `standard` given (Phase II), steps 1–4 are skipped: p̄ and φ are the
+/// Phase I values and every limit uses them with the sample's own nᵢ.
+///
 /// When p̄ is 0 or 1 there is no variation to scale (σ = 0): the chart comes
 /// back with φ = 0 and every limit on the centre line.
 ///
 /// # Errors
 ///
-/// - [`ChartInputError::TooFewSamples`] for fewer than 3 samples (φ needs at
-///   least two moving ranges).
+/// - [`ChartInputError::TooFewSamples`] for fewer than 3 samples when φ is
+///   estimated (it needs at least two moving ranges), or none at all with a
+///   standard.
 /// - [`ChartInputError::Sample`] with
 ///   [`ControlChartError::ZeroSampleSize`] or
 ///   [`ControlChartError::DefectivesExceedSampleSize`] for the first sample
 ///   that has no proportion, with its position.
+/// - [`ChartInputError::Standard`] for a standard p̄ outside (0, 1) or a φ that
+///   is negative or not finite.
 ///
 /// # Reference
 ///
 /// Laney, D.B. (2002). "Improved control charts for attributes",
 /// *Quality Engineering* 14(4), pp. 531-537.
-pub fn laney_p_chart(samples: &[(u64, u64)]) -> Result<LaneyPChart, ChartInputError> {
-    if samples.len() < LANEY_MIN_SAMPLES {
-        return Err(ChartInputError::TooFewSamples {
-            got: samples.len(),
-            min: LANEY_MIN_SAMPLES,
-        });
-    }
+pub fn laney_p_chart(
+    samples: &[(u64, u64)],
+    standard: Option<LaneyStandard>,
+) -> Result<LaneyPChart, ChartInputError> {
+    laney_preconditions(samples.len(), standard, check_proportion_standard, "p_bar")?;
     // Checked per sample, not only in total: one sample with nothing inspected
     // makes its z-score NaN, and a NaN phi puts every limit at NaN -- where no
     // point compares as out of control and the chart reads as in control.
@@ -646,77 +789,26 @@ pub fn laney_p_chart(samples: &[(u64, u64)]) -> Result<LaneyPChart, ChartInputEr
         }
     }
 
-    let total_defectives: u64 = samples.iter().map(|&(d, _)| d).sum();
-    let total_inspected: u64 = samples.iter().map(|&(_, n)| n).sum();
-
-    let p_bar = total_defectives as f64 / total_inspected as f64;
-    // Degenerate: σ = 0 means all proportions are exactly p̄ — φ computation is undefined.
+    let p_bar = standard.map_or_else(
+        || {
+            let total_defectives: u64 = samples.iter().map(|&(d, _)| d).sum();
+            let total_inspected: u64 = samples.iter().map(|&(_, n)| n).sum();
+            total_defectives as f64 / total_inspected as f64
+        },
+        |s| s.center,
+    );
     let base_var = p_bar * (1.0 - p_bar);
-    if base_var <= 0.0 {
-        // φ = 0 (no variability), build chart with zero-width limits.
-        let points = samples
-            .iter()
-            .enumerate()
-            .map(|(i, &(d, n))| {
-                let value = d as f64 / n as f64;
-                LaneyAttributePoint {
-                    index: i,
-                    value,
-                    ucl: p_bar,
-                    cl: p_bar,
-                    lcl: p_bar,
-                    out_of_control: false,
-                }
-            })
-            .collect();
-        return Ok(LaneyPChart {
-            p_bar,
-            phi: 0.0,
-            points,
-        });
-    }
-
-    // Step 2: standardized proportions.
-    let z_scores: Vec<f64> = samples
+    let rows: Vec<(f64, f64)> = samples
         .iter()
-        .map(|&(d, n)| {
-            let p_i = d as f64 / n as f64;
-            let sigma_i = (base_var / n as f64).sqrt();
-            (p_i - p_bar) / sigma_i
-        })
+        .map(|&(d, n)| (d as f64 / n as f64, (base_var / n as f64).sqrt()))
         .collect();
+    let phi = standard.map_or_else(|| laney_phi(&rows, p_bar), |s| s.phi);
 
-    // Step 3: moving ranges of z-scores.
-    let mr_bar = {
-        let mrs: Vec<f64> = z_scores.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
-        mrs.iter().sum::<f64>() / mrs.len() as f64
-    };
-
-    // Step 4: φ = MR̄ / d₂ (d₂ = 1.128 for subgroup of 2).
-    const D2: f64 = 1.128;
-    let phi = mr_bar / D2;
-
-    // Steps 5-6: build chart points.
-    let points = samples
-        .iter()
-        .enumerate()
-        .map(|(i, &(d, n))| {
-            let p_i = d as f64 / n as f64;
-            let sigma_i = (base_var / n as f64).sqrt();
-            let ucl = p_bar + 3.0 * phi * sigma_i;
-            let lcl = (p_bar - 3.0 * phi * sigma_i).max(0.0);
-            LaneyAttributePoint {
-                index: i,
-                value: p_i,
-                ucl,
-                cl: p_bar,
-                lcl,
-                out_of_control: p_i > ucl || p_i < lcl,
-            }
-        })
-        .collect();
-
-    Ok(LaneyPChart { p_bar, phi, points })
+    Ok(LaneyPChart {
+        p_bar,
+        phi,
+        points: laney_points(&rows, p_bar, phi),
+    })
 }
 
 /// Compute the Laney U' chart from `(defect_count, inspection_units)` pairs.
@@ -734,104 +826,55 @@ pub fn laney_p_chart(samples: &[(u64, u64)]) -> Result<LaneyPChart, ChartInputEr
 /// 5. UCLᵢ = ū + 3·φ·√(ū / unitsᵢ)
 /// 6. LCLᵢ = max(0, ū − 3·φ·√(ū / unitsᵢ))
 ///
+/// With `standard` given (Phase II), steps 1–4 are skipped. When ū is 0 there
+/// is no variation to scale: φ = 0 and every limit is 0.
+///
 /// # Errors
 ///
-/// - [`ChartInputError::TooFewSamples`] for fewer than 3 samples.
+/// - [`ChartInputError::TooFewSamples`] for fewer than 3 samples when φ is
+///   estimated, or none at all with a standard.
 /// - [`ChartInputError::Sample`] with [`ControlChartError::NonPositiveUnits`]
 ///   for the first sample whose units are not a positive, finite number, with
 ///   its position.
+/// - [`ChartInputError::Standard`] for a standard ū that is not positive or a
+///   φ that is negative or not finite.
 ///
 /// # Reference
 ///
 /// Laney, D.B. (2002). "Improved control charts for attributes",
 /// *Quality Engineering* 14(4), pp. 531-537.
-pub fn laney_u_chart(samples: &[(u64, f64)]) -> Result<LaneyUChart, ChartInputError> {
-    if samples.len() < LANEY_MIN_SAMPLES {
-        return Err(ChartInputError::TooFewSamples {
-            got: samples.len(),
-            min: LANEY_MIN_SAMPLES,
-        });
-    }
-
+pub fn laney_u_chart(
+    samples: &[(u64, f64)],
+    standard: Option<LaneyStandard>,
+) -> Result<LaneyUChart, ChartInputError> {
+    laney_preconditions(samples.len(), standard, check_rate_standard, "u_bar")?;
     for (index, &(_, units)) in samples.iter().enumerate() {
         if let Err(error) = check_units(units) {
             return Err(ChartInputError::Sample { index, error });
         }
     }
 
-    let total_defects: u64 = samples.iter().map(|&(d, _)| d).sum();
-    // Every term is positive and finite, so the total is too.
-    let total_units: f64 = samples.iter().map(|&(_, n)| n).sum();
-
-    let u_bar = total_defects as f64 / total_units;
-
-    // Degenerate: ū = 0 means no defects observed — φ computation is undefined.
-    if u_bar <= 0.0 {
-        let points = samples
-            .iter()
-            .enumerate()
-            .map(|(i, &(d, n))| {
-                let value = d as f64 / n;
-                LaneyAttributePoint {
-                    index: i,
-                    value,
-                    ucl: 0.0,
-                    cl: 0.0,
-                    lcl: 0.0,
-                    out_of_control: false,
-                }
-            })
-            .collect();
-        return Ok(LaneyUChart {
-            u_bar: 0.0,
-            phi: 0.0,
-            points,
-        });
-    }
-
-    // Step 2: standardized defect rates.
-    let z_scores: Vec<f64> = samples
+    let u_bar = standard.map_or_else(
+        || {
+            let total_defects: u64 = samples.iter().map(|&(d, _)| d).sum();
+            // Every term is positive and finite, so the total is too.
+            let total_units: f64 = samples.iter().map(|&(_, n)| n).sum();
+            total_defects as f64 / total_units
+        },
+        |s| s.center,
+    );
+    let rows: Vec<(f64, f64)> = samples
         .iter()
-        .map(|&(d, n)| {
-            let u_i = d as f64 / n;
-            let sigma_i = (u_bar / n).sqrt();
-            (u_i - u_bar) / sigma_i
-        })
+        .map(|&(d, n)| (d as f64 / n, (u_bar / n).sqrt()))
         .collect();
+    let phi = standard.map_or_else(|| laney_phi(&rows, u_bar), |s| s.phi);
 
-    // Step 3: moving ranges.
-    let mr_bar = {
-        let mrs: Vec<f64> = z_scores.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
-        mrs.iter().sum::<f64>() / mrs.len() as f64
-    };
-
-    // Step 4: φ = MR̄ / d₂.
-    const D2: f64 = 1.128;
-    let phi = mr_bar / D2;
-
-    // Steps 5-6: build chart points.
-    let points = samples
-        .iter()
-        .enumerate()
-        .map(|(i, &(d, n))| {
-            let u_i = d as f64 / n;
-            let sigma_i = (u_bar / n).sqrt();
-            let ucl = u_bar + 3.0 * phi * sigma_i;
-            let lcl = (u_bar - 3.0 * phi * sigma_i).max(0.0);
-            LaneyAttributePoint {
-                index: i,
-                value: u_i,
-                ucl,
-                cl: u_bar,
-                lcl,
-                out_of_control: u_i > ucl || u_i < lcl,
-            }
-        })
-        .collect();
-
-    Ok(LaneyUChart { u_bar, phi, points })
+    Ok(LaneyUChart {
+        u_bar,
+        phi,
+        points: laney_points(&rows, u_bar, phi),
+    })
 }
-
 // ---------------------------------------------------------------------------
 // G Chart (Geometric — inter-defect conforming count)
 // ---------------------------------------------------------------------------
@@ -1415,7 +1458,7 @@ mod tests {
     #[test]
     fn laney_p_basic() {
         let samples: Vec<(u64, u64)> = (0..10).map(|i| (i % 5 + 2, 200)).collect();
-        let chart = laney_p_chart(&samples).expect("valid samples");
+        let chart = laney_p_chart(&samples, None).expect("valid samples");
         assert!(chart.phi > 0.0);
         assert!(chart.p_bar > 0.0 && chart.p_bar < 1.0);
         assert_eq!(chart.points.len(), 10);
@@ -1425,7 +1468,7 @@ mod tests {
     fn laney_p_constant_proportion_phi_near_zero() {
         // All samples identical → all z-scores = 0 → MR = 0 → phi = 0
         let samples: Vec<(u64, u64)> = vec![(10, 1000); 20];
-        let chart = laney_p_chart(&samples).expect("valid samples");
+        let chart = laney_p_chart(&samples, None).expect("valid samples");
         assert!((chart.p_bar - 0.01).abs() < 1e-10);
         assert!(chart.phi >= 0.0);
     }
@@ -1433,7 +1476,7 @@ mod tests {
     #[test]
     fn laney_p_ucl_above_lcl() {
         let samples: Vec<(u64, u64)> = vec![(5, 100), (8, 100), (3, 100), (6, 100), (4, 100)];
-        let chart = laney_p_chart(&samples).expect("valid samples");
+        let chart = laney_p_chart(&samples, None).expect("valid samples");
         for p in &chart.points {
             assert!(p.ucl >= p.lcl);
             assert!((p.cl - chart.p_bar).abs() < 1e-10);
@@ -1444,7 +1487,7 @@ mod tests {
     fn laney_p_insufficient_data() {
         let samples: Vec<(u64, u64)> = vec![(2, 100), (3, 100)];
         assert_eq!(
-            laney_p_chart(&samples).unwrap_err(),
+            laney_p_chart(&samples, None).unwrap_err(),
             ChartInputError::TooFewSamples { got: 2, min: 3 }
         );
     }
@@ -1455,7 +1498,7 @@ mod tests {
         // a number, so phi and every limit become NaN, no point compares as out
         // of control, and the chart reads as in control.
         assert_eq!(
-            laney_p_chart(&[(3, 100), (0, 0), (4, 100), (2, 100)]).unwrap_err(),
+            laney_p_chart(&[(3, 100), (0, 0), (4, 100), (2, 100)], None).unwrap_err(),
             ChartInputError::Sample {
                 index: 1,
                 error: ControlChartError::ZeroSampleSize
@@ -1464,7 +1507,7 @@ mod tests {
         // More defectives than inspected is not a proportion either — and the
         // position reported is that sample's, not the first sample's.
         assert_eq!(
-            laney_p_chart(&[(3, 100), (4, 100), (12, 10), (2, 100)]).unwrap_err(),
+            laney_p_chart(&[(3, 100), (4, 100), (12, 10), (2, 100)], None).unwrap_err(),
             ChartInputError::Sample {
                 index: 2,
                 error: ControlChartError::DefectivesExceedSampleSize {
@@ -1475,24 +1518,146 @@ mod tests {
         );
     }
 
+    // --- Phase I / Phase II ---
+
+    #[test]
+    fn laney_p_phase_two_judges_a_point_against_phase_one() {
+        // Phase I: p̄ = 0.0514, φ = 0.236. A Phase II sample of 11 / 170
+        // (p = 0.0647) sits outside UCL = p̄ + 3·φ·√(p̄(1−p̄)/170) ≈ 0.0634.
+        let standard = LaneyStandard {
+            center: 0.0514,
+            phi: 0.236,
+        };
+        let chart = laney_p_chart(&[(11, 170)], Some(standard)).expect("one sample suffices");
+        assert_eq!(
+            (chart.p_bar, chart.phi),
+            (0.0514, 0.236),
+            "the standard, not an estimate"
+        );
+        let p = &chart.points[0];
+        let expected_ucl = 0.0514 + 3.0 * 0.236 * (0.0514 * (1.0 - 0.0514) / 170.0_f64).sqrt();
+        assert!((p.ucl - expected_ucl).abs() < 1e-15);
+        assert!((p.ucl - 0.0634).abs() < 5e-5, "ucl = {}", p.ucl);
+        assert!(p.out_of_control);
+    }
+
+    #[test]
+    fn re_estimating_across_phases_lets_a_shift_widen_its_own_limits() {
+        // Negative control for the test above: pooling a shifted Phase II with
+        // Phase I moves the centre toward the shift and loosens the verdict.
+        let phase_one: Vec<(u64, u64)> = [(8, 160), (9, 170), (7, 150), (10, 180), (8, 165)].into();
+        let pooled_input: Vec<(u64, u64)> = phase_one
+            .iter()
+            .copied()
+            .chain([(30, 170), (32, 175)])
+            .collect();
+        let p1 = laney_p_chart(&phase_one, None).expect("phase I");
+        let pooled = laney_p_chart(&pooled_input, None).expect("pooled");
+        let phase_two = laney_p_chart(
+            &[(30, 170), (32, 175)],
+            Some(LaneyStandard {
+                center: p1.p_bar,
+                phi: p1.phi,
+            }),
+        )
+        .expect("phase II");
+        assert!(
+            pooled.p_bar > p1.p_bar,
+            "the shift pulls the pooled centre up"
+        );
+        assert!(phase_two.points.iter().all(|p| p.cl == p1.p_bar));
+        assert!(pooled.points[5].ucl > phase_two.points[0].ucl);
+    }
+
+    #[test]
+    fn p_and_u_charts_take_a_known_center() {
+        let mut p = PChart::with_center(0.05).expect("valid p̄");
+        p.add_sample(2, 100).unwrap();
+        p.add_sample(20, 100).unwrap();
+        assert_eq!(p.p_bar(), Some(0.05), "not re-estimated from the samples");
+        let sigma = (0.05_f64 * 0.95 / 100.0).sqrt();
+        assert!((p.points()[1].ucl - (0.05 + 3.0 * sigma)).abs() < 1e-15);
+        assert!(p.points()[1].out_of_control);
+
+        let mut u = UChart::with_center(2.0).expect("valid ū");
+        u.add_sample(9, 2.0).unwrap();
+        assert_eq!(u.u_bar(), Some(2.0));
+        assert!((u.points()[0].ucl - (2.0 + 3.0 * (2.0_f64 / 2.0).sqrt())).abs() < 1e-15);
+    }
+
+    #[test]
+    fn a_standard_outside_its_domain_is_refused() {
+        for p in [0.0, 1.0, -0.1, f64::NAN] {
+            assert_eq!(
+                PChart::with_center(p).err(),
+                Some(ControlChartError::InvalidStandard { parameter: "p_bar" }),
+                "p̄ = {p}"
+            );
+        }
+        assert!(UChart::with_center(0.0).is_err());
+        let bad_phi = LaneyStandard {
+            center: 0.1,
+            phi: -1.0,
+        };
+        assert_eq!(
+            laney_p_chart(&[(1, 10)], Some(bad_phi)).unwrap_err(),
+            ChartInputError::Standard(ControlChartError::InvalidStandard { parameter: "phi" })
+        );
+        let good = LaneyStandard {
+            center: 0.1,
+            phi: 1.0,
+        };
+        assert_eq!(
+            laney_u_chart(&[], Some(good)).unwrap_err(),
+            ChartInputError::TooFewSamples { got: 0, min: 1 }
+        );
+    }
+
+    #[test]
+    fn z_is_the_point_on_the_scale_where_every_limit_is_three() {
+        // Varying n gives varying limits; on the standardized scale they are
+        // all ±3, so run rules have one set of zones.
+        let mut p = PChart::new();
+        for (d, n) in [(3, 100), (12, 180), (1, 60), (9, 150), (4, 90)] {
+            p.add_sample(d, n).unwrap();
+        }
+        for pt in p.points() {
+            let sigma = (pt.ucl - pt.cl) / 3.0;
+            let z = pt.z.expect("p̄ strictly inside (0, 1)");
+            assert!((pt.cl + z * sigma - pt.value).abs() < 1e-12);
+            if pt.lcl > 0.0 {
+                assert_eq!(pt.out_of_control, z.abs() > 3.0);
+            }
+        }
+        let laney =
+            laney_p_chart(&[(3, 100), (12, 180), (1, 60), (9, 150), (4, 90)], None).expect("valid");
+        for pt in &laney.points {
+            let z = pt.z.expect("φ > 0");
+            assert!((pt.cl + z * (pt.ucl - pt.cl) / 3.0 - pt.value).abs() < 1e-12);
+        }
+        // No variation to scale: no standardized value.
+        let flat = laney_p_chart(&[(0, 10), (0, 12), (0, 9)], None).expect("valid");
+        assert!(flat.points.iter().all(|p| p.z.is_none()));
+    }
+
     #[test]
     fn laney_u_rejects_units_by_position() {
         assert_eq!(
-            laney_u_chart(&[(3, 10.0), (4, 10.0), (2, 10.0), (5, 0.0)]).unwrap_err(),
+            laney_u_chart(&[(3, 10.0), (4, 10.0), (2, 10.0), (5, 0.0)], None).unwrap_err(),
             ChartInputError::Sample {
                 index: 3,
                 error: ControlChartError::NonPositiveUnits
             }
         );
         assert_eq!(
-            laney_u_chart(&[(3, 10.0)]).unwrap_err(),
+            laney_u_chart(&[(3, 10.0)], None).unwrap_err(),
             ChartInputError::TooFewSamples { got: 1, min: 3 }
         );
     }
     #[test]
     fn laney_u_basic() {
         let samples: Vec<(u64, f64)> = vec![(5, 10.0); 10];
-        let chart = laney_u_chart(&samples).expect("valid samples");
+        let chart = laney_u_chart(&samples, None).expect("valid samples");
         assert!((chart.u_bar - 0.5).abs() < 1e-10);
         assert!(chart.phi >= 0.0);
     }
@@ -1500,7 +1665,7 @@ mod tests {
     #[test]
     fn laney_u_ucl_above_cl() {
         let samples: Vec<(u64, f64)> = (0..8).map(|i| ((i % 4 + 2) as u64, 10.0)).collect();
-        let chart = laney_u_chart(&samples).expect("valid samples");
+        let chart = laney_u_chart(&samples, None).expect("valid samples");
         for p in &chart.points {
             assert!(p.ucl > p.cl || (p.ucl - p.cl).abs() < 1e-10);
         }
@@ -1716,7 +1881,7 @@ mod tests {
             (6, 150),
             (4, 150),
         ];
-        let chart = laney_p_chart(&samples).expect("valid samples");
+        let chart = laney_p_chart(&samples, None).expect("valid samples");
 
         for (i, (&(d, n), pt)) in samples.iter().zip(&chart.points).enumerate() {
             let p_i = d as f64 / n as f64;
@@ -1777,7 +1942,7 @@ mod tests {
             (d_low, n),
         ];
 
-        let laney = laney_p_chart(&samples).expect("valid samples");
+        let laney = laney_p_chart(&samples, None).expect("valid samples");
 
         // φ should be close to 1 (within 1%).
         assert!(
@@ -1829,7 +1994,7 @@ mod tests {
             (20, 100),
         ];
 
-        let laney = laney_p_chart(&samples).expect("valid samples");
+        let laney = laney_p_chart(&samples, None).expect("valid samples");
         assert!(
             laney.phi > 1.0,
             "φ expected > 1 for overdispersed data, got {}",
@@ -1869,7 +2034,7 @@ mod tests {
     #[test]
     fn laney_p_numerical_reference() {
         let samples: Vec<(u64, u64)> = vec![(3, 50), (7, 50), (2, 50), (8, 50), (4, 50)];
-        let chart = laney_p_chart(&samples).expect("valid samples");
+        let chart = laney_p_chart(&samples, None).expect("valid samples");
 
         let p_bar = 24.0_f64 / 250.0;
         assert!(
@@ -1923,7 +2088,7 @@ mod tests {
             (13, 10.0),
         ];
 
-        let laney = laney_u_chart(&samples).expect("valid samples");
+        let laney = laney_u_chart(&samples, None).expect("valid samples");
         assert!(
             laney.phi > 1.0,
             "φ expected > 1 for overdispersed data, got {}",
