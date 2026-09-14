@@ -426,6 +426,8 @@ fn pair<'a>(
 }
 
 /// `[c1, c2, ...]` counts.
+// Only the WASM binding carries the NP, C and U charts; the FFI has no caller.
+#[cfg_attr(not(feature = "wasm"), allow(dead_code))]
 pub(crate) fn count_rows(value: &serde_json::Value, label: &str) -> Result<Vec<u64>, WireError> {
     as_array(value, label, "an array of counts")?
         .iter()
@@ -435,6 +437,8 @@ pub(crate) fn count_rows(value: &serde_json::Value, label: &str) -> Result<Vec<u
 }
 
 /// A single count that is not an element of an array (e.g. a sample size).
+// Only the WASM binding carries the NP, C and U charts; the FFI has no caller.
+#[cfg_attr(not(feature = "wasm"), allow(dead_code))]
 pub(crate) fn count_value(value: &serde_json::Value, label: &str) -> Result<u64, WireError> {
     whole_count(value, label, None)
 }
@@ -459,6 +463,8 @@ pub(crate) fn count_pairs(
 }
 
 /// `[[defects, units], ...]` pairs; `units` may be fractional.
+// Only the WASM binding carries the NP, C and U charts; the FFI has no caller.
+#[cfg_attr(not(feature = "wasm"), allow(dead_code))]
 pub(crate) fn rate_pairs(
     value: &serde_json::Value,
     label: &str,
