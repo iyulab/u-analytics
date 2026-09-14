@@ -263,7 +263,7 @@ pub fn kendall_tau_b(x: &[f64], y: &[f64]) -> Option<CorrelationResult> {
     let p_value = if var_s > 0.0 {
         let s = (concordant - discordant) as f64;
         let z = s / var_s.sqrt();
-        2.0 * (1.0 - special::standard_normal_cdf(z.abs()))
+        2.0 * special::standard_normal_sf(z.abs())
     } else {
         1.0
     };

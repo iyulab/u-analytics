@@ -609,16 +609,17 @@ pub fn anderson_darling_test(data: &[f64]) -> Option<AndersonDarlingResult> {
     let mut s = 0.0;
     for i in 0..n {
         let z = (x[i] - mean) / sd;
-        let phi = special::standard_normal_cdf(z);
-        // Clamp to avoid ln(0) or ln(negative)
-        let phi = phi.clamp(1e-15, 1.0 - 1e-15);
-
         let z_rev = (x[n - 1 - i] - mean) / sd;
-        let phi_rev = special::standard_normal_cdf(z_rev);
-        let phi_rev = phi_rev.clamp(1e-15, 1.0 - 1e-15);
+        // Both tails evaluated directly, so an outlier contributes its true
+        // ln-probability instead of a subtraction that rounds to ln(0); the
+        // floor only guards arguments beyond the f64 range of the tail (|z| > 38).
+        let ln_phi = special::standard_normal_cdf(z).max(f64::MIN_POSITIVE).ln();
+        let ln_sf_rev = special::standard_normal_sf(z_rev)
+            .max(f64::MIN_POSITIVE)
+            .ln();
 
         let coeff = (2 * (i + 1) - 1) as f64;
-        s += coeff * (phi.ln() + (1.0 - phi_rev).ln());
+        s += coeff * (ln_phi + ln_sf_rev);
     }
 
     let a2 = -nf - s / nf;
@@ -711,11 +712,15 @@ pub fn anderson_darling_normality(data: &[f64]) -> Option<AdNormalityResult> {
         let z_i = (x[i] - mean) / sd;
         let z_rev = (x[n - 1 - i] - mean) / sd;
 
-        let phi_i = special::standard_normal_cdf(z_i).clamp(1e-15, 1.0 - 1e-15);
-        let phi_rev = special::standard_normal_cdf(z_rev).clamp(1e-15, 1.0 - 1e-15);
+        let ln_phi_i = special::standard_normal_cdf(z_i)
+            .max(f64::MIN_POSITIVE)
+            .ln();
+        let ln_sf_rev = special::standard_normal_sf(z_rev)
+            .max(f64::MIN_POSITIVE)
+            .ln();
 
         let coeff = (2 * i + 1) as f64;
-        s += coeff * (phi_i.ln() + (1.0 - phi_rev).ln());
+        s += coeff * (ln_phi_i + ln_sf_rev);
     }
 
     let a2 = -nf - s / nf;
@@ -964,7 +969,7 @@ fn sw_p_value(w: f64, n: usize) -> f64 {
             return 0.0;
         }
         let z = (y2 - m) / s;
-        1.0 - special::standard_normal_cdf(z)
+        special::standard_normal_sf(z)
     } else {
         // Large sample: log-normal transformation
         let xx = nf.ln();
@@ -974,7 +979,7 @@ fn sw_p_value(w: f64, n: usize) -> f64 {
             return 0.0;
         }
         let z = (y - m) / s;
-        1.0 - special::standard_normal_cdf(z)
+        special::standard_normal_sf(z)
     }
 }
 
@@ -1065,7 +1070,7 @@ pub fn mann_whitney_u_test(a: &[f64], b: &[f64]) -> Option<TestResult> {
     }
 
     let z = (u1 - mu) / sigma_sq.sqrt();
-    let p_value = 2.0 * (1.0 - special::standard_normal_cdf(z.abs()));
+    let p_value = 2.0 * special::standard_normal_sf(z.abs());
 
     Some(TestResult {
         statistic: u1,
@@ -1161,7 +1166,7 @@ pub fn wilcoxon_signed_rank_test(x: &[f64], y: &[f64]) -> Option<TestResult> {
     }
 
     let z = (t_plus - mu) / sigma_sq.sqrt();
-    let p_value = 2.0 * (1.0 - special::standard_normal_cdf(z.abs()));
+    let p_value = 2.0 * special::standard_normal_sf(z.abs());
 
     Some(TestResult {
         statistic: t_plus,
@@ -1752,7 +1757,7 @@ pub fn mann_kendall_test(data: &[f64]) -> Option<MannKendallResult> {
     };
 
     // Step 5: Two-tailed p-value
-    let p_value = 2.0 * (1.0 - special::standard_normal_cdf(z_statistic.abs()));
+    let p_value = 2.0 * special::standard_normal_sf(z_statistic.abs());
     let p_value = p_value.clamp(0.0, 1.0);
 
     // Step 6: Kendall's tau

@@ -23,7 +23,7 @@
 //! - Motorola University, "The Six Sigma Process" (defining the 1.5-sigma
 //!   shift convention).
 
-use u_numflow::special::{inverse_normal_cdf, standard_normal_cdf};
+use u_numflow::special::{inverse_normal_sf, standard_normal_sf};
 
 /// Converts a sigma quality level to parts-per-million (PPM) defect rate.
 ///
@@ -33,7 +33,13 @@ use u_numflow::special::{inverse_normal_cdf, standard_normal_cdf};
 /// PPM = 1,000,000 * (1 - Phi(sigma - 1.5))
 /// ```
 ///
-/// where Phi is the standard normal CDF.
+/// where Phi is the standard normal CDF. The upper tail `1 - Phi` is evaluated
+/// directly ([`u_numflow::special::standard_normal_sf`]), so the result keeps
+/// about 15 significant digits across the whole range — at 7.5 sigma the
+/// ~1e-3 PPM is exact to that precision rather than to an absolute error.
+///
+/// For an unshifted normal tail (no 1.5-sigma convention), pass `z + 1.5`, or
+/// use `standard_normal_sf(z) * 1e6` directly.
 ///
 /// # Arguments
 ///
@@ -57,7 +63,7 @@ use u_numflow::special::{inverse_normal_cdf, standard_normal_cdf};
 ///
 /// Motorola Six Sigma convention (Harry & Schroeder, 2000).
 pub fn sigma_to_ppm(sigma: f64) -> f64 {
-    1_000_000.0 * (1.0 - standard_normal_cdf(sigma - 1.5))
+    1_000_000.0 * standard_normal_sf(sigma - 1.5)
 }
 
 /// Converts a parts-per-million (PPM) defect rate to a sigma quality level.
@@ -68,7 +74,11 @@ pub fn sigma_to_ppm(sigma: f64) -> f64 {
 /// sigma = Phi_inv(1 - PPM / 1,000,000) + 1.5
 /// ```
 ///
-/// where Phi_inv is the inverse standard normal CDF.
+/// where Phi_inv is the inverse standard normal CDF. The tail probability
+/// `PPM / 1,000,000` is inverted as given
+/// ([`u_numflow::special::inverse_normal_sf`]) rather than through
+/// `1 - PPM / 1,000,000`, so small PPM values round-trip with
+/// [`sigma_to_ppm`] to about 12 significant digits or better.
 ///
 /// # Arguments
 ///
@@ -100,8 +110,7 @@ pub fn ppm_to_sigma(ppm: f64) -> Option<f64> {
     if ppm.is_nan() || ppm <= 0.0 || ppm >= 1_000_000.0 {
         return None;
     }
-    let p = 1.0 - ppm / 1_000_000.0;
-    let z = inverse_normal_cdf(p);
+    let z = inverse_normal_sf(ppm / 1_000_000.0);
     if z.is_finite() {
         Some(z + 1.5)
     } else {
@@ -229,6 +238,42 @@ mod tests {
             assert!(
                 (recovered - sigma).abs() < 0.1,
                 "roundtrip failed: sigma={sigma}, ppm={ppm}, recovered={recovered}"
+            );
+        }
+    }
+
+    /// Relative precision of the tail, against double-precision reference
+    /// values of the normal survival function (SciPy `norm.sf(z) * 1e6`).
+    /// Evaluating `1 - Phi` by subtraction was off by 5e-5 .. 6.5e-3 relative
+    /// on this same table.
+    #[test]
+    fn sigma_to_ppm_tail_relative_precision() {
+        let cases = [
+            (3.0, 1349.898031630093),
+            (4.0, 31.671241833119865),
+            (5.0, 0.2866515718791933),
+            (6.0, 9.865876450376948e-4),
+            (6.5, 4.016000583859089e-5),
+            (7.0, 1.279812543885835e-6),
+        ];
+        for (z, want) in cases {
+            let got = sigma_to_ppm(z + 1.5);
+            assert!(
+                ((got - want) / want).abs() < 1e-12,
+                "unshifted z={z}: got {got:e}, want {want:e}"
+            );
+        }
+    }
+
+    /// Round trip holds to relative precision, deep into the tail.
+    #[test]
+    fn roundtrip_relative_precision() {
+        for &sigma in &[2.0, 3.0, 4.5, 6.0, 7.5, 9.0] {
+            let ppm = sigma_to_ppm(sigma);
+            let recovered = ppm_to_sigma(ppm).expect("roundtrip should succeed");
+            assert!(
+                (recovered - sigma).abs() < 1e-12,
+                "sigma={sigma}: ppm={ppm:e}, recovered={recovered}"
             );
         }
     }

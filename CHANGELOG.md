@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.5.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Fixed
+
+- **`sigma_to_ppm` / `ppm_to_sigma` lost the tail to subtraction.** PPM was
+  `1e6 · (1 − Φ(σ − 1.5))` over a CDF with an absolute error bound, so its
+  relative error grew from 5e-5 (4.5σ) to 6.5e-3 (8.5σ), and `ppm_to_sigma`
+  round-tripped only to ~3e-4. Both now use the directly evaluated normal tail
+  (`u_numflow::special::standard_normal_sf` / `inverse_normal_sf`): about 15
+  significant digits in PPM and a round trip to 1e-12.
+- The same subtraction in every normal tail probability: the two-sided
+  p-values of Mann-Whitney, Wilcoxon signed-rank and Kendall's tau, the
+  Mann-Kendall trend test, the Shapiro-Wilk p-value, and both Anderson-Darling
+  statistics, which clamped `Φ` to `[1e-15, 1 − 1e-15]` to keep `ln(1 − Φ)`
+  finite. Both tails are now evaluated directly and only floored at the
+  smallest positive `f64`, so a far outlier (|z| beyond ~7.9) contributes its
+  actual log tail probability instead of the clamp's `ln(1e-15)`.
+
 ## [0.11.0] - 2026-09-13
 
 ### Added
