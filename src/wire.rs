@@ -242,8 +242,14 @@ pub(crate) mod code {
     pub(crate) const MALFORMED_INPUT: &str = "malformed_input";
     /// A count that is not a whole number >= 0.
     pub(crate) const COUNT_NOT_WHOLE: &str = "count_not_whole";
-    /// A sample size of zero.
-    pub(crate) const SAMPLE_SIZE_NOT_POSITIVE: &str = "sample_size_not_positive";
+    /// A sample size that is not a whole number >= 1.
+    ///
+    /// One code for the whole field, not one per way of being wrong: a size of
+    /// `0`, `-3`, `10.5` or a NaN are the same mistake to whoever typed the row,
+    /// and splitting them made `code` insufficient on its own -- the consumer
+    /// had to read `message` to learn whether a `count_not_whole` was about the
+    /// defectives or the size beside them.
+    pub(crate) const SAMPLE_SIZE_NOT_WHOLE: &str = "sample_size_not_whole";
     /// More defectives than the sample has items.
     pub(crate) const DEFECTIVES_EXCEED_SAMPLE: &str = "defectives_exceed_sample";
     /// Units inspected that are not a positive, finite number.
@@ -348,7 +354,7 @@ pub(crate) fn chart_error_code(error: &crate::spc::ControlChartError) -> &'stati
         E::DefectivesExceedSampleSize { .. } => code::DEFECTIVES_EXCEED_SAMPLE,
         E::NonPositiveUnits => code::UNITS_NOT_POSITIVE,
         E::SubgroupSizeOutOfRange { .. } => code::SUBGROUP_SIZE_OUT_OF_RANGE,
-        E::ZeroSampleSize => code::SAMPLE_SIZE_NOT_POSITIVE,
+        E::ZeroSampleSize => code::SAMPLE_SIZE_NOT_WHOLE,
         E::InvalidStandard { .. } => code::STANDARD_OUT_OF_RANGE,
     }
 }
@@ -369,26 +375,59 @@ pub(crate) fn add_rows<T>(
 /// Largest count a JSON number carries exactly (2^53).
 const MAX_EXACT_COUNT: f64 = 9_007_199_254_740_992.0;
 
-/// A count: a whole number >= 0. Read from a JSON number of either kind, so a
-/// fractional or negative count is refused *here*, with its position, rather
+/// What a whole number means for one input field: its floor, the name it goes
+/// by in a message, and the code its refusal carries.
+///
+/// The two fields of a `[defectives, sample_size]` pair take the same *kind* of
+/// value and different *domains*, and reporting both under one code left the
+/// difference readable only in the message text.
+#[derive(Clone, Copy)]
+struct CountDomain {
+    min: u64,
+    noun: &'static str,
+    code: &'static str,
+}
+
+/// A count of things observed: a whole number >= 0.
+const COUNT: CountDomain = CountDomain {
+    min: 0,
+    noun: "a count",
+    code: code::COUNT_NOT_WHOLE,
+};
+
+/// The size of a sample: a whole number >= 1. Zero is refused here rather than
+/// downstream so that every bad size -- zero, negative, fractional, not a
+/// number at all -- leaves by the same door.
+const SAMPLE_SIZE: CountDomain = CountDomain {
+    min: 1,
+    noun: "a sample size",
+    code: code::SAMPLE_SIZE_NOT_WHOLE,
+};
+
+/// A whole number in `domain`. Read from a JSON number of either kind, so a
+/// fractional or negative value is refused *here*, with its position, rather
 /// than by a deserializer that knows neither.
 fn whole_count(
     value: &serde_json::Value,
     at: &str,
     index: Option<usize>,
+    domain: CountDomain,
 ) -> Result<u64, WireError> {
+    let CountDomain { min, noun, code } = domain;
     if let Some(n) = value.as_u64() {
-        return Ok(n);
+        if n >= min {
+            return Ok(n);
+        }
     }
     let refuse = |shown: String| {
         WireError::new(
-            code::COUNT_NOT_WHOLE,
+            code,
             index,
-            format!("{at}: a count must be a whole number of at least 0, got {shown}"),
+            format!("{at}: {noun} must be a whole number of at least {min}, got {shown}"),
         )
     };
     match value.as_f64() {
-        Some(x) if x >= 0.0 && x.fract() == 0.0 && x <= MAX_EXACT_COUNT => Ok(x as u64),
+        Some(x) if x >= min as f64 && x.fract() == 0.0 && x <= MAX_EXACT_COUNT => Ok(x as u64),
         Some(x) => Err(refuse(x.to_string())),
         None => Err(refuse(value.to_string())),
     }
@@ -432,15 +471,16 @@ pub(crate) fn count_rows(value: &serde_json::Value, label: &str) -> Result<Vec<u
     as_array(value, label, "an array of counts")?
         .iter()
         .enumerate()
-        .map(|(i, v)| whole_count(v, &format!("{label}[{i}]"), Some(i)))
+        .map(|(i, v)| whole_count(v, &format!("{label}[{i}]"), Some(i), COUNT))
         .collect()
 }
 
-/// A single count that is not an element of an array (e.g. a sample size).
+/// The one sample size an NP chart applies to every row. Not an element of an
+/// array, so its refusal carries no index.
 // Only the WASM binding carries the NP, C and U charts; the FFI has no caller.
 #[cfg_attr(not(feature = "wasm"), allow(dead_code))]
-pub(crate) fn count_value(value: &serde_json::Value, label: &str) -> Result<u64, WireError> {
-    whole_count(value, label, None)
+pub(crate) fn sample_size_value(value: &serde_json::Value, label: &str) -> Result<u64, WireError> {
+    whole_count(value, label, None, SAMPLE_SIZE)
 }
 
 /// `[[defectives, sample_size], ...]` pairs.
@@ -455,8 +495,13 @@ pub(crate) fn count_pairs(
         .map(|(i, row)| {
             let (d, n) = pair(row, label, i, SHAPE)?;
             Ok((
-                whole_count(d, &format!("{label}[{i}][0] (defectives)"), Some(i))?,
-                whole_count(n, &format!("{label}[{i}][1] (sample size)"), Some(i))?,
+                whole_count(d, &format!("{label}[{i}][0] (defectives)"), Some(i), COUNT)?,
+                whole_count(
+                    n,
+                    &format!("{label}[{i}][1] (sample size)"),
+                    Some(i),
+                    SAMPLE_SIZE,
+                )?,
             ))
         })
         .collect()
@@ -475,7 +520,7 @@ pub(crate) fn rate_pairs(
         .enumerate()
         .map(|(i, row)| {
             let (d, u) = pair(row, label, i, SHAPE)?;
-            let defects = whole_count(d, &format!("{label}[{i}][0] (defects)"), Some(i))?;
+            let defects = whole_count(d, &format!("{label}[{i}][0] (defects)"), Some(i), COUNT)?;
             let units = u.as_f64().ok_or_else(|| {
                 WireError::new(
                     code::UNITS_NOT_POSITIVE,
@@ -1242,14 +1287,37 @@ mod input_error_tests {
         }
         let (c, i, _) = err(count_pairs(&json!([[1, 10], [2.5, 10]]), "samples"));
         assert_eq!((c, i), (code::COUNT_NOT_WHOLE, Some(1)));
-        let (c, i, m) = err(count_pairs(&json!([[1, 10], [2, 10], [3, -4]]), "samples"));
-        assert_eq!((c, i), (code::COUNT_NOT_WHOLE, Some(2)));
-        assert!(m.contains("sample size"), "{m}");
         let (c, i, _) = err(rate_pairs(&json!([[1, 1.0], [0.5, 2.0]]), "samples"));
         assert_eq!((c, i), (code::COUNT_NOT_WHOLE, Some(1)));
-        // A value that is not an element carries no position.
-        let (c, i, _) = err(count_value(&json!(10.5), "sample_size"));
-        assert_eq!((c, i), (code::COUNT_NOT_WHOLE, None));
+    }
+
+    /// The other half of a `[defectives, sample_size]` pair has its own domain,
+    /// so it has its own code: `count_not_whole` on a pair row used to mean
+    /// either member, and which one was readable only in the message.
+    #[test]
+    fn every_way_a_sample_size_can_be_wrong_carries_one_code() {
+        for bad in [
+            json!(0),
+            json!(-3),
+            json!(10.5),
+            json!("10"),
+            json!(null),
+            json!(1e300),
+        ] {
+            let (c, i, m) = err(count_pairs(&json!([[1, 10], [1, bad]]), "samples"));
+            assert_eq!((c, i), (code::SAMPLE_SIZE_NOT_WHOLE, Some(1)), "{m}");
+            assert!(m.contains("sample size"), "{m}");
+            assert!(m.contains("at least 1"), "{m}");
+        }
+        // Defectives are checked first, and keep the count code.
+        let (c, i, m) = err(count_pairs(&json!([[1, 10], [1.5, 0]]), "samples"));
+        assert_eq!((c, i), (code::COUNT_NOT_WHOLE, Some(1)), "{m}");
+        assert!(m.contains("defectives"), "{m}");
+        // An NP chart's single size is not an element, so it carries no position.
+        for bad in [json!(0), json!(-3), json!(10.5)] {
+            let (c, i, _) = err(sample_size_value(&bad, "sample_size"));
+            assert_eq!((c, i), (code::SAMPLE_SIZE_NOT_WHOLE, None));
+        }
     }
 
     #[test]
@@ -1259,7 +1327,11 @@ mod input_error_tests {
             count_rows(&json!([3.0, 0, 7]), "c").expect("whole"),
             vec![3, 0, 7]
         );
-        assert_eq!(count_value(&json!(100.0), "n").expect("whole"), 100);
+        assert_eq!(sample_size_value(&json!(100.0), "n").expect("whole"), 100);
+        assert_eq!(
+            count_pairs(&json!([[0, 1], [3.0, 10.0]]), "s").expect("whole"),
+            vec![(0, 1), (3, 10)]
+        );
     }
 
     #[test]

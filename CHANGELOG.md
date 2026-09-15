@@ -8,11 +8,35 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Changed (breaking)
+
+- **A rejected sample size has its own code.** `sample_size_not_positive` is
+  replaced by **`sample_size_not_whole`**, and it now covers every way a sample
+  size can be wrong -- zero, negative, fractional, or not a number -- across the
+  WASM bindings, the C FFI error body and `AnalyticsException.Reason`.
+
+  On a `[defectives, sample_size]` row the two members share a shape but not a
+  domain, and both refusals used to arrive as `count_not_whole`: which member
+  failed was readable only in `message`, which is written for people and may
+  change between releases. A size of `0` had a code of its own while `-3` and
+  `10.5` did not, so one field answered to two codes and one code answered for
+  two fields.
+
+  ```js
+  p_chart([[1, 10], [1.5, 10]])  // count_not_whole,       index 1  (the defectives)
+  p_chart([[1, 10], [1, 10.5]])  // sample_size_not_whole, index 1  (the size)
+  np_chart([1, 2], 10.5)         // sample_size_not_whole, index null
+  ```
+
+  `count_not_whole` now means a defect or defective count only. Code matching
+  `sample_size_not_positive` should match `sample_size_not_whole` instead; code
+  that only displays `message` is unaffected.
+
 ### Added
 
-- C# `UAnalytics` **0.8.0** (binding only; the crate is unchanged):`
-  `AnalyticsClient.PChart(samples, pBar)` and`
-  `LaneyPChart(samples, pBar, phi)` send the Phase II standard the C FFI has`
+- C# `UAnalytics` **0.8.0** (binding only; the crate is unchanged):
+  `AnalyticsClient.PChart(samples, pBar)` and
+  `LaneyPChart(samples, pBar, phi)` send the Phase II standard the C FFI has
   accepted since 0.12.0, which 0.7.0's client had no way to pass.
 
 ## [0.12.0] - 2026-09-15

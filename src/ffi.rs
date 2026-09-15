@@ -1055,8 +1055,17 @@ mod tests {
         assert_eq!(code, -3, "{body}");
         let (code, body) = call(uanalytics_p_chart, r#"{"samples": [[3, 100], [0, 0]]}"#);
         assert_eq!(code, -3, "{body}");
-        assert_eq!(body["code"], "sample_size_not_positive", "{body}");
+        assert_eq!(body["code"], "sample_size_not_whole", "{body}");
         assert_eq!(body["index"], 1, "{body}");
+        // A size that is negative or fractional is the same mistake, and now
+        // leaves by the same code instead of arriving as `count_not_whole`.
+        for bad in ["-3", "10.5"] {
+            let req = format!(r#"{{"samples": [[3, 100], [1, {bad}]]}}"#);
+            let (code, body) = call(uanalytics_p_chart, &req);
+            assert_eq!(code, -3, "{body}");
+            assert_eq!(body["code"], "sample_size_not_whole", "{body}");
+            assert_eq!(body["index"], 1, "{body}");
+        }
     }
 
     #[test]

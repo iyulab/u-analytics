@@ -248,7 +248,7 @@ public class AnalyticsException : Exception
 
     /// <summary>
     /// Stable, machine-readable reason, e.g. <c>count_not_whole</c>,
-    /// <c>sample_size_not_positive</c>, <c>defectives_exceed_sample</c>,
+    /// <c>sample_size_not_whole</c>, <c>defectives_exceed_sample</c>,
     /// <c>units_not_positive</c>, <c>too_few_samples</c>, <c>malformed_input</c>,
     /// <c>invalid_input</c>. <c>null</c> when the engine returned no body.
     /// </summary>

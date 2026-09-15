@@ -17,13 +17,13 @@ use wasm_bindgen::prelude::*;
 // The shapes below are the wire contract, shared with the C FFI so the two
 // transports cannot drift apart again. See `crate::wire`.
 use crate::wire::{
-    add_rows, attribute_point_dtos, capability_dto, count_pairs, count_rows, count_value,
-    default_cost, default_min_seg, default_penalty, gage_rr_anova_dto, gage_rr_xbar_r_dto, imr_dto,
-    laney_p_dto, laney_point_dtos, p_chart_dto, pelt_dto, percentile_capability_dto, rate_pairs,
-    rules_from_json, run_rules_dto, xbar_r_dto, xbar_s_dto, AttributeChartPointDto,
-    AttributeStandardDto, CapabilityInputDto, GageRRInputDto, LimitsInputDto, PeltInputDto,
-    PeltPenaltyDto, PeltResultDto, PercentileCapabilityInputDto, SeasonalityInputDto,
-    SpectralResidualInputDto, WireError,
+    add_rows, attribute_point_dtos, capability_dto, count_pairs, count_rows, default_cost,
+    default_min_seg, default_penalty, gage_rr_anova_dto, gage_rr_xbar_r_dto, imr_dto, laney_p_dto,
+    laney_point_dtos, p_chart_dto, pelt_dto, percentile_capability_dto, rate_pairs,
+    rules_from_json, run_rules_dto, sample_size_value, xbar_r_dto, xbar_s_dto,
+    AttributeChartPointDto, AttributeStandardDto, CapabilityInputDto, GageRRInputDto,
+    LimitsInputDto, PeltInputDto, PeltPenaltyDto, PeltResultDto, PercentileCapabilityInputDto,
+    SeasonalityInputDto, SpectralResidualInputDto, WireError,
 };
 
 // ---------------------------------------------------------------------------
@@ -321,7 +321,9 @@ fn standard_option(options: Option<JsValue>) -> Result<AttributeStandardDto, JsV
 /// # Errors
 ///
 /// Throws an `Error` with `code` and `index` (the row): `count_not_whole`
-/// for a count that is not a whole number >= 0, `sample_size_not_positive`,
+/// for a defective count that is not a whole number >= 0,
+/// `sample_size_not_whole` for a sample size that is not a whole number >= 1
+/// (zero, negative, fractional or not a number alike),
 /// `defectives_exceed_sample`, `malformed_input` for a row that is not a pair,
 /// `too_few_samples` for an empty array, `standard_out_of_range` for a
 /// `p_bar` outside (0, 1).
@@ -452,9 +454,10 @@ pub fn laney_p_chart(samples: JsValue, options: Option<JsValue>) -> Result<JsVal
 ///
 /// # Errors
 ///
-/// Throws an `Error` with `code` and `index`: `count_not_whole` (with the row,
-/// or `index: null` for `sample_size`), `sample_size_not_positive`,
-/// `defectives_exceed_sample`, `too_few_samples` for an empty array.
+/// Throws an `Error` with `code` and `index`: `count_not_whole` with the row
+/// for a defective count, `sample_size_not_whole` with `index: null` for the
+/// `sample_size` argument, `defectives_exceed_sample`, `too_few_samples` for
+/// an empty array.
 ///
 /// # Output JSON
 ///
@@ -464,7 +467,7 @@ pub fn np_chart(defectives: JsValue, sample_size: JsValue) -> Result<JsValue, Js
     let defectives: serde_json::Value = from_js(defectives, "defectives")?;
     let defectives = count_rows(&defectives, "defectives").map_err(js_err)?;
     let sample_size: serde_json::Value = from_js(sample_size, "sample_size")?;
-    let sample_size = count_value(&sample_size, "sample_size").map_err(js_err)?;
+    let sample_size = sample_size_value(&sample_size, "sample_size").map_err(js_err)?;
     to_js(&np_chart_dto(&defectives, sample_size).map_err(js_err)?)
 }
 
@@ -1844,7 +1847,7 @@ mod binding_contract_tests {
         // A zero sample size is a value, not a panic that would trap the module.
         let e = np_chart_dto(&[0, 0], 0).expect_err("nothing inspected");
         assert!(e.message.contains("sample size"), "{e}");
-        assert_eq!((e.code, e.index), (code::SAMPLE_SIZE_NOT_POSITIVE, None));
+        assert_eq!((e.code, e.index), (code::SAMPLE_SIZE_NOT_WHOLE, None));
     }
 
     #[test]
@@ -1913,7 +1916,7 @@ mod binding_contract_tests {
         assert_eq!((e.code, e.index), (code::DEFECTIVES_EXCEED_SAMPLE, Some(1)));
         let e = p_chart_dto(&[(3, 100), (0, 0)], &Default::default()).expect_err("0 of 0");
         assert!(e.message.contains("samples[1]"), "{e}");
-        assert_eq!((e.code, e.index), (code::SAMPLE_SIZE_NOT_POSITIVE, Some(1)));
+        assert_eq!((e.code, e.index), (code::SAMPLE_SIZE_NOT_WHOLE, Some(1)));
         let ok = p_chart_dto(&[(3, 100), (5, 120), (2, 80)], &Default::default()).expect("valid");
         assert_eq!(ok.points.len(), 3);
     }

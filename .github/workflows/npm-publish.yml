@@ -139,10 +139,16 @@ jobs:
           ok(e instanceof Error, 'a refusal must be an Error')
           ok(e.code === 'count_not_whole' && e.index === 2, `code=${e.code} index=${e.index}`)
           ok(typeof e.message === 'string' && e.message.includes('defects[2]'), `message=${e.message}`)
-          e = refusal(() => m.p_chart([[3, 100], [0, 0]]))
-          ok(e.code === 'sample_size_not_positive' && e.index === 1, `code=${e.code} index=${e.index}`)
+          // On a [defectives, sample_size] pair the code says which member failed:
+          // every bad size is one code, so a consumer never reads `message` to find out.
+          for (const bad of [0, -3, 10.5]) {
+            e = refusal(() => m.p_chart([[3, 100], [1, bad]]))
+            ok(e.code === 'sample_size_not_whole' && e.index === 1, `size=${bad} code=${e.code} index=${e.index}`)
+          }
+          e = refusal(() => m.p_chart([[3, 100], [1.5, 100]]))
+          ok(e.code === 'count_not_whole' && e.index === 1, `code=${e.code} index=${e.index}`)
           e = refusal(() => m.np_chart([1, 2], 10.5))
-          ok(e.code === 'count_not_whole' && e.index === null, `code=${e.code} index=${e.index}`)
+          ok(e.code === 'sample_size_not_whole' && e.index === null, `code=${e.code} index=${e.index}`)
 
           // Phase II: a Phase I standard crosses as options and fixes the limits.
           const p2 = m.laney_p_chart([[11, 170]], { p_bar: 0.0514, phi: 0.236 })

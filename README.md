@@ -228,12 +228,15 @@ interface AnalyticsError extends Error {
   index: number | null  // position of the offending element in its input array
 }
 // try { c_chart([1, 2, 2.5]) } catch (e) { e.code === "count_not_whole"; e.index === 2 }
+// On a [defectives, sample_size] row the code says which member failed:
+//   p_chart([[1, 10], [1.5, 10]]) -> count_not_whole,      index 1
+//   p_chart([[1, 10], [1, 10.5]]) -> sample_size_not_whole, index 1
 ```
 
 | `code` | Meaning |
 |---|---|
-| `count_not_whole` | a count (defects, defectives, sample size) is not a whole number ≥ 0 |
-| `sample_size_not_positive` | a sample size of 0 |
+| `count_not_whole` | a defect or defective count is not a whole number ≥ 0 |
+| `sample_size_not_whole` | a sample size is not a whole number ≥ 1 — zero, negative, fractional and not-a-number alike |
 | `defectives_exceed_sample` | more defectives than the sample has items |
 | `units_not_positive` | units inspected that are not a positive number |
 | `subgroup_length_mismatch` | a subgroup of a different length than the first |
