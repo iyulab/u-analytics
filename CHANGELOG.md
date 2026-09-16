@@ -32,6 +32,14 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   `sample_size_not_positive` should match `sample_size_not_whole` instead; code
   that only displays `message` is unaffected.
 
+### Fixed
+
+- **`boxcox_capability` inherits a corrected λ estimate** (`u-numflow`
+  `estimate_lambda`): on a sample whose values sit in a narrow band the
+  likelihood is monotone across the range, and the estimate now lands on the
+  end of the range with `lambda_at_bound: true` instead of stopping just inside
+  it and reporting `false`. Requires `u-numflow` 0.6.1. No API change here.
+
 ### Added
 
 - C# `UAnalytics` **0.8.0** (binding only; the crate is unchanged):

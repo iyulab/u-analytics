@@ -262,6 +262,60 @@ mod tests {
         r.indices.as_ref().expect("limits were given")
     }
 
+    /// A narrow sample's λ sits on the end of the range, and the result says so.
+    ///
+    /// The estimator lives in the foundation crate, so what this pins is the
+    /// path: a caller reaching Box-Cox capability through this function is told
+    /// the same thing a caller reaching the estimator directly is told. The
+    /// sample is one a consumer reported -- 250 readings inside a 0.13 % band,
+    /// where the likelihood is monotone and the estimate used to stop just
+    /// short of the bound and call itself interior.
+    #[test]
+    fn a_narrow_sample_reports_a_lambda_that_sits_on_the_range_limit() {
+        let data = vec![
+            24.994, 25.007, 24.998, 25.006, 24.993, 25.002, 24.996, 25.004, 24.995, 25.005, 25.007,
+            24.995, 25.005, 24.993, 25.006, 24.996, 25.004, 24.998, 25.002, 24.994, 24.996, 25.004,
+            24.994, 25.006, 24.998, 25.002, 24.993, 25.007, 24.995, 25.005, 25.005, 24.995, 25.003,
+            24.993, 25.007, 24.996, 25.006, 24.994, 25.004, 24.997, 24.993, 25.006, 24.997, 25.005,
+            24.994, 25.007, 24.996, 25.004, 24.998, 25.0, 25.009, 24.999, 25.01, 24.998, 25.008,
+            25.002, 24.997, 25.006, 25.011, 25.0, 25.011, 25.0, 24.998, 25.006, 24.999, 25.009,
+            25.002, 24.997, 25.008, 25.01, 24.997, 25.01, 25.002, 24.999, 25.008, 25.011, 24.998,
+            25.009, 25.0, 25.006, 25.006, 24.999, 25.011, 25.002, 24.998, 25.01, 25.009, 24.997,
+            25.0, 25.008, 25.008, 25.01, 24.997, 25.006, 25.011, 24.999, 25.009, 25.002, 24.998,
+            25.0, 25.0, 24.997, 25.009, 25.011, 25.006, 24.998, 25.01, 24.999, 25.008, 25.002,
+            25.002, 25.008, 25.0, 24.999, 25.01, 25.006, 24.997, 25.011, 24.998, 25.009, 25.01,
+            25.002, 25.009, 24.997, 25.001, 25.008, 24.999, 25.006, 25.011, 24.997, 24.999, 25.01,
+            25.006, 24.998, 25.009, 25.001, 25.011, 25.008, 25.002, 24.996, 25.005, 24.994, 25.007,
+            24.996, 24.993, 25.006, 24.998, 25.004, 24.995, 25.002, 24.996, 25.003, 24.993, 25.007,
+            25.004, 24.995, 25.006, 24.994, 25.002, 25.0, 25.007, 24.998, 25.004, 24.993, 25.005,
+            24.996, 25.002, 24.994, 25.006, 24.995, 24.993, 25.006, 24.995, 25.004, 24.997, 25.007,
+            24.994, 25.002, 24.996, 25.006, 25.004, 24.997, 25.006, 24.994, 25.002, 24.993, 25.005,
+            24.996, 25.007, 24.996, 24.995, 25.005, 24.998, 25.003, 24.993, 25.007, 24.996, 25.004,
+            24.994, 25.005, 24.996, 25.003, 24.998, 25.002, 24.997, 25.004, 25.0, 25.023, 25.025,
+            25.021, 25.006, 24.994, 25.003, 24.997, 25.005, 24.998, 25.007, 24.995, 25.002, 24.993,
+            24.994, 25.007, 24.997, 25.006, 24.993, 25.005, 24.996, 25.003, 24.999, 25.0, 25.003,
+            24.996, 25.007, 24.994, 25.005, 24.997, 25.002, 24.993, 25.006, 24.997, 24.997, 25.004,
+            24.993, 25.006, 24.998, 25.005, 24.995, 25.007, 24.994, 25.001,
+        ];
+        assert_eq!(data.len(), 250);
+
+        let wide = boxcox_capability(&data, None, None, R).expect("positive data, no spec");
+        assert!(wide.lambda_at_bound, "{wide:?}");
+        assert_eq!(wide.lambda, R.0, "{wide:?}");
+        assert!(wide.indices.is_none(), "no spec was given");
+
+        // A spec does not change where λ came from, and the indices are then
+        // computed at that same λ rather than at a point beside it.
+        let with_spec =
+            boxcox_capability(&data, Some(25.05), Some(24.95), R).expect("positive data");
+        assert!(with_spec.lambda_at_bound, "{with_spec:?}");
+        assert_eq!(with_spec.lambda, wide.lambda);
+        assert!(
+            indices(&with_spec).pp.is_some_and(f64::is_finite),
+            "{with_spec:?}"
+        );
+    }
+
     /// Data exactly normal after a Box-Cox transform with `lambda0`: normal
     /// quantiles pushed through the inverse transform.
     fn normal_after_boxcox(lambda0: f64, n: usize) -> Vec<f64> {
