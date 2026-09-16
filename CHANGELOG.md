@@ -34,6 +34,18 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Fixed
 
+- **`jarque_bera_test` computes the statistic its own citation defines.** It
+  used the bias-adjusted `G₁`/`G₂` (Excel's `SKEW()`/`KURT()`) where Jarque &
+  Bera (1987) — and SciPy, R and statsmodels — use the moment ratios
+  `g₁`/`g₂`. The two forms disagree by tens of percent at the sample sizes this
+  test is used at: on a 20-point sample the old form returned 7.498 where the
+  defined statistic is 5.564.
+
+- **The Jarque-Bera p-value keeps its digits in the tail.** A χ² with two
+  degrees of freedom is an exponential, so the p-value is `exp(−JB/2)` exactly.
+  It was computed as `1 − cdf`, which reaches 0 once `JB` passes about 74 — a
+  sample whose true p-value is `7e-21` was reported as `0`.
+
 - **`boxcox_capability` inherits a corrected λ estimate** (`u-numflow`
   `estimate_lambda`): on a sample whose values sit in a narrow band the
   likelihood is monotone across the range, and the estimate now lands on the

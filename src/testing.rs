@@ -457,9 +457,22 @@ pub fn chi_squared_independence(table: &[f64], n_rows: usize, n_cols: usize) -> 
 ///
 /// # Algorithm
 ///
-/// JB = (n/6) · [S² + (K²/4)]
+/// ```text
+/// JB = (n/6) · [g₁² + g₂²/4],   p = exp(−JB/2)
+/// ```
 ///
-/// where S = skewness, K = excess kurtosis. JB ~ χ²(2) under H₀.
+/// `g₁` and `g₂` are the **moment** coefficients of skewness and excess
+/// kurtosis (`m₃/m₂^(3/2)` and `m₄/m₂² − 3`), which is what Jarque and Bera
+/// wrote the statistic in and what SciPy, R and statsmodels compute. The
+/// bias-adjusted `G₁`/`G₂` that [`u_numflow::stats::skewness`] and
+/// [`u_numflow::stats::kurtosis`] report -- Excel's `SKEW()`/`KURT()` -- are a
+/// different pair of estimators, and substituting them moves JB by tens of
+/// percent at the sample sizes this test is used at.
+///
+/// `JB ~ χ²(2)` under H₀, and a χ² with two degrees of freedom is an
+/// exponential: its survival function is `exp(−JB/2)` exactly. Taking that
+/// instead of `1 − cdf` keeps the p-value to full relative precision in the
+/// tail, where `1 − cdf` rounds to zero.
 ///
 /// # Returns
 ///
@@ -489,12 +502,13 @@ pub fn jarque_bera_test(data: &[f64]) -> Option<TestResult> {
         return None;
     }
 
-    let s = stats::skewness(data)?;
-    let k = stats::kurtosis(data)?;
+    let g1 = stats::skewness_moment(data)?;
+    let g2 = stats::kurtosis_moment(data)?;
 
     let nf = n as f64;
-    let jb = (nf / 6.0) * (s * s + k * k / 4.0);
-    let p_value = 1.0 - special::chi_squared_cdf(jb, 2.0);
+    let jb = (nf / 6.0) * (g1 * g1 + g2 * g2 / 4.0);
+    // χ²(2) is Exponential(1/2): sf(x) = exp(−x/2), no cancellation in the tail.
+    let p_value = (-jb / 2.0).exp();
 
     Some(TestResult {
         statistic: jb,
@@ -2482,6 +2496,80 @@ mod tests {
         let data = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 10.0, 20.0, 50.0];
         let r = jarque_bera_test(&data).expect("should compute");
         assert!(r.p_value < 0.05, "p = {}", r.p_value);
+    }
+
+    /// The statistic is the one the cited paper defines, which is the one
+    /// SciPy, R and statsmodels report -- moment ratios, not the bias-adjusted
+    /// estimators Excel's SKEW()/KURT() return.
+    ///
+    /// Reference values computed from the definition, independently of the
+    /// implementation: g1 = m3/m2^1.5, g2 = m4/m2^2 - 3, JB = n/6 (g1^2 + g2^2/4).
+    #[test]
+    fn jb_is_the_moment_form_the_paper_defines() {
+        let data = [
+            2.1, 3.4, 1.9, 5.6, 2.2, 3.1, 4.8, 2.9, 3.3, 7.2, 2.5, 3.0, 4.1, 2.7, 3.8, 2.4, 6.1,
+            3.6, 2.8, 3.2,
+        ];
+        let r = jarque_bera_test(&data).expect("20 finite points");
+        assert!(
+            (r.statistic - 5.563_714_337_9).abs() < 1e-8,
+            "JB = {}",
+            r.statistic
+        );
+
+        // What it used to compute, from the adjusted estimators: 35 % higher on
+        // this sample. The gap is not a rounding difference to be tolerated.
+        let n = data.len() as f64;
+        let big_g1 = u_numflow::stats::skewness(&data).expect("same data");
+        let big_g2 = u_numflow::stats::kurtosis(&data).expect("same data");
+        let adjusted = (n / 6.0) * (big_g1 * big_g1 + big_g2 * big_g2 / 4.0);
+        assert!(
+            adjusted > r.statistic * 1.3,
+            "the two forms differ by more than a third here: {adjusted} vs {}",
+            r.statistic
+        );
+    }
+
+    /// chi-squared with two degrees of freedom is an exponential, so the
+    /// p-value is `exp(-JB/2)` exactly -- and stays a number where `1 - cdf`
+    /// rounds to zero.
+    #[test]
+    fn jb_p_value_keeps_its_digits_in_the_tail() {
+        // A ramp with one far outlier: JB near 93, where `1 - cdf` is exactly
+        // zero in f64 and the true p-value is about 7e-21.
+        let mut data: Vec<f64> = (1..20).map(f64::from).collect();
+        data.push(60.0);
+        let r = jarque_bera_test(&data).expect("20 finite points");
+        assert!(r.statistic > 90.0, "JB = {}", r.statistic);
+        assert!(
+            1.0 - special::chi_squared_cdf(r.statistic, 2.0) == 0.0,
+            "this sample is only interesting because the complement underflows"
+        );
+        assert!(
+            r.p_value > 0.0,
+            "the complement returns 0 here; this must not"
+        );
+        assert!(
+            (r.p_value - 6.702e-21).abs() < 1e-23,
+            "p = {} (expected about 6.7e-21)",
+            r.p_value
+        );
+        assert!(
+            (r.p_value - (-r.statistic / 2.0).exp()).abs() <= f64::EPSILON * r.p_value,
+            "p = {} vs exp(-JB/2) = {}",
+            r.p_value,
+            (-r.statistic / 2.0).exp()
+        );
+        // And it still agrees with the distribution it claims, where that is
+        // computable at all.
+        let small = jarque_bera_test(&[-2.0, -1.5, -1.0, -0.5, 0.0, 0.0, 0.5, 1.0, 1.5, 2.0])
+            .expect("10 finite points");
+        let via_cdf = 1.0 - special::chi_squared_cdf(small.statistic, 2.0);
+        assert!(
+            (small.p_value - via_cdf).abs() < 1e-12,
+            "{} vs {via_cdf}",
+            small.p_value
+        );
     }
 
     #[test]
