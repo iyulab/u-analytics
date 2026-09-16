@@ -34,6 +34,17 @@ pub struct GageRRInput {
     pub tolerance: Option<f64>,
 }
 
+/// A centre line and control limits for one of the study's two charts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GageChartLimits {
+    /// Centre line: R̄ for the range chart, X̿ for the average chart.
+    pub center: f64,
+    /// Upper control limit.
+    pub ucl: f64,
+    /// Lower control limit.
+    pub lcl: f64,
+}
+
 /// Results from a Gage R&R study (X̄-R or ANOVA method).
 #[derive(Debug, Clone)]
 pub struct GageRRResult {
@@ -58,6 +69,17 @@ pub struct GageRRResult {
     pub percent_pv: f64,
     /// %Tolerance = 6 × GRR / tolerance × 100 (if tolerance provided).
     pub percent_tolerance: Option<f64>,
+
+    /// The range chart the method plots: R̄ and its limits, over the
+    /// operator×part cell ranges the variance components are built from.
+    pub range_chart: GageChartLimits,
+    /// The average chart the method plots: X̿ and its limits, over the
+    /// operator×part cell averages.
+    ///
+    /// Unlike a process chart, points here are *expected* to fall outside the
+    /// limits -- that is how the study reads whether the parts vary enough to
+    /// be told apart.
+    pub average_chart: GageChartLimits,
 
     /// Number of Distinct Categories = floor(1.41 × PV / GRR), minimum 1.
     pub ndc: u32,
@@ -372,10 +394,35 @@ pub fn gage_rr_xbar_r(input: &GageRRInput) -> Result<GageRRResult, &'static str>
         }
     });
 
+    // The two charts the method plots, from the same R̄ the components use --
+    // computing them anywhere else invites a second, slightly different R̄.
+    // The subgroup for both is one operator×part cell, so n is the trial count,
+    // which this function has already narrowed to 2 or 3.
+    let (a2, d3, d4) = crate::spc::range_chart_factors(n_trials)
+        .expect("n_trials is 2 or 3, inside the factor tables");
+    let cell_means: Vec<f64> = input
+        .measurements
+        .iter()
+        .flat_map(|part| part.iter().map(|trials| stats::mean(trials).unwrap_or(0.0)))
+        .collect();
+    let x_double_bar = stats::mean(&cell_means).expect("cell_means is non-empty");
+    let range_chart = GageChartLimits {
+        center: r_bar,
+        ucl: d4 * r_bar,
+        lcl: d3 * r_bar,
+    };
+    let average_chart = GageChartLimits {
+        center: x_double_bar,
+        ucl: x_double_bar + a2 * r_bar,
+        lcl: x_double_bar - a2 * r_bar,
+    };
+
     let ndc = compute_ndc(pv, grr);
     let status = grr_status(percent_grr);
 
     Ok(GageRRResult {
+        range_chart,
+        average_chart,
         ev,
         av,
         grr,
@@ -818,6 +865,91 @@ mod tests {
     // -----------------------------------------------------------------------
     // X̄-R method tests
     // -----------------------------------------------------------------------
+
+    /// The study's two charts come back with it, from the same R̄ the variance
+    /// components are built from.
+    ///
+    /// A consumer that draws them otherwise re-derives R̄ from the raw
+    /// measurements and copies the D3/D4/A2 tables out of a manual -- two
+    /// chances for its numbers to disagree with the ones beside them.
+    #[test]
+    fn the_result_carries_the_charts_the_method_plots() {
+        // 3 parts x 2 operators x 3 trials.
+        let measurements = vec![
+            vec![vec![10.0, 10.2, 10.1], vec![10.1, 10.0, 10.2]],
+            vec![vec![12.0, 12.1, 12.3], vec![12.2, 12.0, 12.1]],
+            vec![vec![14.0, 14.1, 14.2], vec![14.1, 14.3, 14.0]],
+        ];
+        let input = GageRRInput {
+            measurements: measurements.clone(),
+            tolerance: None,
+        };
+        let r = gage_rr_xbar_r(&input).expect("3 parts, 2 operators, 3 trials");
+
+        // R̄ computed independently from the cell ranges.
+        let cell_ranges: Vec<f64> = measurements
+            .iter()
+            .flat_map(|part| {
+                part.iter().map(|trials| {
+                    trials.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+                        - trials.iter().copied().fold(f64::INFINITY, f64::min)
+                })
+            })
+            .collect();
+        let r_bar = cell_ranges.iter().sum::<f64>() / cell_ranges.len() as f64;
+        assert!(
+            (r.range_chart.center - r_bar).abs() < 1e-12,
+            "R̄ = {} vs {r_bar}",
+            r.range_chart.center
+        );
+
+        // n = 3 trials: AIAG D3 = 0, D4 = 2.575, A2 = 1.023.
+        assert!((r.range_chart.ucl - 2.575 * r_bar).abs() < 1e-12);
+        assert_eq!(r.range_chart.lcl, 0.0, "D3 is 0 at n = 3");
+
+        // X̿ over the cell averages, and the average chart around it.
+        let cell_means: Vec<f64> = measurements
+            .iter()
+            .flat_map(|part| {
+                part.iter()
+                    .map(|trials| trials.iter().sum::<f64>() / trials.len() as f64)
+            })
+            .collect();
+        let x_double_bar = cell_means.iter().sum::<f64>() / cell_means.len() as f64;
+        assert!((r.average_chart.center - x_double_bar).abs() < 1e-12);
+        assert!((r.average_chart.ucl - (x_double_bar + 1.023 * r_bar)).abs() < 1e-12);
+        assert!((r.average_chart.lcl - (x_double_bar - 1.023 * r_bar)).abs() < 1e-12);
+    }
+
+    /// The factor tables are the crate's, and the subgroup sizes this method
+    /// can reach are only 2 and 3 -- so a caller never meets a size the tables
+    /// do not cover, and never needs a fallback for one.
+    #[test]
+    fn the_method_only_ever_asks_for_factors_it_has() {
+        let two = vec![
+            vec![vec![10.0, 10.2], vec![10.1, 10.0]],
+            vec![vec![12.0, 12.1], vec![12.2, 12.0]],
+        ];
+        let r = gage_rr_xbar_r(&GageRRInput {
+            measurements: two,
+            tolerance: None,
+        })
+        .expect("2 trials");
+        // n = 2: D4 = 3.267, A2 = 1.880.
+        assert!((r.range_chart.ucl / r.range_chart.center - 3.267).abs() < 1e-12);
+
+        // Four trials is refused by the method itself, before any factor is
+        // looked up: there is no path to an uncovered subgroup size.
+        let four = vec![
+            vec![vec![10.0, 10.2, 10.1, 10.3], vec![10.1, 10.0, 10.2, 10.1]],
+            vec![vec![12.0, 12.1, 12.3, 12.2], vec![12.2, 12.0, 12.1, 12.3]],
+        ];
+        assert!(gage_rr_xbar_r(&GageRRInput {
+            measurements: four,
+            tolerance: None,
+        })
+        .is_err());
+    }
 
     #[test]
     fn xbar_r_basic_computation() {

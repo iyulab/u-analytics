@@ -573,6 +573,10 @@ spectral_residual(input: {
 
 // Gage R&R — measurements[part][operator][trial]
 gage_rr_xbar_r(input: { measurements: number[][][], tolerance?: number }): {
+  // The two charts the method plots, from the same R-bar the components use.
+  // Subgroup = one operator x part cell, so n is the trial count (2 or 3).
+  range_chart:   { center: number, ucl: number, lcl: number },  // R-bar, D4*R-bar, D3*R-bar
+  average_chart: { center: number, ucl: number, lcl: number },  // X-double-bar +/- A2*R-bar
   ev, av, grr, pv, tv, percent_ev, percent_av, percent_grr, percent_pv: number,
   percent_tolerance: number | null, ndc: number, status: "Acceptable" | "Marginal" | "Unacceptable",
 }
@@ -589,6 +593,12 @@ percentile_capability(input: { data: number[], usl?: number, lsl?: number }): {
   median: number, percentile_lower: number, percentile_upper: number,
 }
 ```
+
+Points on the average chart are *expected* to fall outside its limits -- that is
+how the study reads whether the parts vary enough to be told apart. The factors
+come from `spc::range_chart_factors(n)` (Rust), which refuses a subgroup size the
+tables do not cover rather than approximating it; `gage_rr_xbar_r` itself accepts
+only 2 or 3 trials, so that refusal is unreachable through it.
 
 ## C FFI (NuGet `UAnalytics`)
 

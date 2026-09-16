@@ -43,4 +43,4 @@ pub use chart::{
     ViolationType, MAX_SUBGROUP_SIZE, MIN_SUBGROUP_SIZE,
 };
 pub use rules::{NelsonRules, RuleSet, RunRule, WesternElectricRules};
-pub use variables::{IndividualMRChart, XBarRChart, XBarSChart};
+pub use variables::{range_chart_factors, IndividualMRChart, XBarRChart, XBarSChart};

@@ -8,6 +8,22 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- **`gage_rr_xbar_r` returns the two charts its method plots** --
+  `range_chart` (R̄, `D4·R̄`, `D3·R̄`) and `average_chart` (X̿ ± `A2·R̄`), both
+  computed from the same R̄ the variance components are built from. They are how
+  a study reads whether operators are consistent and whether the parts vary
+  enough to be told apart, and the result carried neither, so a consumer drawing
+  them re-derived R̄ from the raw measurements and copied the D3/D4/A2 tables out
+  of a manual -- two chances for its numbers to disagree with the ones beside
+  them.
+
+- **`spc::range_chart_factors(n)`** (Rust) -- the `(A2, D3, D4)` a subgroup of
+  `n` takes. The crate held these and kept them to itself. A size outside the
+  tables is `subgroup_size_out_of_range`, not an approximation: falling back to
+  another size's factors draws limits that look right and are not.
+
 ### Changed (breaking)
 
 - **A rejected sample size has its own code.** `sample_size_not_positive` is

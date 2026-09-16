@@ -773,7 +773,28 @@ pub(crate) struct GageRRInputDto {
 }
 
 #[derive(Serialize)]
+pub(crate) struct GageChartLimitsDto {
+    pub(crate) center: f64,
+    pub(crate) ucl: f64,
+    pub(crate) lcl: f64,
+}
+
+impl From<crate::msa::GageChartLimits> for GageChartLimitsDto {
+    fn from(l: crate::msa::GageChartLimits) -> Self {
+        GageChartLimitsDto {
+            center: l.center,
+            ucl: l.ucl,
+            lcl: l.lcl,
+        }
+    }
+}
+
+#[derive(Serialize)]
 pub(crate) struct GageRRResultDto {
+    /// The range chart the method plots, from the same R̄ the components use.
+    pub(crate) range_chart: GageChartLimitsDto,
+    /// The average chart the method plots.
+    pub(crate) average_chart: GageChartLimitsDto,
     pub(crate) ev: f64,
     pub(crate) av: f64,
     pub(crate) grr: f64,
@@ -893,6 +914,8 @@ pub(crate) fn gage_rr_xbar_r_dto(dto: GageRRInputDto) -> Result<GageRRResultDto,
     };
     let result = crate::msa::gage_rr_xbar_r(&input).map_err(|e| e.to_string())?;
     Ok(GageRRResultDto {
+        range_chart: result.range_chart.into(),
+        average_chart: result.average_chart.into(),
         ev: result.ev,
         av: result.av,
         grr: result.grr,

@@ -43,6 +43,39 @@ use super::rules::{RuleSet, RunRule};
 // future edit cannot quietly break it.
 // ---------------------------------------------------------------------------
 
+/// The range-chart and average-chart factors for a subgroup of `n`.
+///
+/// `(a2, d3, d4)`, as tabulated in AIAG's SPC manual: an average chart's limits
+/// are `x̿ ± a2·r̄` and a range chart's are `d3·r̄` and `d4·r̄`.
+///
+/// Exposed because a caller that draws those charts otherwise copies the tables
+/// out of a manual and has nothing to check the copy against. A subgroup size
+/// the tables do not cover is refused rather than approximated -- falling back
+/// to another size's factors draws limits that look right and are not.
+///
+/// # Errors
+/// [`ControlChartError::SubgroupSizeOutOfRange`] outside
+/// `MIN_SUBGROUP_SIZE..=MAX_SUBGROUP_SIZE`.
+///
+/// # Examples
+/// ```
+/// use u_analytics::spc::range_chart_factors;
+///
+/// let (a2, d3, d4) = range_chart_factors(2).unwrap();
+/// assert_eq!((a2, d3, d4), (1.880, 0.000, 3.267));
+/// assert!(range_chart_factors(1).is_err());
+/// ```
+pub fn range_chart_factors(n: usize) -> Result<(f64, f64, f64), ControlChartError> {
+    if !(MIN_SUBGROUP_SIZE..=MAX_SUBGROUP_SIZE).contains(&n) {
+        return Err(ControlChartError::SubgroupSizeOutOfRange {
+            got: n,
+            min: MIN_SUBGROUP_SIZE,
+            max: MAX_SUBGROUP_SIZE,
+        });
+    }
+    Ok((A2[n - 2], D3[n - 2], D4[n - 2]))
+}
+
 /// A2 factors for X-bar-R chart UCL/LCL computation.
 ///
 /// UCL = X-double-bar + A2 * R-bar, LCL = X-double-bar - A2 * R-bar.
