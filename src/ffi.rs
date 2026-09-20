@@ -70,7 +70,9 @@ fn write_error(
     error: impl Into<crate::wire::WireError>,
 ) -> i32 {
     let e = error.into();
-    let err = serde_json::json!({ "error": e.message, "code": e.code, "index": e.index });
+    let err = serde_json::json!({
+        "error": e.message, "code": e.code, "index": e.index, "parameter": e.parameter,
+    });
     match write_json(result_ptr, &err) {
         0 => status,
         write_failure => write_failure,

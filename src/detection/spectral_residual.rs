@@ -40,6 +40,56 @@ pub const MIN_OBSERVATIONS: usize = 12;
 /// in Ren et al.).
 const EXTENSION: usize = 5;
 
+/// Why a [`SpectralResidual`] run was refused.
+///
+/// One condition, not the rulebook. A consumer has to tell its user which
+/// setting to change, and a refusal that lists every rule leaves it
+/// re-validating the options the crate already checks -- which is how the
+/// same rules end up written twice, in two places that can drift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SpectralResidualError {
+    /// An option is outside its domain.
+    OptionOutOfRange {
+        /// The option's name, spelled as the builder and the wire formats
+        /// spell it (`threshold`, `sensitivity`, ...).
+        option: &'static str,
+        /// What that option has to satisfy, for a message a consumer can show.
+        requirement: &'static str,
+    },
+    /// Fewer observations than the transform is applied to at once.
+    TooFewObservations {
+        /// [`MIN_OBSERVATIONS`].
+        needed: usize,
+        /// How many were given.
+        got: usize,
+    },
+    /// The series holds a NaN or an infinity.
+    ValueNotFinite {
+        /// Position of the first such value.
+        index: usize,
+    },
+}
+
+impl core::fmt::Display for SpectralResidualError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SpectralResidualError::OptionOutOfRange {
+                option,
+                requirement,
+            } => write!(f, "{option} must be {requirement}"),
+            SpectralResidualError::TooFewObservations { needed, got } => {
+                write!(f, "needs at least {needed} observations, got {got}")
+            }
+            SpectralResidualError::ValueNotFinite { index } => {
+                write!(f, "data[{index}] is not a finite number")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SpectralResidualError {}
+
 /// Spectral residual anomaly scorer.
 ///
 /// Built with [`SpectralResidual::new`] (the defaults of Ren et al. 2019) and
@@ -126,40 +176,77 @@ impl SpectralResidual {
         self
     }
 
-    fn valid(&self) -> bool {
-        self.averaging_window >= 1
-            && self.judgement_window >= 1
-            && self.threshold.is_finite()
-            && self.threshold > 0.0
-            && self.min_zscore.is_finite()
-            && self.min_zscore >= 0.0
-            && self.sensitivity.is_finite()
-            && self.sensitivity > 0.0
-            && self.sensitivity < 100.0
-            && self.batch_size.is_none_or(|b| b >= MIN_OBSERVATIONS)
+    /// The first option that is outside its domain, in a fixed order.
+    fn check_options(&self) -> Result<(), SpectralResidualError> {
+        let out_of_range = |option, requirement| {
+            Err(SpectralResidualError::OptionOutOfRange {
+                option,
+                requirement,
+            })
+        };
+        if self.averaging_window < 1 {
+            return out_of_range("averaging_window", ">= 1");
+        }
+        if self.judgement_window < 1 {
+            return out_of_range("judgement_window", ">= 1");
+        }
+        if !self.threshold.is_finite() || self.threshold <= 0.0 {
+            return out_of_range("threshold", "a finite number > 0");
+        }
+        if !self.min_zscore.is_finite() || self.min_zscore < 0.0 {
+            return out_of_range("min_zscore", "a finite number >= 0");
+        }
+        if !self.sensitivity.is_finite() || self.sensitivity <= 0.0 || self.sensitivity >= 100.0 {
+            return out_of_range("sensitivity", "a finite number strictly between 0 and 100");
+        }
+        if self.batch_size.is_some_and(|b| b < MIN_OBSERVATIONS) {
+            return out_of_range("batch_size", "unset, or at least MIN_OBSERVATIONS");
+        }
+        Ok(())
     }
 
     /// Scores every point of the series.
     ///
-    /// Returns `None` when the configuration is invalid, the series has fewer
-    /// than [`MIN_OBSERVATIONS`] points, or a value is not finite. The
-    /// result has one [`SrPoint`] per input point, in order.
+    /// The result has one [`SrPoint`] per input point, in order.
+    ///
+    /// # Errors
+    ///
+    /// Returns the **one** condition that was not met — the option that is out
+    /// of its domain, the shortfall in observations, or the position of the
+    /// first non-finite value — rather than a refusal a caller has to match
+    /// against the whole rulebook to interpret.
     ///
     /// # Examples
     ///
     /// ```
-    /// use u_analytics::detection::SpectralResidual;
+    /// use u_analytics::detection::{SpectralResidual, SpectralResidualError};
     ///
     /// let mut series: Vec<f64> = (0..60).map(|t| (t as f64 * 0.3).sin()).collect();
     /// series[40] += 4.0; // a spike
     /// let points = SpectralResidual::new().analyze(&series).unwrap();
     /// assert!(points[40].is_anomaly);
     /// assert!(points[40].score > points[20].score);
+    ///
+    /// // A refusal names the option it is about.
+    /// let refused = SpectralResidual::new().with_threshold(0.0).analyze(&series);
+    /// assert_eq!(
+    ///     refused,
+    ///     Err(SpectralResidualError::OptionOutOfRange {
+    ///         option: "threshold",
+    ///         requirement: "a finite number > 0",
+    ///     })
+    /// );
     /// ```
-    pub fn analyze(&self, series: &[f64]) -> Option<Vec<SrPoint>> {
-        if !self.valid() || series.len() < MIN_OBSERVATIONS || series.iter().any(|v| !v.is_finite())
-        {
-            return None;
+    pub fn analyze(&self, series: &[f64]) -> Result<Vec<SrPoint>, SpectralResidualError> {
+        self.check_options()?;
+        if series.len() < MIN_OBSERVATIONS {
+            return Err(SpectralResidualError::TooFewObservations {
+                needed: MIN_OBSERVATIONS,
+                got: series.len(),
+            });
+        }
+        if let Some(index) = series.iter().position(|v| !v.is_finite()) {
+            return Err(SpectralResidualError::ValueNotFinite { index });
         }
         let n = series.len();
         let batch = self.batch_size.unwrap_or(n).min(n);
@@ -175,7 +262,7 @@ impl SpectralResidual {
             points.extend(self.analyze_batch(&series[start..end], start));
             start = end;
         }
-        Some(points)
+        Ok(points)
     }
 
     fn analyze_batch(&self, data: &[f64], offset: usize) -> Vec<SrPoint> {
@@ -472,32 +559,90 @@ mod tests {
         }
     }
 
+    /// A refusal names the one condition that failed, so a consumer can point
+    /// at the setting to change instead of restating every rule.
     #[test]
-    fn invalid_input_and_configuration_are_refused() {
-        assert!(SpectralResidual::new().analyze(&[1.0; 11]).is_none());
+    fn a_refusal_names_the_condition_that_failed() {
+        let ok = vec![1.0; 20];
+        let out_of_range = |option, requirement| {
+            Err(SpectralResidualError::OptionOutOfRange {
+                option,
+                requirement,
+            })
+        };
+
+        assert_eq!(
+            SpectralResidual::new().analyze(&[1.0; 11]),
+            Err(SpectralResidualError::TooFewObservations {
+                needed: MIN_OBSERVATIONS,
+                got: 11
+            })
+        );
+
         let mut series = vec![1.0; 20];
         series[7] = f64::INFINITY;
-        assert!(SpectralResidual::new().analyze(&series).is_none());
-        let ok = vec![1.0; 20];
-        assert!(SpectralResidual::new()
+        assert_eq!(
+            SpectralResidual::new().analyze(&series),
+            Err(SpectralResidualError::ValueNotFinite { index: 7 })
+        );
+
+        // Every option, each naming itself — the four the consumer report
+        // reached through one indistinguishable message, and the two beside
+        // them.
+        assert_eq!(
+            SpectralResidual::new().with_threshold(0.0).analyze(&ok),
+            out_of_range("threshold", "a finite number > 0")
+        );
+        assert_eq!(
+            SpectralResidual::new().with_sensitivity(100.0).analyze(&ok),
+            out_of_range("sensitivity", "a finite number strictly between 0 and 100")
+        );
+        assert_eq!(
+            SpectralResidual::new().with_sensitivity(0.0).analyze(&ok),
+            out_of_range("sensitivity", "a finite number strictly between 0 and 100")
+        );
+        assert_eq!(
+            SpectralResidual::new()
+                .with_batch_size(Some(5))
+                .analyze(&ok),
+            out_of_range("batch_size", "unset, or at least MIN_OBSERVATIONS")
+        );
+        assert_eq!(
+            SpectralResidual::new()
+                .with_averaging_window(0)
+                .analyze(&ok),
+            out_of_range("averaging_window", ">= 1")
+        );
+        assert_eq!(
+            SpectralResidual::new()
+                .with_judgement_window(0)
+                .analyze(&ok),
+            out_of_range("judgement_window", ">= 1")
+        );
+        assert_eq!(
+            SpectralResidual::new().with_min_zscore(-1.0).analyze(&ok),
+            out_of_range("min_zscore", "a finite number >= 0")
+        );
+        assert_eq!(
+            SpectralResidual::new()
+                .with_threshold(f64::NAN)
+                .analyze(&ok),
+            out_of_range("threshold", "a finite number > 0")
+        );
+
+        // The message a transport shows repeats the option, not the rulebook.
+        let message = SpectralResidual::new()
             .with_threshold(0.0)
             .analyze(&ok)
-            .is_none());
-        assert!(SpectralResidual::new()
-            .with_sensitivity(100.0)
-            .analyze(&ok)
-            .is_none());
-        assert!(SpectralResidual::new()
-            .with_averaging_window(0)
-            .analyze(&ok)
-            .is_none());
-        assert!(SpectralResidual::new()
-            .with_batch_size(Some(5))
-            .analyze(&ok)
-            .is_none());
+            .expect_err("refused")
+            .to_string();
+        assert_eq!(message, "threshold must be a finite number > 0");
+        assert!(!message.contains("sensitivity"));
+
+        // `min_zscore = 0` disables the gate; it is not out of range.
         assert!(SpectralResidual::new()
             .with_min_zscore(0.0)
             .analyze(&ok)
-            .is_some());
+            .is_ok());
     }
 }

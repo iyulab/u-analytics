@@ -220,17 +220,20 @@ anderson_darling_normality(new Float64Array([4.9, 5.1, 5.0, 5.2, 4.8, 5.05]));
 // → { statistic, statistic_modified, p_value }
 ```
 
-**Errors.** A refused input throws an `Error` with two extra properties:
+**Errors.** A refused input throws an `Error` with three extra properties:
 
 ```ts
 interface AnalyticsError extends Error {
-  code: string          // stable reason — branch on this, not on `message`
-  index: number | null  // position of the offending element in its input array
+  code: string              // stable reason — branch on this, not on `message`
+  index: number | null      // position of the offending element in its input array
+  parameter: string | null  // the option the refusal is about, when it is about one
 }
 // try { c_chart([1, 2, 2.5]) } catch (e) { e.code === "count_not_whole"; e.index === 2 }
 // On a [defectives, sample_size] row the code says which member failed:
 //   p_chart([[1, 10], [1.5, 10]]) -> count_not_whole,      index 1
 //   p_chart([[1, 10], [1, 10.5]]) -> sample_size_not_whole, index 1
+// `index` says where in the data; `parameter` says which option:
+//   spectral_residual(data, { threshold: 0 }) -> option_out_of_range, parameter "threshold"
 ```
 
 | `code` | Meaning |
@@ -242,7 +245,8 @@ interface AnalyticsError extends Error {
 | `subgroup_length_mismatch` | a subgroup of a different length than the first |
 | `subgroup_size_out_of_range` | a subgroup size the factor tables do not cover |
 | `too_few_samples` | fewer samples than the chart needs (`index: null`) |
-| `standard_out_of_range` | a Phase I `p_bar`/`u_bar`/`phi` outside its domain |
+| `standard_out_of_range` | a Phase I `p_bar`/`u_bar`/`phi` outside its domain — `parameter` names which |
+| `option_out_of_range` | an option outside its domain — `parameter` names which, and `message` states what it has to satisfy |
 | `malformed_input` | not the shape the function takes — a row that is not a pair, an unknown field |
 | `invalid_input` | any other refusal; the message says what |
 
@@ -622,12 +626,12 @@ char   *uanalytics_version(void);            // crate version; free with uanalyt
 |---|---|---|
 | `0` | success | the response JSON |
 | `-1` | `request_json` or `result_ptr` was null | null |
-| `-2` | the request did not parse into the expected shape | `{"error": "...", "code": "malformed_input", "index": null}` |
-| `-3` | the request parsed, and the computation rejected it | `{"error": "...", "code": "...", "index": ...}` |
-| `-4` | internal panic (caught; never unwinds across the boundary) | `{"error": "...", "code": "invalid_input", "index": null}` |
+| `-2` | the request did not parse into the expected shape | `{"error": "...", "code": "malformed_input", "index": null, "parameter": null}` |
+| `-3` | the request parsed, and the computation rejected it | `{"error": "...", "code": "...", "index": ..., "parameter": ...}` |
+| `-4` | internal panic (caught; never unwinds across the boundary) | `{"error": "...", "code": "invalid_input", "index": null, "parameter": null}` |
 
-`code` and `index` are the same values the JavaScript `Error` carries (see
-**Errors** in the JavaScript section).
+`code`, `index` and `parameter` are the same values the JavaScript `Error`
+carries (see **Errors** in the JavaScript section).
 
 Unknown request fields are rejected (`-2`, naming the field) rather than
 ignored, so a misspelt option cannot silently change which analysis you get.

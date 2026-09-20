@@ -97,7 +97,8 @@ struct TChartPointDto {
 // ---------------------------------------------------------------------------
 
 /// Every refusal crosses into JavaScript as an `Error` carrying `code` (a
-/// stable reason) and `index` (the offending array position, or `null`), with
+/// stable reason), `index` (the offending array position, or `null`) and
+/// `parameter` (the option the refusal is about, or `null`), with
 /// the human-readable text as its `message` -- the shape Node gives its own
 /// errors, so `err.message` still reads as before while a program can branch on
 /// `err.code` and point at `err.index`.
@@ -114,6 +115,8 @@ fn js_err(error: impl Into<WireError>) -> JsValue {
         &JsValue::from_str(error.code),
     );
     let _ = js_sys::Reflect::set(&js, &JsValue::from_str("index"), &index);
+    let parameter = error.parameter.map_or(JsValue::NULL, JsValue::from_str);
+    let _ = js_sys::Reflect::set(&js, &JsValue::from_str("parameter"), &parameter);
     js.into()
 }
 

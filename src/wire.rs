@@ -228,6 +228,13 @@ pub(crate) struct WireError {
     pub(crate) code: &'static str,
     /// Position of the offending element in its input array, when there is one.
     pub(crate) index: Option<usize>,
+    /// Name of the offending *option*, when the refusal is about one.
+    ///
+    /// `index` says where in the data; this says which knob. Without it the
+    /// name lives only in `message`, which is the one field documented as free
+    /// to change -- so a consumer wanting to point at the setting has to parse
+    /// prose, or re-derive the rule itself.
+    pub(crate) parameter: Option<&'static str>,
     /// Human-readable description.
     pub(crate) message: String,
 }
@@ -264,6 +271,8 @@ pub(crate) mod code {
     pub(crate) const TOO_FEW_SAMPLES: &str = "too_few_samples";
     /// A known (Phase I) parameter outside its domain.
     pub(crate) const STANDARD_OUT_OF_RANGE: &str = "standard_out_of_range";
+    /// An option outside its domain. `parameter` names which one.
+    pub(crate) const OPTION_OUT_OF_RANGE: &str = "option_out_of_range";
 }
 
 impl WireError {
@@ -275,8 +284,15 @@ impl WireError {
         WireError {
             code,
             index,
+            parameter: None,
             message: message.into(),
         }
+    }
+
+    /// Names the option a refusal is about, alongside its code.
+    pub(crate) fn about(mut self, parameter: &'static str) -> Self {
+        self.parameter = Some(parameter);
+        self
     }
 
     /// A refusal without a more specific code.
@@ -300,7 +316,13 @@ impl WireError {
             Some(i) => format!("{label}[{i}]: {error}"),
             None => error.to_string(),
         };
-        Self::new(chart_error_code(error), index, message)
+        let wire = Self::new(chart_error_code(error), index, message);
+        match error {
+            // The domain error already names the parameter; the wire record
+            // should not make a consumer read it back out of the message.
+            crate::spc::ControlChartError::InvalidStandard { parameter } => wire.about(parameter),
+            _ => wire,
+        }
     }
 
     /// A whole-slice chart's refusal.
@@ -1230,12 +1252,25 @@ pub(crate) struct SpectralResidualDto {
     pub(crate) anomalies: Vec<usize>,
 }
 
+impl From<crate::detection::SpectralResidualError> for WireError {
+    fn from(error: crate::detection::SpectralResidualError) -> Self {
+        use crate::detection::SpectralResidualError as E;
+        let message = error.to_string();
+        match error {
+            E::OptionOutOfRange { option, .. } => {
+                WireError::new(code::OPTION_OUT_OF_RANGE, None, message).about(option)
+            }
+            E::TooFewObservations { .. } => WireError::too_few_samples(message),
+            E::ValueNotFinite { index } => {
+                WireError::new(code::VALUE_NOT_FINITE, Some(index), message)
+            }
+        }
+    }
+}
+
 pub(crate) fn spectral_residual_dto(
     input: SpectralResidualInputDto,
-) -> Result<SpectralResidualDto, String> {
-    if let Some(i) = input.data.iter().position(|x| !x.is_finite()) {
-        return Err(format!("data[{i}] is not a finite number"));
-    }
+) -> Result<SpectralResidualDto, WireError> {
     let mut sr = crate::detection::SpectralResidual::new();
     if let Some(q) = input.averaging_window {
         sr = sr.with_averaging_window(q);
@@ -1255,15 +1290,9 @@ pub(crate) fn spectral_residual_dto(
     if input.batch_size.is_some() {
         sr = sr.with_batch_size(input.batch_size);
     }
-    let points = sr.analyze(&input.data).ok_or_else(|| {
-        format!(
-            "invalid configuration or data (need at least {} finite values; averaging_window >= 1, \
-             judgement_window >= 1, threshold > 0, min_zscore >= 0, 0 < sensitivity < 100, \
-             batch_size >= {})",
-            crate::detection::SR_MIN_OBSERVATIONS,
-            crate::detection::SR_MIN_OBSERVATIONS
-        )
-    })?;
+    // The crate owns these rules, so it is the crate that says which one was
+    // broken -- the transports only carry the answer.
+    let points = sr.analyze(&input.data)?;
     let anomalies = points
         .iter()
         .filter(|p| p.is_anomaly)
@@ -1397,12 +1426,84 @@ mod input_error_tests {
     }
 
     #[test]
-    fn the_error_serializes_as_code_index_message() {
+    fn the_error_serializes_as_code_index_parameter_message() {
+        // Both locators are always present: `index` says where in the data,
+        // `parameter` says which option, and each is null when it does not
+        // apply -- so a consumer reads a field rather than testing for one.
         let e = WireError::new(code::COUNT_NOT_WHOLE, Some(4), "defects[4]: nope");
         assert_eq!(
             serde_json::to_value(&e).expect("serializable"),
-            json!({ "code": "count_not_whole", "index": 4, "message": "defects[4]: nope" })
+            json!({
+                "code": "count_not_whole", "index": 4,
+                "parameter": null, "message": "defects[4]: nope"
+            })
         );
+
+        let e = WireError::new(code::OPTION_OUT_OF_RANGE, None, "threshold must be > 0")
+            .about("threshold");
+        assert_eq!(
+            serde_json::to_value(&e).expect("serializable"),
+            json!({
+                "code": "option_out_of_range", "index": null,
+                "parameter": "threshold", "message": "threshold must be > 0"
+            })
+        );
+    }
+
+    /// The report that prompted this: four different option mistakes reached
+    /// the consumer as one indistinguishable message, so it re-validated the
+    /// options itself. Each now arrives naming its own option.
+    #[test]
+    fn a_refused_option_names_itself_on_the_wire() {
+        let request = |extra: serde_json::Value| {
+            let mut body = json!({ "data": vec![1.0_f64; 20] });
+            let (map, extra) = (body.as_object_mut().expect("object"), extra);
+            for (k, v) in extra.as_object().expect("object") {
+                map.insert(k.clone(), v.clone());
+            }
+            let input: SpectralResidualInputDto =
+                serde_json::from_value(body).expect("valid request");
+            spectral_residual_dto(input)
+        };
+
+        for (option, body) in [
+            ("threshold", json!({ "threshold": 0.0 })),
+            ("sensitivity", json!({ "sensitivity": 100.0 })),
+            ("sensitivity", json!({ "sensitivity": 0.0 })),
+            ("batch_size", json!({ "batch_size": 5 })),
+        ] {
+            let e = request(body).expect_err("refused");
+            assert_eq!(e.code, code::OPTION_OUT_OF_RANGE, "{}", e.message);
+            assert_eq!(e.parameter, Some(option), "{}", e.message);
+            assert!(e.message.starts_with(option), "{}", e.message);
+        }
+
+        // Data problems keep their own codes and the position. A NaN has no
+        // JSON spelling, so this request is built directly.
+        let mut data = vec![1.0_f64; 20];
+        data[7] = f64::NAN;
+        let e = spectral_residual_dto(SpectralResidualInputDto {
+            data,
+            averaging_window: None,
+            judgement_window: None,
+            threshold: None,
+            min_zscore: None,
+            sensitivity: None,
+            batch_size: None,
+        })
+        .expect_err("refused");
+        assert_eq!(
+            (e.code, e.index, e.parameter),
+            (code::VALUE_NOT_FINITE, Some(7), None)
+        );
+
+        let input: SpectralResidualInputDto =
+            serde_json::from_value(json!({ "data": vec![1.0_f64; 11] })).expect("valid request");
+        let e = spectral_residual_dto(input).expect_err("refused");
+        assert_eq!(e.code, code::TOO_FEW_SAMPLES);
+
+        // And a valid request is still served.
+        assert!(request(json!({})).is_ok());
     }
 
     fn standard(v: serde_json::Value) -> AttributeStandardDto {

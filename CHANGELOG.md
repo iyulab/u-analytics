@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.5.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Changed
+
+- **A refused `spectral_residual` names the one option that was wrong.**
+  `SpectralResidual::analyze` returned `Option`, so it threw away *which*
+  condition had failed; every transport then restated the whole rulebook --
+  "need at least 12 finite observations; averaging_window >= 1,
+  judgement_window >= 1, threshold > 0, min_zscore >= 0, 0 < sensitivity < 100,
+  batch_size 0 or >= 12" -- for a caller to match its own settings against.
+  Consumers therefore re-validated the options themselves, writing the crate's
+  rules a second time in a place that can drift from them.
+
+  It now returns `Result<Vec<SrPoint>, SpectralResidualError>`, naming the
+  option and what it has to satisfy, the shortfall in observations, or the
+  position of the first non-finite value.
+
+- **A wire error carries `parameter` beside `index`.** `index` says where in
+  the data a refusal is; `parameter` says which option it is about. Without it
+  the option's name lived only in `message`, the one field documented as free
+  to change, so pointing a user at the setting to fix meant parsing prose.
+  It is `null` where it does not apply, on every transport, and
+  `standard_out_of_range` now fills it with the `p_bar`/`u_bar`/`phi` the
+  domain error already named.
+
+  New code `option_out_of_range`.
+
 ## [0.13.0] - 2026-09-16
 
 ### Added
