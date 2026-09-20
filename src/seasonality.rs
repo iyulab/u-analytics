@@ -99,7 +99,10 @@ impl Periodogram {
 pub struct PeriodCandidate {
     /// Integer period, in observations.
     pub period: usize,
-    /// Autocorrelation at that lag — the strength of the periodicity.
+    /// Autocorrelation at that lag, with the `(n − lag)/n` bias of the
+    /// estimator undone — the same value this candidate was selected and
+    /// accepted on, so it is comparable against
+    /// [`SeasonalityResult::acf_threshold`] and against other candidates.
     pub acf: f64,
     /// Periodogram bin (1-based) whose band produced this candidate.
     pub bin: usize,
@@ -248,19 +251,25 @@ pub fn estimate_period(series: &[f64]) -> Option<SeasonalityResult> {
         if lo > hi {
             continue;
         }
-        let Some(lag) = (lo..=hi)
-            .filter(|&lag| lag < r.len())
-            .max_by(|&a, &b| r[a].partial_cmp(&r[b]).expect("finite acf"))
-        else {
+        // The biased ACF shrinks by (n − lag)/n, and that shrinkage is
+        // monotone in the lag -- so on a hill spanning several lags it tilts
+        // every comparison toward the shorter one, and the estimate lands
+        // below the true period whenever the series is not a whole number of
+        // cycles long. Undoing the bias is exactly what removes that tilt, so
+        // the corrected value decides all three questions here: which lag in
+        // the band, whether it is a hill top, and whether it clears the bound.
+        let corrected_at = |lag: usize| r[lag] * n as f64 / (n - lag) as f64;
+        let Some(lag) = (lo..=hi).filter(|&lag| lag < r.len()).max_by(|&a, &b| {
+            corrected_at(a)
+                .partial_cmp(&corrected_at(b))
+                .expect("finite acf")
+        }) else {
             continue;
         };
-        // The biased ACF shrinks by (n − lag)/n, which at short lengths keeps
-        // even a perfect periodicity under the bound; the bound is compared
-        // against the bias-corrected value, the hill is judged on the biased.
-        let corrected = r[lag] * n as f64 / (n - lag) as f64;
+        let corrected = corrected_at(lag);
         let is_hill_top = corrected > acf_threshold
-            && r[lag] >= r[lag - 1]
-            && r.get(lag + 1).is_none_or(|&next| r[lag] >= next);
+            && corrected >= corrected_at(lag - 1)
+            && (lag + 1 >= r.len() || corrected >= corrected_at(lag + 1));
         if !is_hill_top {
             continue;
         }
@@ -275,7 +284,7 @@ pub fn estimate_period(series: &[f64]) -> Option<SeasonalityResult> {
         }
         candidates.push(PeriodCandidate {
             period: lag,
-            acf: r[lag],
+            acf: corrected,
             bin,
             power,
             power_share: power / total,
@@ -451,6 +460,67 @@ mod tests {
                     n + 3
                 );
             }
+        }
+    }
+
+    /// Reported by a consumer: a 63-point period over 300 observations --
+    /// 4.76 cycles -- came back as 60.
+    ///
+    /// The estimate has to hold when the series is not a whole number of
+    /// cycles long, which is the ordinary case for real data. The sweep below
+    /// is the general statement; this is the series as reported.
+    #[test]
+    fn a_period_is_exact_when_the_series_is_not_a_whole_number_of_cycles() {
+        fn jitter(i: usize) -> f64 {
+            (((i as f64) * 12.9898).sin() * 43758.5453) % 1.0
+        }
+        let spikes = [50usize, 120, 200, 250];
+        let reported: Vec<f64> = (0..300)
+            .map(|i| {
+                25.0 + 2.2 * (2.0 * PI * i as f64 / 63.0).sin()
+                    + 0.4 * jitter(i)
+                    + if spikes.contains(&i) { 12.0 } else { 0.0 }
+            })
+            .collect();
+        let r = estimate_period(&reported).unwrap();
+        assert_eq!(r.period, Some(63), "{r:?}");
+
+        // The same series at whole cycles was never in doubt; the two together
+        // say the fractional tail is what used to move the answer.
+        let whole: Vec<f64> = (0..315)
+            .map(|i| 25.0 + 2.2 * (2.0 * PI * i as f64 / 63.0).sin() + 0.4 * jitter(i))
+            .collect();
+        assert_eq!(estimate_period(&whole).unwrap().period, Some(63));
+
+        for period in [11usize, 17, 23, 31, 47, 63] {
+            let n = ((period as f64) * 4.76).round() as usize;
+            let sine: Vec<f64> = noise(period as u64 * 17 + 3, n)
+                .iter()
+                .enumerate()
+                .map(|(t, e)| (2.0 * PI * t as f64 / period as f64 + 0.7).sin() + 0.2 * e)
+                .collect();
+            let r = estimate_period(&sine).unwrap();
+            assert_eq!(r.period, Some(period), "period {period}, n {n}: {r:?}");
+        }
+    }
+
+    /// A candidate's `acf` is the value it was judged on, so a consumer
+    /// comparing it against `acf_threshold` reaches the crate's own verdict.
+    #[test]
+    fn a_candidate_reports_the_autocorrelation_it_was_accepted_on() {
+        let series: Vec<f64> = (0..137)
+            .map(|t| (2.0 * PI * t as f64 / 19.0).sin())
+            .collect();
+        let r = estimate_period(&series).unwrap();
+        assert_eq!(r.period, Some(19));
+        for c in &r.candidates {
+            assert!(
+                c.acf > r.acf_threshold,
+                "candidate {} reports {} against a bound of {}",
+                c.period,
+                c.acf,
+                r.acf_threshold
+            );
         }
     }
 

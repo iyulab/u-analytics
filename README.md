@@ -560,6 +560,10 @@ estimate_period(input: { data: number[] }): {
   candidates: { period: number, acf: number, bin: number, power: number, power_share: number }[],
   n: number, acf_threshold: number, power_threshold: number,
 }
+// `acf` has the (n - lag)/n bias of the estimator undone -- the value the
+// candidate was selected and accepted on, so comparing it against
+// `acf_threshold` reaches the same verdict the crate did. The period is exact
+// whether or not the series is a whole number of cycles long.
 
 // Spectral residual anomaly scoring — Ren et al. (2019); >= 12 finite values
 spectral_residual(input: {

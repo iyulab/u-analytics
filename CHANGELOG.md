@@ -8,6 +8,30 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Fixed
+
+- **`estimate_period` landed below the true period when the series was not a
+  whole number of cycles long.** A consumer reported a period of 63 over 300
+  observations -- 4.76 cycles -- coming back as 60.
+
+  The autocorrelation hill was selected on the biased estimator, whose
+  `(n - lag)/n` shrinkage is monotone in the lag: on a hill spanning several
+  lags it tilts every comparison toward the shorter one. Undoing the bias is
+  exactly what removes that tilt, so the corrected value now decides which lag
+  in the band, whether it is a hill top, and whether it clears the bound -- it
+  previously decided only the last of the three. On the reported series the
+  corrected autocorrelation peaks at 63 where the biased one peaks at 60.
+
+  A whole number of cycles was never affected, which is why the sweep over
+  periods 2..20 did not see this: its sine case builds `n = period * cycles`.
+
+### Changed
+
+- **A candidate's `acf` is the bias-corrected value it was judged on.** It was
+  the biased one, while `acf_threshold` was compared against the corrected --
+  so a consumer checking a candidate against the bound it ships beside could
+  reach a different verdict than the crate had.
+
 ### Changed
 
 - **A refused `spectral_residual` names the one option that was wrong.**
