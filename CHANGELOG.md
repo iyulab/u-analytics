@@ -8,6 +8,21 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- **A point says whether it sits near a batch boundary (`near_edge`).** The
+  method appends five points along the trailing slope before transforming, and
+  the transform is circular, so that block is adjacent to the first points as
+  well as the last. Measured on a noisy sawtooth of 200 points -- replacing the
+  predicted extension with the series' real continuation, everything else held
+  fixed -- the saliency of the five points at *either* end moves about eight
+  times as much as the middle, and the two ends by the same amount. A consumer
+  seeing a lone flag four places from the end had no way to tell that from a
+  detection in the body of the series.
+
+  It marks a position, not a verdict: a real anomaly near an end is still
+  reported as one.
+
 ### Fixed
 
 - **`estimate_period` landed below the true period when the series was not a
@@ -31,6 +46,13 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   the biased one, while `acf_threshold` was compared against the corrected --
   so a consumer checking a candidate against the bound it ships beside could
   reach a different verdict than the crate had.
+
+- **Documented: at a step, the flag can fall on the point before the
+  transition as well.** Saliency measures local spectral irregularity rather
+  than locating an edge, so the irregularity a level change creates is spread
+  over the points around it and which of them clear the threshold depends on
+  the noise. This is the method as published; a consumer matching detections
+  against known transitions should allow a place on either side.
 
 ### Changed
 

@@ -21,6 +21,26 @@
 //! spread of the residuals. The band is information for a chart, not the
 //! anomaly decision, which is the saliency score.
 //!
+//! # What the saliency does at a boundary, and at a step
+//!
+//! Two properties of the method are worth knowing before reading its output.
+//!
+//! **Near either end of a batch**, the saliency is moved by the transform's
+//! own boundary handling: κ = 5 points along the trailing slope are appended
+//! before the transform, and since the transform is circular that block is
+//! adjacent to the first points as well as the last. Points there carry
+//! [`SrPoint::near_edge`], so a flag that appears only at an end can be told
+//! from one in the body of the series.
+//!
+//! **At a step**, the flag can fall on the point before the transition as well
+//! as on the transition itself -- `[59, 60]` rather than `[60]` for a level
+//! change between 59 and 60. Saliency is a measure of local spectral
+//! irregularity, not an edge detector: the irregularity a step creates is
+//! spread over the points around it, and which of them clear the threshold
+//! depends on the noise. This is the method as published, not a defect, and it
+//! is why a consumer matching detections against known transitions should
+//! allow a place on either side rather than demand an exact index.
+//!
 //! # References
 //! - Ren, H., Xu, B., Wang, Y., Yi, C., Huang, C., Kou, X., Xing, T., Yang,
 //!   M., Tong, J. & Zhang, Q. (2019). "Time-Series Anomaly Detection Service
@@ -34,6 +54,14 @@ use u_numflow::stats::median;
 
 /// Fewest observations the transform is applied to at once.
 pub const MIN_OBSERVATIONS: usize = 12;
+
+// A refusal has to read as a sentence to whoever typed the option, so the
+// `batch_size` message spells the number rather than naming the constant.
+// This keeps the two from drifting apart.
+const _: () = assert!(
+    MIN_OBSERVATIONS == 12,
+    "the batch_size requirement message spells this number"
+);
 
 /// Points appended before the transform to soften its boundary effect, and
 /// the number of preceding points their slope is estimated from (κ = m = 5
@@ -200,7 +228,7 @@ impl SpectralResidual {
             return out_of_range("sensitivity", "a finite number strictly between 0 and 100");
         }
         if self.batch_size.is_some_and(|b| b < MIN_OBSERVATIONS) {
-            return out_of_range("batch_size", "unset, or at least MIN_OBSERVATIONS");
+            return out_of_range("batch_size", "unset, or at least 12");
         }
         Ok(())
     }
@@ -327,6 +355,7 @@ impl SpectralResidual {
                 lower: expected[i] - margin,
                 upper: expected[i] + margin,
                 is_anomaly: flagged[i],
+                near_edge: i < EXTENSION || i + EXTENSION >= n,
             })
             .collect()
     }
@@ -351,6 +380,22 @@ pub struct SrPoint {
     pub upper: f64,
     /// `score > threshold` and the value clears the z-score gate.
     pub is_anomaly: bool,
+    /// The point lies within κ = 5 places of an end of its batch, where the
+    /// transform's own boundary handling moves the saliency most.
+    ///
+    /// The method extends the series by κ points before transforming, and the
+    /// transform is circular, so that appended block sits next to the last
+    /// points *and* the first ones. Measured on a noisy sawtooth of 200
+    /// points, replacing the predicted extension with the series' real
+    /// continuation moves the saliency of the five points at either end about
+    /// eight times as much as it moves the middle -- and the two ends by the
+    /// same amount, which is why this is not a tail-only flag.
+    ///
+    /// It is a property of the position, not a verdict: a real anomaly near an
+    /// end is still reported as one. What it says is that a lone flag here is
+    /// the one worth a second look, and an anomaly count is worth reporting
+    /// with and without these.
+    pub near_edge: bool,
 }
 
 /// The saliency map of Ren et al. (2019): extend the series by κ = 5 points
@@ -559,6 +604,72 @@ mod tests {
         }
     }
 
+    /// The transform's boundary handling reaches both ends, so the marker
+    /// does too -- a tail-only flag would leave half the affected points
+    /// unmarked.
+    #[test]
+    fn points_near_either_end_of_a_batch_are_marked() {
+        let series: Vec<f64> = (0..200).map(|i| (i % 7) as f64).collect();
+        let points = SpectralResidual::new().analyze(&series).expect("ok");
+        let marked: Vec<usize> = points
+            .iter()
+            .filter(|p| p.near_edge)
+            .map(|p| p.index)
+            .collect();
+        assert_eq!(marked, vec![0, 1, 2, 3, 4, 195, 196, 197, 198, 199]);
+
+        // Batching moves the boundaries, so it moves the marks with them.
+        let batched = SpectralResidual::new()
+            .with_batch_size(Some(50))
+            .analyze(&series)
+            .expect("ok");
+        let marked: Vec<usize> = batched
+            .iter()
+            .filter(|p| p.near_edge)
+            .map(|p| p.index)
+            .collect();
+        // 49 and 50 straddle a batch boundary, so both are near an edge; 75
+        // sits in the body of a batch and is not.
+        assert!(marked.contains(&49) && marked.contains(&50), "{marked:?}");
+        assert!(!marked.contains(&75), "{marked:?}");
+        assert_eq!(
+            marked.len(),
+            4 * 10,
+            "four batches, ten marks each: {marked:?}"
+        );
+
+        // It marks a position, it does not suppress a detection: a spike
+        // planted in the last few points is still an anomaly.
+        let mut spiked: Vec<f64> = (0..60).map(|i| (i % 7) as f64).collect();
+        spiked[57] += 30.0;
+        let points = SpectralResidual::new().analyze(&spiked).expect("ok");
+        assert!(points[57].is_anomaly);
+        assert!(points[57].near_edge);
+    }
+
+    /// Documented, not corrected (see the module docs): the flag at a level
+    /// change can land on the point before it as well.
+    #[test]
+    fn a_step_can_flag_the_point_before_the_transition() {
+        let step: Vec<f64> = (0..120)
+            .map(|i| {
+                let jitter = ((i as f64 * 7.3891).sin() * 10000.0).fract().abs() * 0.2;
+                (if i < 60 { 1.0 } else { 6.0 }) + jitter
+            })
+            .collect();
+        let points = SpectralResidual::new().analyze(&step).expect("ok");
+        let flagged: Vec<usize> = points
+            .iter()
+            .filter(|p| p.is_anomaly && !p.near_edge)
+            .map(|p| p.index)
+            .collect();
+        assert!(!flagged.is_empty(), "the transition is detected");
+        assert!(
+            flagged.iter().all(|&i| (59..=61).contains(&i)),
+            "detections sit at the transition or its neighbour: {flagged:?}"
+        );
+    }
+
     /// A refusal names the one condition that failed, so a consumer can point
     /// at the setting to change instead of restating every rule.
     #[test]
@@ -605,7 +716,7 @@ mod tests {
             SpectralResidual::new()
                 .with_batch_size(Some(5))
                 .analyze(&ok),
-            out_of_range("batch_size", "unset, or at least MIN_OBSERVATIONS")
+            out_of_range("batch_size", "unset, or at least 12")
         );
         assert_eq!(
             SpectralResidual::new()

@@ -1244,6 +1244,9 @@ pub(crate) struct SrPointDto {
     pub(crate) lower: f64,
     pub(crate) upper: f64,
     pub(crate) is_anomaly: bool,
+    /// Within kappa = 5 places of an end of its batch, where the transform's
+    /// own boundary handling moves the saliency most.
+    pub(crate) near_edge: bool,
 }
 
 #[derive(Serialize, Debug)]
@@ -1310,6 +1313,7 @@ pub(crate) fn spectral_residual_dto(
                 lower: p.lower,
                 upper: p.upper,
                 is_anomaly: p.is_anomaly,
+                near_edge: p.near_edge,
             })
             .collect(),
         anomalies,

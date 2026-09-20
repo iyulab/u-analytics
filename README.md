@@ -164,6 +164,10 @@ series[40] += 4.0;
 let points = SpectralResidual::new().analyze(&series).unwrap();
 assert!(points[40].is_anomaly);
 let flagged: Vec<usize> = points.iter().filter(|p| p.is_anomaly).map(|p| p.index).collect();
+// `near_edge` marks the kappa = 5 points at either end of a batch, where the
+// transform's own boundary handling moves the saliency most. It marks a
+// position, not a verdict -- but a flag that appears only there is the one
+// worth a second look.
 assert_eq!(flagged, vec![40]);
 ```
 
@@ -575,7 +579,8 @@ spectral_residual(input: {
   sensitivity?: number,           // default 70: coverage % of the expected-value band
   batch_size?: number,            // score in consecutive batches (>= 12)
 }): {
-  points: { index, value, saliency, score, expected, lower, upper: number, is_anomaly: boolean }[],
+  points: { index, value, saliency, score, expected, lower, upper: number,
+            is_anomaly: boolean, near_edge: boolean }[],
   anomalies: number[],            // indices with is_anomaly
 }
 
