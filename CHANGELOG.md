@@ -10,6 +10,25 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Added
 
+- **Every exported WASM function declares its return type.** They were typed
+  `(...) => any`, with the output's field *names* in the doc comment and the
+  element types only in the README -- so a consumer's wrong assumption about a
+  result's shape compiled and shipped. `as` is the only thing that can be
+  written against `any`, and it is exactly the construct that silences this.
+
+  The declarations are derived from the structs the binding already
+  serialises, so there is no second copy to drift: `tsify` emits the interface
+  and `unchecked_return_type` names it in the signature. The runtime path is
+  unchanged -- same serializer, same bytes. An optional field is declared
+  `T | null`, which is what this crate's serializer sends.
+
+  A publish-path check (`scripts/check-typed-dts.sh`) fails the release if any
+  exported function returns `any`, or if a declaration names a type the file
+  does not declare. It runs before publishing rather than beside it in CI,
+  because the two run on the same push.
+
+  Inputs remain `any`; they are validated at the boundary.
+
 - **A point says whether it sits near a batch boundary (`near_edge`).** The
   method appends five points along the trailing slope before transforming, and
   the transform is circular, so that block is adjacent to the first points as
@@ -22,23 +41,6 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
   It marks a position, not a verdict: a real anomaly near an end is still
   reported as one.
-
-### Fixed
-
-- **`estimate_period` landed below the true period when the series was not a
-  whole number of cycles long.** A consumer reported a period of 63 over 300
-  observations -- 4.76 cycles -- coming back as 60.
-
-  The autocorrelation hill was selected on the biased estimator, whose
-  `(n - lag)/n` shrinkage is monotone in the lag: on a hill spanning several
-  lags it tilts every comparison toward the shorter one. Undoing the bias is
-  exactly what removes that tilt, so the corrected value now decides which lag
-  in the band, whether it is a hill top, and whether it clears the bound -- it
-  previously decided only the last of the three. On the reported series the
-  corrected autocorrelation peaks at 63 where the biased one peaks at 60.
-
-  A whole number of cycles was never affected, which is why the sweep over
-  periods 2..20 did not see this: its sine case builds `n = period * cycles`.
 
 ### Changed
 
@@ -53,8 +55,6 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   over the points around it and which of them clear the threshold depends on
   the noise. This is the method as published; a consumer matching detections
   against known transitions should allow a place on either side.
-
-### Changed
 
 - **A refused `spectral_residual` names the one option that was wrong.**
   `SpectralResidual::analyze` returned `Option`, so it threw away *which*
@@ -78,6 +78,23 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   domain error already named.
 
   New code `option_out_of_range`.
+
+### Fixed
+
+- **`estimate_period` landed below the true period when the series was not a
+  whole number of cycles long.** A consumer reported a period of 63 over 300
+  observations -- 4.76 cycles -- coming back as 60.
+
+  The autocorrelation hill was selected on the biased estimator, whose
+  `(n - lag)/n` shrinkage is monotone in the lag: on a hill spanning several
+  lags it tilts every comparison toward the shorter one. Undoing the bias is
+  exactly what removes that tilt, so the corrected value now decides which lag
+  in the band, whether it is a hill top, and whether it clears the bound -- it
+  previously decided only the last of the three. On the reported series the
+  corrected autocorrelation peaks at 63 where the biased one peaks at 60.
+
+  A whole number of cycles was never affected, which is why the sweep over
+  periods 2..20 did not see this: its sine case builds `n = period * cycles`.
 
 ## [0.13.0] - 2026-09-16
 

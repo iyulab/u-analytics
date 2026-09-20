@@ -22,6 +22,8 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct XbarRChartDto {
     pub(crate) xbar_cl: f64,
     pub(crate) xbar_ucl: f64,
@@ -40,6 +42,8 @@ pub(crate) struct XbarRChartDto {
 }
 
 #[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct ChartPointDto {
     pub(crate) index: usize,
     pub(crate) value: f64,
@@ -47,6 +51,8 @@ pub(crate) struct ChartPointDto {
 }
 
 #[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct PChartDto {
     pub(crate) p_bar: f64,
     pub(crate) points: Vec<AttributeChartPointDto>,
@@ -54,6 +60,8 @@ pub(crate) struct PChartDto {
 }
 
 #[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct AttributeChartPointDto {
     pub(crate) index: usize,
     pub(crate) value: f64,
@@ -112,6 +120,8 @@ impl AttributeStandardDto {
 }
 
 #[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct LaneyPChartDto {
     pub(crate) p_bar: f64,
     pub(crate) phi: f64,
@@ -223,6 +233,8 @@ pub(crate) fn subgroup_size(subgroups: &[Vec<f64>]) -> Result<usize, WireError> 
 /// every consumer ended up re-validating the rules the crate already enforces.
 /// `code` is stable across releases; `message` is for people and may change.
 #[derive(Serialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct WireError {
     /// Stable, machine-readable reason (see the constants below).
     pub(crate) code: &'static str,
@@ -686,6 +698,8 @@ pub(crate) struct CapabilityInputDto {
 }
 
 #[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct CapabilityDto {
     pub(crate) mean: f64,
     /// `"within"` when `sigma_within` was supplied, `"overall"` otherwise.
@@ -777,6 +791,8 @@ pub(crate) struct PercentileCapabilityInputDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct PercentileCapabilityDto {
     pub(crate) cp_star: Option<f64>,
     pub(crate) cpk_star: Option<f64>,
@@ -795,6 +811,8 @@ pub(crate) struct GageRRInputDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct GageChartLimitsDto {
     pub(crate) center: f64,
     pub(crate) ucl: f64,
@@ -812,6 +830,8 @@ impl From<crate::msa::GageChartLimits> for GageChartLimitsDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct GageRRResultDto {
     /// The range chart the method plots, from the same R̄ the components use.
     pub(crate) range_chart: GageChartLimitsDto,
@@ -832,6 +852,8 @@ pub(crate) struct GageRRResultDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct GageRRAnovaResultDto {
     pub(crate) anova_table: Vec<AnovaRowDto>,
     pub(crate) variance_components: VarianceComponentsDto,
@@ -849,6 +871,8 @@ pub(crate) struct GageRRAnovaResultDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct AnovaRowDto {
     pub(crate) source: String,
     pub(crate) df: f64,
@@ -859,6 +883,8 @@ pub(crate) struct AnovaRowDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct VarianceComponentsDto {
     pub(crate) part: f64,
     pub(crate) operator: f64,
@@ -896,6 +922,8 @@ pub(crate) enum PeltPenaltyDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct PeltResultDto {
     pub(crate) changepoints: Vec<usize>,
     pub(crate) n_segments: usize,
@@ -1021,6 +1049,8 @@ pub(crate) fn pelt_dto(input: PeltInputDto) -> Result<PeltResultDto, String> {
 }
 
 #[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct XbarSChartDto {
     pub(crate) xbar_cl: f64,
     pub(crate) xbar_ucl: f64,
@@ -1037,6 +1067,8 @@ pub(crate) struct XbarSChartDto {
 }
 
 #[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct ImrChartDto {
     pub(crate) i_cl: f64,
     pub(crate) i_ucl: f64,
@@ -1166,6 +1198,8 @@ pub(crate) struct SeasonalityInputDto {
 }
 
 #[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct PeriodCandidateDto {
     pub(crate) period: usize,
     pub(crate) acf: f64,
@@ -1175,6 +1209,8 @@ pub(crate) struct PeriodCandidateDto {
 }
 
 #[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct SeasonalityDto {
     /// `null` when no periodicity passed both stages.
     pub(crate) period: Option<usize>,
@@ -1235,6 +1271,8 @@ pub(crate) struct SpectralResidualInputDto {
 }
 
 #[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct SrPointDto {
     pub(crate) index: usize,
     pub(crate) value: f64,
@@ -1250,6 +1288,8 @@ pub(crate) struct SrPointDto {
 }
 
 #[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct SpectralResidualDto {
     pub(crate) points: Vec<SrPointDto>,
     pub(crate) anomalies: Vec<usize>,

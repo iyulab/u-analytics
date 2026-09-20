@@ -30,7 +30,8 @@ use crate::wire::{
 // Serializable DTO types
 // ---------------------------------------------------------------------------
 
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
+#[tsify(missing_as_null)]
 struct AdNormalityDto {
     statistic: f64,
     statistic_modified: f64,
@@ -38,7 +39,8 @@ struct AdNormalityDto {
 }
 
 /// NP and C charts: one set of limits for every point.
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, tsify::Tsify)]
+#[tsify(missing_as_null)]
 struct FixedLimitChartDto {
     cl: f64,
     ucl: f64,
@@ -47,26 +49,30 @@ struct FixedLimitChartDto {
     in_control: bool,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, tsify::Tsify)]
+#[tsify(missing_as_null)]
 struct UChartDto {
     u_bar: f64,
     points: Vec<AttributeChartPointDto>,
     in_control: bool,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, tsify::Tsify)]
+#[tsify(missing_as_null)]
 struct LaneyUChartDto {
     u_bar: f64,
     phi: f64,
     points: Vec<AttributeChartPointDto>,
 }
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
+#[tsify(missing_as_null)]
 struct GChartDto {
     g_bar: f64,
     points: Vec<GChartPointDto>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
+#[tsify(missing_as_null)]
 struct GChartPointDto {
     index: usize,
     value: f64,
@@ -76,13 +82,15 @@ struct GChartPointDto {
     out_of_control: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
+#[tsify(missing_as_null)]
 struct TChartDto {
     t_bar: f64,
     points: Vec<TChartPointDto>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
+#[tsify(missing_as_null)]
 struct TChartPointDto {
     index: usize,
     value: f64,
@@ -208,7 +216,7 @@ fn from_json<T: serde::de::DeserializeOwned>(
 /// Omitted, `undefined`, `null`, or an object without `rules` all mean all
 /// eight (Nelson), which is what this binding did before the option existed.
 /// `{ rules: [] }` applies none, leaving control limits only.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "XbarRChartDto")]
 pub fn xbar_r_chart(data: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
     let subgroups: Vec<Vec<f64>> = from_js(data, "data")?;
     let rules = rules_option(options)?;
@@ -232,7 +240,7 @@ pub fn xbar_r_chart(data: JsValue, options: Option<JsValue>) -> Result<JsValue, 
 /// # Options (optional second argument)
 ///
 /// `{ rules?: string[] }`, exactly as for [`xbar_r_chart`].
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "XbarSChartDto")]
 pub fn xbar_s_chart(data: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
     let subgroups: Vec<Vec<f64>> = from_js(data, "data")?;
     let rules = rules_option(options)?;
@@ -254,7 +262,7 @@ pub fn xbar_s_chart(data: JsValue, options: Option<JsValue>) -> Result<JsValue, 
 /// # Options (optional second argument)
 ///
 /// `{ rules?: string[] }`, exactly as for [`xbar_r_chart`].
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "ImrChartDto")]
 pub fn imr_chart(values: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
     let values: Vec<f64> = from_js(values, "values")?;
     let rules = rules_option(options)?;
@@ -275,7 +283,7 @@ pub fn imr_chart(values: JsValue, options: Option<JsValue>) -> Result<JsValue, J
 /// # Output JSON
 ///
 /// One `{ index, value, violations }` per input value, in input order.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "ChartPointDto[]")]
 pub fn run_rules(
     values: JsValue,
     limits: JsValue,
@@ -342,7 +350,7 @@ fn standard_option(options: Option<JsValue>) -> Result<AttributeStandardDto, JsV
 /// Object with fields: `p_bar` (the centre line used), `points` (array, each
 /// with `z` -- the standardized value, on which every limit is +/-3),
 /// `in_control`.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "PChartDto")]
 pub fn p_chart(samples: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
     let json: serde_json::Value = from_js(samples, "samples")?;
     let samples = count_pairs(&json, "samples").map_err(js_err)?;
@@ -386,7 +394,7 @@ pub fn p_chart(samples: JsValue, options: Option<JsValue>) -> Result<JsValue, Js
 /// their place would make `cp` equal `pp` for every input. `cpm` uses neither
 /// sigma -- it is the spread of `data` about `target` -- so it is reported in
 /// both cases.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "CapabilityDto")]
 pub fn process_capability(input: JsValue) -> Result<JsValue, JsValue> {
     let input: CapabilityInputDto = from_js(input, "input")?;
     to_js(&capability_dto(input).map_err(js_err)?)
@@ -403,7 +411,7 @@ pub fn process_capability(input: JsValue) -> Result<JsValue, JsValue> {
 /// # Output JSON
 ///
 /// Object with fields: `statistic` (A²), `statistic_modified` (A²*), `p_value`.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "AdNormalityDto")]
 pub fn anderson_darling_normality(data: &[f64]) -> Result<JsValue, JsValue> {
     let result = crate::testing::anderson_darling_normality(data).ok_or_else(|| {
         js_err("insufficient or invalid data (need >= 3 finite non-constant values)")
@@ -440,7 +448,7 @@ pub fn anderson_darling_normality(data: &[f64]) -> Result<JsValue, JsValue> {
 ///
 /// Object with fields: `p_bar`, `phi` (the values used), `points` (array, each
 /// with `z`).
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "LaneyPChartDto")]
 pub fn laney_p_chart(samples: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
     let json: serde_json::Value = from_js(samples, "samples")?;
     let samples = count_pairs(&json, "samples").map_err(js_err)?;
@@ -465,7 +473,7 @@ pub fn laney_p_chart(samples: JsValue, options: Option<JsValue>) -> Result<JsVal
 /// # Output JSON
 ///
 /// Object with fields: `cl`, `ucl`, `lcl`, `points` (array), `in_control`.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "FixedLimitChartDto")]
 pub fn np_chart(defectives: JsValue, sample_size: JsValue) -> Result<JsValue, JsValue> {
     let defectives: serde_json::Value = from_js(defectives, "defectives")?;
     let defectives = count_rows(&defectives, "defectives").map_err(js_err)?;
@@ -488,7 +496,7 @@ pub fn np_chart(defectives: JsValue, sample_size: JsValue) -> Result<JsValue, Js
 /// # Output JSON
 ///
 /// Object with fields: `cl`, `ucl`, `lcl`, `points` (array), `in_control`.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "FixedLimitChartDto")]
 pub fn c_chart(defects: JsValue) -> Result<JsValue, JsValue> {
     let defects: serde_json::Value = from_js(defects, "defects")?;
     let defects = count_rows(&defects, "defects").map_err(js_err)?;
@@ -515,7 +523,7 @@ pub fn c_chart(defects: JsValue) -> Result<JsValue, JsValue> {
 /// # Output JSON
 ///
 /// Object with fields: `u_bar`, `points` (array, each with `z`), `in_control`.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "UChartDto")]
 pub fn u_chart(samples: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
     let json: serde_json::Value = from_js(samples, "samples")?;
     let samples = rate_pairs(&json, "samples").map_err(js_err)?;
@@ -539,7 +547,7 @@ pub fn u_chart(samples: JsValue, options: Option<JsValue>) -> Result<JsValue, Js
 /// # Output JSON
 ///
 /// Object with fields: `u_bar`, `phi`, `points` (array, each with `z`).
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "LaneyUChartDto")]
 pub fn laney_u_chart(samples: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
     let json: serde_json::Value = from_js(samples, "samples")?;
     let samples = rate_pairs(&json, "samples").map_err(js_err)?;
@@ -645,7 +653,7 @@ fn laney_u_dto(
 /// # Output JSON
 ///
 /// Object with fields: `g_bar`, `points` (array with ucl/cl/lcl/out_of_control).
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "GChartDto")]
 pub fn g_chart(gaps: &[f64]) -> Result<JsValue, JsValue> {
     let chart = crate::spc::g_chart(gaps)
         .ok_or_else(|| js_err("insufficient data (need >= 2 finite positive values)"))?;
@@ -681,7 +689,7 @@ pub fn g_chart(gaps: &[f64]) -> Result<JsValue, JsValue> {
 /// # Output JSON
 ///
 /// Object with fields: `t_bar`, `points` (array with ucl/cl/lcl/out_of_control).
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "TChartDto")]
 pub fn t_chart(times: &[f64]) -> Result<JsValue, JsValue> {
     let chart = crate::spc::t_chart(times)
         .ok_or_else(|| js_err("insufficient data (need >= 2 finite positive values)"))?;
@@ -733,7 +741,7 @@ pub fn t_chart(times: &[f64]) -> Result<JsValue, JsValue> {
 /// ```json
 /// { "changepoints": [3], "n_segments": 2 }
 /// ```
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "PeltResultDto")]
 pub fn detect_changepoints(input: JsValue) -> Result<JsValue, JsValue> {
     let input: PeltInputDto = from_js(input, "input")?;
     to_js(&pelt_dto(input).map_err(js_err)?)
@@ -776,7 +784,7 @@ struct MultiPeltInputDto {
 /// ```json
 /// { "changepoints": [2], "n_segments": 2 }
 /// ```
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "PeltResultDto")]
 pub fn detect_changepoints_multi(input: JsValue) -> Result<JsValue, JsValue> {
     let input: MultiPeltInputDto = from_js(input, "input")?;
 
@@ -832,7 +840,7 @@ pub fn detect_changepoints_multi(input: JsValue) -> Result<JsValue, JsValue> {
 ///
 /// Object with fields: `ev`, `av`, `grr`, `pv`, `tv`, `percent_ev`, `percent_av`,
 /// `percent_grr`, `percent_pv`, `percent_tolerance`, `ndc`, `status`.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "GageRRResultDto")]
 pub fn gage_rr_xbar_r(input: JsValue) -> Result<JsValue, JsValue> {
     let input: GageRRInputDto = from_js(input, "input")?;
     to_js(&gage_rr_xbar_r_dto(input).map_err(js_err)?)
@@ -849,7 +857,7 @@ pub fn gage_rr_xbar_r(input: JsValue) -> Result<JsValue, JsValue> {
 /// Object with fields: `anova_table`, `variance_components`, `ev`, `av`, `grr`,
 /// `pv`, `tv`, `percent_grr`, `percent_tolerance`, `ndc`, `status`,
 /// `interaction_significant`, `interaction_pooled`.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "GageRRAnovaResultDto")]
 pub fn gage_rr_anova(input: JsValue) -> Result<JsValue, JsValue> {
     let input: GageRRInputDto = from_js(input, "input")?;
     to_js(&gage_rr_anova_dto(input).map_err(js_err)?)
@@ -873,7 +881,7 @@ pub fn gage_rr_anova(input: JsValue) -> Result<JsValue, JsValue> {
 ///
 /// Object with fields: `cp_star`, `cpk_star`, `cpu_star`, `cpl_star`,
 /// `median`, `percentile_lower`, `percentile_upper`.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "PercentileCapabilityDto")]
 pub fn percentile_capability(input: JsValue) -> Result<JsValue, JsValue> {
     let input: PercentileCapabilityInputDto = from_js(input, "input")?;
     to_js(&percentile_capability_dto(input).map_err(js_err)?)
@@ -903,7 +911,8 @@ fn default_cusum_h() -> f64 {
     5.0
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, tsify::Tsify)]
+#[tsify(missing_as_null)]
 struct CusumPointDto {
     index: usize,
     s_upper: f64,
@@ -911,7 +920,8 @@ struct CusumPointDto {
     signal: bool,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, tsify::Tsify)]
+#[tsify(missing_as_null)]
 struct CusumDto {
     /// Decision interval actually used, echoed so a caller can draw the
     /// boundary without restating its own input. Unlike EWMA's widening
@@ -942,7 +952,8 @@ fn default_ewma_l_factor() -> f64 {
     3.0
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, tsify::Tsify)]
+#[tsify(missing_as_null)]
 struct EwmaPointDto {
     index: usize,
     ewma: f64,
@@ -951,7 +962,8 @@ struct EwmaPointDto {
     signal: bool,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, tsify::Tsify)]
+#[tsify(missing_as_null)]
 struct EwmaDto {
     points: Vec<EwmaPointDto>,
     signal_indices: Vec<usize>,
@@ -986,7 +998,7 @@ struct EwmaDto {
 ///
 /// Both cumulative sums are on the **standardized** scale (`z = (x - target) / sigma`)
 /// and start at zero, so they compare against `h` directly.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "CusumDto")]
 pub fn cusum(input: JsValue) -> Result<JsValue, JsValue> {
     let input: CusumInputDto = from_js(input, "input")?;
     let dto = cusum_dto(input).map_err(js_err)?;
@@ -1058,7 +1070,7 @@ fn cusum_dto(input: CusumInputDto) -> Result<CusumDto, String> {
 ///
 /// The limits **widen with the observation index** (they are exact, not asymptotic),
 /// so they are returned per point rather than once for the chart.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "EwmaDto")]
 pub fn ewma(input: JsValue) -> Result<JsValue, JsValue> {
     let input: EwmaInputDto = from_js(input, "input")?;
     let dto = ewma_dto(input).map_err(js_err)?;
@@ -1126,7 +1138,8 @@ struct BoxcoxCapabilityInputDto {
     lambda_range: Option<[f64; 2]>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, tsify::Tsify)]
+#[tsify(missing_as_null)]
 struct BoxcoxCapabilityDto {
     /// Estimated optimal Box-Cox parameter. `0` is a log transform, `1` the
     /// identity, `0.5` approximately a square root.
@@ -1178,7 +1191,7 @@ struct BoxcoxCapabilityDto {
 /// short-term sigma, which a flat vector cannot carry, so they come back
 /// `null` here -- exactly as they do from `process_capability` without
 /// `sigma_within`.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "BoxcoxCapabilityDto")]
 pub fn boxcox_capability(input: JsValue) -> Result<JsValue, JsValue> {
     let input: BoxcoxCapabilityInputDto = from_js(input, "input")?;
     let dto = boxcox_capability_dto(input).map_err(js_err)?;
@@ -1243,7 +1256,7 @@ fn boxcox_capability_dto(input: BoxcoxCapabilityInputDto) -> Result<BoxcoxCapabi
 /// `n / 2` are admissible. Each candidate carries the ACF at its lag (its
 /// strength), the periodogram bin that produced it (1-based, of the padded
 /// transform), that bin's power and share of the total.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "SeasonalityDto")]
 pub fn estimate_period(input: JsValue) -> Result<JsValue, JsValue> {
     let input: SeasonalityInputDto = from_js(input, "input")?;
     to_js(&crate::wire::seasonality_dto(input).map_err(js_err)?)
@@ -1287,7 +1300,7 @@ pub fn estimate_period(input: JsValue) -> Result<JsValue, JsValue> {
 /// anomalies replaced by their neighbours; `lower`/`upper` is the band
 /// around it. The band is chart information — the anomaly decision is the
 /// `score`.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "SpectralResidualDto")]
 pub fn spectral_residual(input: JsValue) -> Result<JsValue, JsValue> {
     let input: SpectralResidualInputDto = from_js(input, "input")?;
     to_js(&crate::wire::spectral_residual_dto(input).map_err(js_err)?)
