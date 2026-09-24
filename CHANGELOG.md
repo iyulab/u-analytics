@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.5.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Fixed
+
+- **`mann_whitney_u_test` and `wilcoxon_signed_rank_test` understated p for
+  small samples.** Both used the normal approximation without continuity
+  correction, which is always too small there and declares significance the
+  data cannot support: three observations per group, completely separated,
+  gave p = 0.0495 where the smallest achievable p is 0.100; five paired
+  differences all of one sign gave 0.043 where the exact p is 0.0625. With no
+  ties and samples of at most 50 both now use the exact null distribution;
+  otherwise the normal approximation with continuity correction. **p-values
+  rise for small samples.**
+
 ## [0.14.0] - 2026-09-20
 
 ### Added

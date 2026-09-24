@@ -1010,8 +1010,15 @@ fn sw_p_value(w: f64, n: usize) -> f64 {
 ///
 /// 1. Combine samples, rank all observations (average ranks for ties)
 /// 2. U₁ = R₁ - n₁(n₁+1)/2 where R₁ = sum of ranks in sample 1
-/// 3. Normal approximation: z = (U₁ - μ) / σ
-///    where μ = n₁n₂/2, σ² includes tie correction
+/// 3. p-value (two-sided):
+///    - **no ties and both samples ≤ 50**: the exact null distribution of U,
+///      by the recursion P(m, n, u) = m/(m+n)·P(m−1, n, u−n) + n/(m+n)·P(m, n−1, u)
+///    - otherwise: normal approximation with continuity correction,
+///      z = (|U₁ − μ| − ½) / σ, μ = n₁n₂/2, σ² with the tie correction
+///
+/// The normal approximation alone understates p for small samples: with
+/// three observations each and complete separation it gives 0.0495 where
+/// the smallest achievable p is 0.100.
 ///
 /// # Returns
 ///
@@ -1083,14 +1090,86 @@ pub fn mann_whitney_u_test(a: &[f64], b: &[f64]) -> Option<TestResult> {
         return None;
     }
 
-    let z = (u1 - mu) / sigma_sq.sqrt();
-    let p_value = 2.0 * special::standard_normal_sf(z.abs());
+    let p_value = if tie_correction == 0.0 && n1 <= EXACT_MAX_N && n2 <= EXACT_MAX_N {
+        // Without ties U is an integer in 0..=n1·n2 and its null
+        // distribution is symmetric about n1·n2/2.
+        let u = u1.round() as usize;
+        let tail = u.min(n1 * n2 - u);
+        (2.0 * mann_whitney_exact_cdf(n1, n2, tail)).min(1.0)
+    } else {
+        continuity_corrected_p(u1, mu, sigma_sq)
+    };
 
     Some(TestResult {
         statistic: u1,
         df: 0.0, // not applicable for non-parametric
         p_value,
     })
+}
+
+/// Largest sample size for which the rank tests use their exact null
+/// distribution (when there are no ties). Above it the normal approximation
+/// with continuity correction is accurate to well under 0.001 in p.
+const EXACT_MAX_N: usize = 50;
+
+/// Two-sided p of a rank statistic by the normal approximation with
+/// continuity correction.
+fn continuity_corrected_p(statistic: f64, mu: f64, sigma_sq: f64) -> f64 {
+    let z = ((statistic - mu).abs() - 0.5).max(0.0) / sigma_sq.sqrt();
+    (2.0 * special::standard_normal_sf(z)).min(1.0)
+}
+
+/// P(U ≤ u) for the Mann-Whitney statistic with sample sizes `m`, `n` and
+/// no ties.
+///
+/// Every arrangement of the two samples' ranks is equally likely under H₀,
+/// and the last-ranked observation belongs to the first sample with
+/// probability m/(m+n), in which case it adds n to U:
+/// P(m, n, u) = m/(m+n)·P(m−1, n, u−n) + n/(m+n)·P(m, n−1, u).
+/// O(m·n·(m·n)) time, O(n·m·n) memory -- a few megabytes at m = n = 50.
+fn mann_whitney_exact_cdf(m: usize, n: usize, u: usize) -> f64 {
+    let max_u = m * n;
+    // row[j] = distribution of U for (i, j), indices 0..=i·j.
+    let mut prev: Vec<Vec<f64>> = (0..=n).map(|_| vec![1.0]).collect(); // i = 0
+    for i in 1..=m {
+        let mut cur: Vec<Vec<f64>> = Vec::with_capacity(n + 1);
+        cur.push(vec![1.0]); // j = 0: U = 0
+        for j in 1..=n {
+            let mut dist = vec![0.0; i * j + 1];
+            let wi = i as f64 / (i + j) as f64;
+            let wj = j as f64 / (i + j) as f64;
+            // Last observation from sample 1: U shifts by j.
+            for (k, &pk) in prev[j].iter().enumerate() {
+                dist[k + j] += wi * pk;
+            }
+            // Last observation from sample 2: U unchanged.
+            for (k, &pk) in cur[j - 1].iter().enumerate() {
+                dist[k] += wj * pk;
+            }
+            cur.push(dist);
+        }
+        prev = cur;
+    }
+    prev[n].iter().take(u.min(max_u) + 1).sum::<f64>().min(1.0)
+}
+
+/// P(T⁺ ≤ t) for the Wilcoxon signed-rank statistic with `n` non-zero,
+/// untied differences: each rank enters T⁺ with probability ½ independently.
+fn wilcoxon_exact_cdf(n: usize, t: usize) -> f64 {
+    let max_t = n * (n + 1) / 2;
+    let mut dist = vec![0.0; max_t + 1];
+    dist[0] = 1.0;
+    let mut reach = 0;
+    for rank in 1..=n {
+        reach += rank;
+        for s in (rank..=reach).rev() {
+            dist[s] = 0.5 * dist[s] + 0.5 * dist[s - rank];
+        }
+        for d in dist.iter_mut().take(rank) {
+            *d *= 0.5;
+        }
+    }
+    dist.iter().take(t.min(max_t) + 1).sum::<f64>().min(1.0)
 }
 
 /// Wilcoxon signed-rank test: H₀: median of differences = 0.
@@ -1103,8 +1182,14 @@ pub fn mann_whitney_u_test(a: &[f64], b: &[f64]) -> Option<TestResult> {
 /// 1. Compute differences dᵢ = xᵢ - yᵢ, discard zeros
 /// 2. Rank |dᵢ| (average ranks for ties)
 /// 3. T⁺ = sum of ranks where dᵢ > 0
-/// 4. Normal approximation: z = (T⁺ - μ) / σ
-///    where μ = n(n+1)/4, σ² includes tie correction
+/// 4. p-value (two-sided):
+///    - **no tied |dᵢ| and n ≤ 50**: the exact null distribution of T⁺
+///      (each rank enters T⁺ with probability ½)
+///    - otherwise: normal approximation with continuity correction,
+///      z = (|T⁺ − μ| − ½) / σ, μ = n(n+1)/4, σ² with the tie correction
+///
+/// The normal approximation alone understates p for small samples: five
+/// differences all of one sign give 0.043 where the exact p is 0.0625.
 ///
 /// # Returns
 ///
@@ -1179,8 +1264,15 @@ pub fn wilcoxon_signed_rank_test(x: &[f64], y: &[f64]) -> Option<TestResult> {
         return None;
     }
 
-    let z = (t_plus - mu) / sigma_sq.sqrt();
-    let p_value = 2.0 * special::standard_normal_sf(z.abs());
+    let p_value = if tie_correction_val == 0.0 && nr <= EXACT_MAX_N {
+        // Without ties T⁺ is an integer in 0..=n(n+1)/2, symmetric about
+        // n(n+1)/4.
+        let t = t_plus.round() as usize;
+        let tail = t.min(nr * (nr + 1) / 2 - t);
+        (2.0 * wilcoxon_exact_cdf(nr, tail)).min(1.0)
+    } else {
+        continuity_corrected_p(t_plus, mu, sigma_sq)
+    };
 
     Some(TestResult {
         statistic: t_plus,
@@ -2985,6 +3077,133 @@ mod tests {
         assert!(wilcoxon_signed_rank_test(&[1.0], &[2.0]).is_none()); // n < 2
                                                                       // All zero differences → fewer than 2 non-zero diffs
         assert!(wilcoxon_signed_rank_test(&[5.0, 5.0], &[5.0, 5.0]).is_none());
+    }
+
+    /// Oracle: the exact p by enumerating every arrangement of the ranks
+    /// (Python, independent of the recursion). The normal approximation this
+    /// replaced reported the second column -- always too small, and below
+    /// 0.05 in the first and third rows where the exact p is not.
+    #[test]
+    fn mann_whitney_small_samples_use_the_exact_distribution() {
+        // (n1, n2, U, exact p, old normal-approximation p)
+        let cases = [
+            (3, 3, 0, 0.1000, 0.0495),
+            (4, 4, 0, 0.0286, 0.0209),
+            (4, 4, 1, 0.0571, 0.0433),
+            (5, 5, 2, 0.0317, 0.0283),
+            (8, 8, 13, 0.0499, 0.0460),
+            (10, 10, 23, 0.0433, 0.0413),
+        ];
+        for (n1, n2, u, exact, old) in cases {
+            let (a, b) = separated_samples(n1, n2, u);
+            let r = mann_whitney_u_test(&a, &b).expect("valid samples");
+            assert_eq!(r.statistic, u as f64);
+            assert!(
+                (r.p_value - exact).abs() < 1e-4,
+                "n={n1},{n2} U={u}: p={} want {exact} (old {old})",
+                r.p_value
+            );
+        }
+    }
+
+    /// Two samples of sizes `n1`, `n2` with no ties whose U₁ is exactly `u`:
+    /// sample 1 takes the lowest ranks, then its top member is moved up past
+    /// `u` members of sample 2 one step at a time.
+    fn separated_samples(n1: usize, n2: usize, u: usize) -> (Vec<f64>, Vec<f64>) {
+        let mut ranks_a: Vec<usize> = (1..=n1).collect();
+        let mut remaining = u;
+        for k in (0..n1).rev() {
+            let room = n2.min(remaining);
+            ranks_a[k] += room;
+            remaining -= room;
+            if remaining == 0 {
+                break;
+            }
+        }
+        let ranks_b: Vec<usize> = (1..=n1 + n2).filter(|r| !ranks_a.contains(r)).collect();
+        (
+            ranks_a.iter().map(|&r| r as f64).collect(),
+            ranks_b.iter().map(|&r| r as f64).collect(),
+        )
+    }
+
+    /// Oracle: exact p by enumerating all 2ⁿ sign assignments (Python).
+    #[test]
+    fn wilcoxon_small_samples_use_the_exact_distribution() {
+        // (n, T+, exact p)
+        let cases = [
+            (5, 0, 0.0625),
+            (5, 1, 0.125),
+            (6, 2, 0.09375),
+            (8, 5, 0.078125),
+            (10, 8, 0.048828125),
+            (12, 14, 0.0522460938),
+        ];
+        for (n, t_plus, exact) in cases {
+            // Differences 1..=n; the ranks summing to t_plus are positive.
+            let positive = ranks_summing_to(n, t_plus);
+            let x: Vec<f64> = (1..=n)
+                .map(|r| {
+                    if positive.contains(&r) {
+                        r as f64
+                    } else {
+                        -(r as f64)
+                    }
+                })
+                .collect();
+            let y = vec![0.0; n];
+            let r = wilcoxon_signed_rank_test(&x, &y).expect("valid samples");
+            assert_eq!(r.statistic, t_plus as f64);
+            assert!(
+                (r.p_value - exact).abs() < 1e-9,
+                "n={n} T+={t_plus}: p={} want {exact}",
+                r.p_value
+            );
+        }
+    }
+
+    /// A set of distinct ranks from 1..=n summing to `target` (greedy from the top).
+    fn ranks_summing_to(n: usize, target: usize) -> Vec<usize> {
+        let mut out = Vec::new();
+        let mut left = target;
+        for r in (1..=n).rev() {
+            if r <= left {
+                out.push(r);
+                left -= r;
+            }
+        }
+        assert_eq!(left, 0);
+        out
+    }
+
+    /// Above the exact range, or with ties, the p comes from the normal
+    /// approximation with continuity correction.
+    #[test]
+    fn rank_tests_fall_back_to_continuity_corrected_normal() {
+        let a: Vec<f64> = (0..60).map(|i| i as f64).collect();
+        let b: Vec<f64> = (0..60).map(|i| i as f64 + 20.5).collect();
+        let r = mann_whitney_u_test(&a, &b).expect("valid samples");
+        let (n1, n2) = (60.0, 60.0);
+        let mu = n1 * n2 / 2.0;
+        let sigma = (n1 * n2 * (n1 + n2 + 1.0) / 12.0_f64).sqrt();
+        let z = ((r.statistic - mu).abs() - 0.5) / sigma;
+        let want = 2.0 * special::standard_normal_sf(z);
+        assert!((r.p_value - want).abs() < 1e-12);
+
+        // At the boundary the two methods agree closely.
+        let a: Vec<f64> = (0..50).map(|i| i as f64).collect();
+        let b: Vec<f64> = (0..50).map(|i| i as f64 + 10.5).collect();
+        let exact = mann_whitney_u_test(&a, &b).expect("valid samples").p_value;
+        let mu = 1250.0;
+        let sigma = (2500.0 * 101.0 / 12.0_f64).sqrt();
+        let u = mann_whitney_u_test(&a, &b)
+            .expect("valid samples")
+            .statistic;
+        let approx = continuity_corrected_p(u, mu, sigma * sigma);
+        assert!(
+            (exact - approx).abs() < 1e-3,
+            "exact {exact} vs approx {approx}"
+        );
     }
 
     // -----------------------------------------------------------------------
