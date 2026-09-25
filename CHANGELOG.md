@@ -8,6 +8,26 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Changed
+
+- **Every exported WASM function declares its parameter types.** Inputs were
+  typed `any`, so a misspelt run rule, a field an input does not have, or a
+  standard another chart reads compiled and failed only at run time. Input
+  objects are declared from the structs the binding deserialises
+  (`CapabilityInputDto`, `PeltInputDto`, `SpectralResidualInputDto`, ...;
+  fields with a default are optional, and an optional number accepts `null`),
+  data arguments are `number[]`, `number[][]` or `[number, number][]`, and the
+  option arguments are `RuleOptions` (with `RunRule`, the eight rule names) for
+  the variables charts and `run_rules`, and `PChartOptions`,
+  `LaneyPChartOptions`, `UChartOptions` or `LaneyUChartOptions` -- each with
+  only the standard that chart accepts -- for the attributes charts. A PELT
+  `cost` is `"l2" | "normal"` and a `penalty` is `"bic"` or a number.
+  **TypeScript code that passed a wrong shape now fails to compile**; the
+  runtime path is unchanged, and every input is still validated at the
+  boundary.
+- The publishing workflow now also fails if an exported function takes a
+  parameter typed `any` (`check-typed-dts.sh --params`).
+
 ## [0.14.1] - 2026-09-25
 
 C# `UAnalytics` NuGet 0.8.0 → **0.9.0** -- the binding is rebuilt on this

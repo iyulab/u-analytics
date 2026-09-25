@@ -258,20 +258,26 @@ interface AnalyticsError extends Error {
 
 ### TypeScript
 
-Every exported function declares its return type, and the declarations are
-generated from the same structs the binding serialises, so they cannot drift
-from what it actually returns:
+Every exported function declares its parameter and return types, and the
+declarations are generated from the same structs the binding reads and
+serialises, so they cannot drift from what it actually accepts and returns:
 
 ```ts
-export function spectral_residual(input: any): SpectralResidualDto;
+export function spectral_residual(input: SpectralResidualInputDto): SpectralResidualDto;
+export function xbar_r_chart(data: number[][], options?: RuleOptions | null): XbarRChartDto;
+export function p_chart(samples: [number, number][], options?: PChartOptions | null): PChartDto;
 ```
 
 An absent optional value is declared `T | null`, which is what the binding
-sends. Nothing needs an `as` cast -- and a wrong assumption about a result's
-shape is a compile error rather than something that fails at run time.
+sends. Nothing needs an `as` cast, and a wrong assumption is a compile error
+rather than something that fails at run time -- on the way in as well as on
+the way out: a misspelt run rule (`RunRule`), a field the input does not have,
+a penalty name the detector does not know, or a standard another chart reads
+(`u_bar` given to `p_chart`) no longer compiles.
 
-Inputs are still `any`: they are validated at the boundary, and a rejected one
-says what was wrong.
+The binding still validates every input at the boundary, for JavaScript
+callers and for values that reach it through a cast, and a rejected one says
+what was wrong.
 
 ### `process_capability(input)`
 

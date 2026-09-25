@@ -680,20 +680,30 @@ pub(crate) fn laney_p_dto(
 /// Every field except `data` is optional, but at least one of `usl`/`lsl` must
 /// be present -- a capability index without a specification limit is undefined.
 #[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CapabilityInputDto {
     pub(crate) data: Vec<f64>,
     #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
     pub(crate) usl: Option<f64>,
     #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
     pub(crate) lsl: Option<f64>,
     /// Short-term (within-subgroup) sigma, normally estimated from a control
     /// chart as R-bar/d2 or S-bar/c4. It cannot be recovered from `data`: the
     /// subgroup structure is not in a flat measurement vector.
     #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
     pub(crate) sigma_within: Option<f64>,
     /// Process target for Cpm. Without it `cpm` is `null`.
     #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
     pub(crate) target: Option<f64>,
 }
 
@@ -783,10 +793,16 @@ pub(crate) fn capability_dto(input: CapabilityInputDto) -> Result<CapabilityDto,
 
 /// Input for `percentile_capability`.
 #[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PercentileCapabilityInputDto {
     pub(crate) data: Vec<f64>,
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
     pub(crate) lsl: Option<f64>,
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
     pub(crate) usl: Option<f64>,
 }
 
@@ -804,9 +820,13 @@ pub(crate) struct PercentileCapabilityDto {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct GageRRInputDto {
     pub(crate) measurements: Vec<Vec<Vec<f64>>>,
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
     pub(crate) tolerance: Option<f64>,
 }
 
@@ -903,14 +923,21 @@ pub(crate) fn grr_status_str(status: crate::msa::GrrStatus) -> &'static str {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PeltInputDto {
     pub(crate) data: Vec<f64>,
     #[serde(default = "default_cost")]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "\"l2\" | \"normal\""))]
     pub(crate) cost: String,
     #[serde(default = "default_penalty")]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "\"bic\" | number"))]
     pub(crate) penalty: PeltPenaltyDto,
     #[serde(default = "default_min_seg")]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
     pub(crate) min_segment_len: usize,
 }
 
@@ -1086,6 +1113,8 @@ pub(crate) struct ImrChartDto {
 
 /// Control limits a caller supplies to `run_rules`.
 #[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct LimitsInputDto {
     pub(crate) ucl: f64,
@@ -1192,6 +1221,8 @@ pub(crate) fn run_rules_dto(
 // ── Seasonality ──────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SeasonalityInputDto {
     pub(crate) data: Vec<f64>,
@@ -1253,20 +1284,34 @@ pub(crate) fn seasonality_dto(input: SeasonalityInputDto) -> Result<SeasonalityD
 // ── Spectral residual ────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SpectralResidualInputDto {
     pub(crate) data: Vec<f64>,
     #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
     pub(crate) averaging_window: Option<usize>,
     #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
     pub(crate) judgement_window: Option<usize>,
     #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
     pub(crate) threshold: Option<f64>,
     #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
     pub(crate) min_zscore: Option<f64>,
     #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
     pub(crate) sensitivity: Option<f64>,
     #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
     pub(crate) batch_size: Option<usize>,
 }
 
