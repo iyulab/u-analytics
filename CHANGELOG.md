@@ -8,6 +8,25 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-09-25
+
+C# `UAnalytics` NuGet 0.8.0 → **0.9.0** -- the binding is rebuilt on this
+release. 0.8.0 shipped the 0.12.0 native library, so none of the C FFI changes
+made since reached .NET. The C# surface is unchanged; what changes for a C#
+caller is what the native library returns:
+
+- `PChart` / `LaneyPChart`: every wrong sample size -- zero, negative,
+  fractional -- is refused with `AnalyticsException.Reason` =
+  `sample_size_not_whole`, which replaces `sample_size_not_positive` (0.13.0).
+  Code matching the old reason must match the new one.
+- `GageRRXbarR`: the result also carries the range and average chart limits
+  (0.13.0).
+- `EstimatePeriod`: the period is estimated on the bias-corrected
+  autocorrelation, which no longer pulls it toward shorter periods on a
+  series that is not a whole number of cycles (0.14.0).
+- `SpectralResidual`: a refused option is named in `Reason`, and points a
+  batch boundary reaches are marked `near_edge` (0.14.0).
+
 ### Fixed
 
 - **`mann_whitney_u_test` and `wilcoxon_signed_rank_test` understated p for
