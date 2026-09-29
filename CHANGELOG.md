@@ -8,6 +8,8 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-29
+
 ### Changed
 
 - **Every exported WASM function declares its parameter types.** Inputs were
@@ -26,7 +28,7 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   runtime path is unchanged, and every input is still validated at the
   boundary.
 - The publishing workflow now also fails if an exported function takes a
-  parameter typed `any` (`check-typed-dts.sh --params`).
+  parameter typed `any` (`check-typed-dts.sh`).
 
 ## [0.14.1] - 2026-09-25
 
