@@ -103,6 +103,7 @@ jobs:
           name: native-${{ matrix.rid }}
           path: target/${{ matrix.target }}/release/${{ matrix.artifact }}
           if-no-files-found: error
+          retention-days: 1
 
   # ── Pack & Publish NuGet ──
   pack-and-publish:
@@ -163,6 +164,7 @@ jobs:
         with:
           name: nuget-package
           path: ./nupkg/*.nupkg
+          retention-days: 7
 
       - name: Publish to NuGet.org
         if: github.event_name == 'push' || inputs.publish != false
@@ -172,3 +174,21 @@ jobs:
             --api-key ${{ secrets.NUGET_API_KEY }} \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
+
+  # The artifacts above only carry files between jobs. Once the package is on
+  # NuGet they are storage nobody reads, so they go as soon as it is published.
+  # A run that does not publish keeps them for inspection until they expire.
+  # This job alone gets `actions: write`; the publishing job keeps its own scope.
+  cleanup-artifacts:
+    name: Delete intermediate artifacts
+    needs: pack-and-publish
+    if: github.event_name == 'push' || inputs.publish != false
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - uses: geekyeggo/delete-artifact@176a747ab7e287e3ff4787bf8a148716375ca118 # v6.0.0
+        with:
+          name: |
+            native-*
+            nuget-package
