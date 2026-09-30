@@ -215,6 +215,11 @@ The npm package ships two entry points, selected automatically via the
 | Bundlers (webpack, Vite, …) | ESM + WebAssembly ESM-integration | `default` condition |
 | Node.js (`require` **and** `import`) | CJS glue that loads the wasm from the filesystem | `node` condition — works in CJS TS runners (`tsx`, `ts-node`) without loader hooks |
 
+A browser **without** a bundler is not supported: the package loads its `.wasm`
+file with an ES module import, which browsers refuse (`application/wasm` is not a
+module script type), so `<script type="module">` from a CDN fails, and CDN
+re-bundling services fail on the same import. Use a bundler or Node.
+
 ```js
 // Both work in Node — no bundler, no experimental flags:
 const { anderson_darling_normality } = require("@iyulab/u-analytics");
