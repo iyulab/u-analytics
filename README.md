@@ -242,7 +242,7 @@ interface AnalyticsError extends Error {
 //   p_chart([[1, 10], [1.5, 10]]) -> count_not_whole,      index 1
 //   p_chart([[1, 10], [1, 10.5]]) -> sample_size_not_whole, index 1
 // `index` says where in the data; `parameter` says which option:
-//   spectral_residual(data, { threshold: 0 }) -> parameter_out_of_range, parameter "threshold"
+//   spectral_residual({ data, threshold: 0 }) -> parameter_out_of_range, parameter "threshold"
 ```
 
 | `code` | Meaning |
