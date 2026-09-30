@@ -6,9 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.5.0 onward; earlier entries list release dates only (see git history).
 
-## [Unreleased]
+## [0.16.0] - 2026-09-30
 
 ### Changed
+
+- C# `UAnalytics` NuGet 0.9.0 → **0.10.0**: bundles this release, so
+  `AnalyticsException.Reason` carries the renamed codes.
+- Depends on u-numflow 0.7.
 
 - **Breaking:** two refusal codes are renamed to the names the sibling
   packages use for the same reasons, so one consumer handles them once:
