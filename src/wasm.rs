@@ -380,7 +380,7 @@ fn standard_option(options: Option<JsValue>) -> Result<AttributeStandardDto, JsV
 /// `sample_size_not_whole` for a sample size that is not a whole number >= 1
 /// (zero, negative, fractional or not a number alike),
 /// `defectives_exceed_sample`, `malformed_input` for a row that is not a pair,
-/// `too_few_samples` for an empty array, `standard_out_of_range` for a
+/// `insufficient_data` for an empty array, `standard_out_of_range` for a
 /// `p_bar` outside (0, 1).
 ///
 /// # Options
@@ -487,7 +487,7 @@ pub fn anderson_darling_normality(data: &[f64]) -> Result<JsValue, JsValue> {
 ///
 /// # Errors
 ///
-/// As [`p_chart`], with `too_few_samples` below 3 samples (1 with a standard).
+/// As [`p_chart`], with `insufficient_data` below 3 samples (1 with a standard).
 ///
 /// # Options
 ///
@@ -523,7 +523,7 @@ pub fn laney_p_chart(
 ///
 /// Throws an `Error` with `code` and `index`: `count_not_whole` with the row
 /// for a defective count, `sample_size_not_whole` with `index: null` for the
-/// `sample_size` argument, `defectives_exceed_sample`, `too_few_samples` for
+/// `sample_size` argument, `defectives_exceed_sample`, `insufficient_data` for
 /// an empty array.
 ///
 /// # Output JSON
@@ -550,7 +550,7 @@ pub fn np_chart(
 /// # Errors
 ///
 /// Throws an `Error` with `code` and `index`: `count_not_whole` with the row,
-/// `too_few_samples` for an empty array.
+/// `insufficient_data` for an empty array.
 ///
 /// # Output JSON
 ///
@@ -574,7 +574,7 @@ pub fn c_chart(
 /// # Errors
 ///
 /// Throws an `Error` with `code` and `index` (the row): `count_not_whole`,
-/// `units_not_positive`, `malformed_input`, `too_few_samples`,
+/// `units_not_positive`, `malformed_input`, `insufficient_data`,
 /// `standard_out_of_range`.
 ///
 /// # Options
@@ -603,7 +603,7 @@ pub fn u_chart(
 ///
 /// # Errors
 ///
-/// As [`u_chart`], with `too_few_samples` below 3 samples (1 with a standard).
+/// As [`u_chart`], with `insufficient_data` below 3 samples (1 with a standard).
 ///
 /// # Options
 ///
@@ -642,7 +642,7 @@ fn np_chart_dto(defectives: &[u64], sample_size: u64) -> Result<FixedLimitChartD
     add_rows(defectives, "defectives", |&d| chart.add_sample(d))?;
     let (ucl, cl, lcl) = chart
         .control_limits()
-        .ok_or_else(|| WireError::too_few_samples("defectives must not be empty"))?;
+        .ok_or_else(|| WireError::insufficient_data("defectives must not be empty"))?;
     Ok(FixedLimitChartDto {
         cl,
         ucl,
@@ -661,7 +661,7 @@ fn c_chart_dto(defects: &[u64]) -> Result<FixedLimitChartDto, WireError> {
     }
     let (ucl, cl, lcl) = chart
         .control_limits()
-        .ok_or_else(|| WireError::too_few_samples("defects must not be empty"))?;
+        .ok_or_else(|| WireError::insufficient_data("defects must not be empty"))?;
     Ok(FixedLimitChartDto {
         cl,
         ucl,
@@ -691,7 +691,7 @@ fn u_chart_dto(
     add_rows(raw, "samples", |&(d, u)| chart.add_sample(d, u))?;
     let u_bar = chart
         .u_bar()
-        .ok_or_else(|| WireError::too_few_samples("samples must not be empty"))?;
+        .ok_or_else(|| WireError::insufficient_data("samples must not be empty"))?;
     Ok(UChartDto {
         u_bar,
         points: attribute_point_dtos(chart.points()),
@@ -2021,7 +2021,7 @@ mod binding_contract_tests {
         let e = laney_u_dto(&samples[..2], &Default::default()).expect_err("fewer than 3 samples");
         assert_eq!(
             (e.code, e.index),
-            (crate::wire::code::TOO_FEW_SAMPLES, None)
+            (crate::wire::code::INSUFFICIENT_DATA, None)
         );
         let e = laney_u_dto(&[(3, 1.0), (5, -1.0), (2, 0.8)], &Default::default())
             .expect_err("negative units");
@@ -2286,6 +2286,6 @@ mod binding_contract_tests {
         assert_eq!(e.index, Some(1));
         let e = laney_p_dto(&[(3, 100), (5, 120)], &Default::default())
             .expect_err("fewer than 3 samples");
-        assert_eq!(e.code, crate::wire::code::TOO_FEW_SAMPLES);
+        assert_eq!(e.code, crate::wire::code::INSUFFICIENT_DATA);
     }
 }

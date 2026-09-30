@@ -1084,7 +1084,7 @@ mod tests {
 
         let (code, body) = call(uanalytics_laney_p_chart, r#"{"samples": [[3, 100]]}"#);
         assert_eq!(code, -3, "{body}");
-        assert_eq!(body["code"], "too_few_samples", "{body}");
+        assert_eq!(body["code"], "insufficient_data", "{body}");
         assert!(body["index"].is_null(), "{body}");
 
         // A request that is not JSON at all keeps its parse status.

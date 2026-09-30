@@ -222,7 +222,7 @@ pub(crate) fn subgroup_size(subgroups: &[Vec<f64>]) -> Result<usize, WireError> 
     subgroups
         .first()
         .map(Vec::len)
-        .ok_or_else(|| WireError::too_few_samples("subgroups: at least one subgroup required"))
+        .ok_or_else(|| WireError::insufficient_data("subgroups: at least one subgroup required"))
 }
 
 /// A refused input, in the one shape every transport reports.
@@ -280,11 +280,11 @@ pub(crate) mod code {
     /// A NaN or an infinity where a measurement belongs.
     pub(crate) const VALUE_NOT_FINITE: &str = "value_not_finite";
     /// Fewer samples than the chart needs.
-    pub(crate) const TOO_FEW_SAMPLES: &str = "too_few_samples";
+    pub(crate) const INSUFFICIENT_DATA: &str = "insufficient_data";
     /// A known (Phase I) parameter outside its domain.
     pub(crate) const STANDARD_OUT_OF_RANGE: &str = "standard_out_of_range";
     /// An option outside its domain. `parameter` names which one.
-    pub(crate) const OPTION_OUT_OF_RANGE: &str = "option_out_of_range";
+    pub(crate) const PARAMETER_OUT_OF_RANGE: &str = "parameter_out_of_range";
 }
 
 impl WireError {
@@ -313,8 +313,8 @@ impl WireError {
     }
 
     /// Too few samples, with the message naming how many are needed.
-    pub(crate) fn too_few_samples(message: impl Into<String>) -> Self {
-        Self::new(code::TOO_FEW_SAMPLES, None, message)
+    pub(crate) fn insufficient_data(message: impl Into<String>) -> Self {
+        Self::new(code::INSUFFICIENT_DATA, None, message)
     }
 
     /// A chart's refusal of one element, placed at `label[index]`, or of the
@@ -343,7 +343,7 @@ impl WireError {
         match error {
             ChartInputError::Sample { index, error } => Self::chart(label, Some(*index), error),
             ChartInputError::TooFewSamples { .. } => {
-                Self::too_few_samples(format!("{label}: {error}"))
+                Self::insufficient_data(format!("{label}: {error}"))
             }
             ChartInputError::Standard(error) => Self::chart(label, None, error),
         }
@@ -652,7 +652,7 @@ pub(crate) fn p_chart_dto(
     add_rows(samples, "samples", |&(d, n)| chart.add_sample(d, n))?;
     let p_bar = chart
         .p_bar()
-        .ok_or_else(|| WireError::too_few_samples("samples: at least 1 sample is needed"))?;
+        .ok_or_else(|| WireError::insufficient_data("samples: at least 1 sample is needed"))?;
     Ok(PChartDto {
         p_bar,
         points: attribute_point_dtos(chart.points()),
@@ -1346,9 +1346,9 @@ impl From<crate::detection::SpectralResidualError> for WireError {
         let message = error.to_string();
         match error {
             E::OptionOutOfRange { option, .. } => {
-                WireError::new(code::OPTION_OUT_OF_RANGE, None, message).about(option)
+                WireError::new(code::PARAMETER_OUT_OF_RANGE, None, message).about(option)
             }
-            E::TooFewObservations { .. } => WireError::too_few_samples(message),
+            E::TooFewObservations { .. } => WireError::insufficient_data(message),
             E::ValueNotFinite { index } => {
                 WireError::new(code::VALUE_NOT_FINITE, Some(index), message)
             }
@@ -1528,12 +1528,12 @@ mod input_error_tests {
             })
         );
 
-        let e = WireError::new(code::OPTION_OUT_OF_RANGE, None, "threshold must be > 0")
+        let e = WireError::new(code::PARAMETER_OUT_OF_RANGE, None, "threshold must be > 0")
             .about("threshold");
         assert_eq!(
             serde_json::to_value(&e).expect("serializable"),
             json!({
-                "code": "option_out_of_range", "index": null,
+                "code": "parameter_out_of_range", "index": null,
                 "parameter": "threshold", "message": "threshold must be > 0"
             })
         );
@@ -1562,7 +1562,7 @@ mod input_error_tests {
             ("batch_size", json!({ "batch_size": 5 })),
         ] {
             let e = request(body).expect_err("refused");
-            assert_eq!(e.code, code::OPTION_OUT_OF_RANGE, "{}", e.message);
+            assert_eq!(e.code, code::PARAMETER_OUT_OF_RANGE, "{}", e.message);
             assert_eq!(e.parameter, Some(option), "{}", e.message);
             assert!(e.message.starts_with(option), "{}", e.message);
         }
@@ -1589,7 +1589,7 @@ mod input_error_tests {
         let input: SpectralResidualInputDto =
             serde_json::from_value(json!({ "data": vec![1.0_f64; 11] })).expect("valid request");
         let e = spectral_residual_dto(input).expect_err("refused");
-        assert_eq!(e.code, code::TOO_FEW_SAMPLES);
+        assert_eq!(e.code, code::INSUFFICIENT_DATA);
 
         // And a valid request is still served.
         assert!(request(json!({})).is_ok());

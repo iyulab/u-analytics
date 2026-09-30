@@ -10,6 +10,12 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Changed
 
+- **Breaking:** two refusal codes are renamed to the names the sibling
+  packages use for the same reasons, so one consumer handles them once:
+  `too_few_samples` is now `insufficient_data`, and `option_out_of_range` is
+  now `parameter_out_of_range`. The WebAssembly `Error`, the C error body and
+  `AnalyticsException.Reason` all carry the new names; fields are unchanged.
+
 - The publishing workflow runs the README's JavaScript examples against the
   built package before it publishes, so an example that throws is caught
   before a reader copies it.

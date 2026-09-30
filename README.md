@@ -242,7 +242,7 @@ interface AnalyticsError extends Error {
 //   p_chart([[1, 10], [1.5, 10]]) -> count_not_whole,      index 1
 //   p_chart([[1, 10], [1, 10.5]]) -> sample_size_not_whole, index 1
 // `index` says where in the data; `parameter` says which option:
-//   spectral_residual(data, { threshold: 0 }) -> option_out_of_range, parameter "threshold"
+//   spectral_residual(data, { threshold: 0 }) -> parameter_out_of_range, parameter "threshold"
 ```
 
 | `code` | Meaning |
@@ -253,9 +253,9 @@ interface AnalyticsError extends Error {
 | `units_not_positive` | units inspected that are not a positive number |
 | `subgroup_length_mismatch` | a subgroup of a different length than the first |
 | `subgroup_size_out_of_range` | a subgroup size the factor tables do not cover |
-| `too_few_samples` | fewer samples than the chart needs (`index: null`) |
+| `insufficient_data` | fewer samples than the chart needs (`index: null`) |
 | `standard_out_of_range` | a Phase I `p_bar`/`u_bar`/`phi` outside its domain — `parameter` names which |
-| `option_out_of_range` | an option outside its domain — `parameter` names which, and `message` states what it has to satisfy |
+| `parameter_out_of_range` | an option outside its domain — `parameter` names which, and `message` states what it has to satisfy |
 | `malformed_input` | not the shape the function takes — a row that is not a pair, an unknown field |
 | `invalid_input` | any other refusal; the message says what |
 
