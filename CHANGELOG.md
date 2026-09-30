@@ -8,6 +8,12 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Changed
+
+- The publishing workflow runs the README's JavaScript examples against the
+  built package before it publishes, so an example that throws is caught
+  before a reader copies it.
+
 ## [0.15.0] - 2026-09-29
 
 ### Changed

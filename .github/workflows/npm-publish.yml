@@ -93,6 +93,15 @@ jobs:
       # with no `JsValue` anywhere; what is only observable here is whether a
       # real JS object survives the boundary and comes back with the documented
       # shape. This is the last gate before `npm publish`.
+      - name: README examples run against the built package
+        # An example written for another build target (`import init` + `await
+        # init()`) passes the import check above and fails on the first line a
+        # reader copies from the registry page.
+        run: |
+          PKG_NAME=$(node -p "require('./pkg/package.json').name")
+          cd "$RUNNER_TEMP/smoke"
+          node "$GITHUB_WORKSPACE/scripts/check-readme-snippets.mjs" "$PKG_NAME"
+
       - name: Node behaviour gate (bindings actually answer)
         run: |
           PKG_NAME=$(node -p "require('./pkg/package.json').name")
