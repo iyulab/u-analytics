@@ -580,8 +580,8 @@ anderson_darling_normality(data: number[] | Float64Array):
 // malformed_input with index i (it is not averaged as 0).
 
 // Hypothesis tests. Samples are number[] | Float64Array; groups and tables are
-// number[][], refused at the row (`groups[1][2]: expected a number, got null`
-// -> index 1). Too few values -> insufficient_data; a sample with no variation,
+// number[][], refused where the value sits (`groups[1][2]` null -> parameter
+// "groups[1]", index 2). Too few values -> insufficient_data; a sample with no variation,
 // for which the statistic is undefined -> invalid_input.
 type TestResult = { statistic: number, df: number, p_value: number }
 one_sample_t_test(data, mu0: number): TestResult          // >= 2 values

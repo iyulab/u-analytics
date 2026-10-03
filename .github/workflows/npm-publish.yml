@@ -194,7 +194,7 @@ jobs:
           // Hypothesis tests refuse at the row of a number[][] argument.
           let rowErr = null
           try { m.kruskal_wallis_test([[1, 2, 3], [2, 3, null]]) } catch (err) { rowErr = err }
-          ok(rowErr && rowErr.code === 'malformed_input' && rowErr.index === 1 && rowErr.parameter === 'groups',
+          ok(rowErr && rowErr.code === 'malformed_input' && rowErr.index === 2 && rowErr.parameter === 'groups[1]',
             `kruskal_wallis_test null row: ${rowErr ? rowErr.code + '@' + rowErr.index : 'no error'}`)
           const anova = m.one_way_anova([[1, 2, 3], [2, 3, 4], [5, 6, 7]])
           ok(anova.df_between === 2 && anova.df_within === 6 && anova.f_statistic === 13, `anova ${JSON.stringify(anova)}`)

@@ -284,10 +284,13 @@ fn read_numbers(value: &JsValue, param: &'static str) -> Result<Vec<f64>, WireEr
     )
 }
 
-/// Places a row reader's refusal at its row: `param[row][j]`, `index` = row.
+/// Places a row reader's refusal in its row, as the crate's error contract
+/// reads: `parameter` is the path to the array (`data[1]`) and `index` the
+/// position in it -- the shape `find_non_finite` already gives a NaN there.
 fn at_row(e: WireError, param: &'static str, row: usize) -> WireError {
-    let message = e.message.replacen(param, &format!("{param}[{row}]"), 1);
-    WireError::new(e.code, Some(row), message).about(param)
+    let path = format!("{param}[{row}]");
+    let message = e.message.replacen(param, &path, 1);
+    WireError::new(e.code, e.index, message).about(path)
 }
 
 /// Reads a `number[][]` argument as sent -- each row as [`read_numbers`] does
@@ -348,7 +351,7 @@ pub fn xbar_r_chart(
     #[wasm_bindgen(unchecked_param_type = "number[][]")] data: JsValue,
     #[wasm_bindgen(unchecked_optional_param_type = "RuleOptions | null")] options: Option<JsValue>,
 ) -> Result<JsValue, JsValue> {
-    let subgroups: Vec<Vec<f64>> = from_js(data, "data")?;
+    let subgroups = read_number_rows(&data, "data").map_err(js_err)?;
     let rules = rules_option(options)?;
     to_js(&xbar_r_dto(subgroups, rules).map_err(js_err)?)
 }
@@ -375,7 +378,7 @@ pub fn xbar_s_chart(
     #[wasm_bindgen(unchecked_param_type = "number[][]")] data: JsValue,
     #[wasm_bindgen(unchecked_optional_param_type = "RuleOptions | null")] options: Option<JsValue>,
 ) -> Result<JsValue, JsValue> {
-    let subgroups: Vec<Vec<f64>> = from_js(data, "data")?;
+    let subgroups = read_number_rows(&data, "data").map_err(js_err)?;
     let rules = rules_option(options)?;
     to_js(&xbar_s_dto(subgroups, rules).map_err(js_err)?)
 }
@@ -397,10 +400,10 @@ pub fn xbar_s_chart(
 /// `{ rules?: string[] }`, exactly as for [`xbar_r_chart`].
 #[wasm_bindgen(unchecked_return_type = "ImrChartDto")]
 pub fn imr_chart(
-    #[wasm_bindgen(unchecked_param_type = "number[]")] values: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] values: JsValue,
     #[wasm_bindgen(unchecked_optional_param_type = "RuleOptions | null")] options: Option<JsValue>,
 ) -> Result<JsValue, JsValue> {
-    let values: Vec<f64> = from_js(values, "values")?;
+    let values = read_numbers(&values, "values").map_err(js_err)?;
     let rules = rules_option(options)?;
     to_js(&imr_dto(values, rules).map_err(js_err)?)
 }
@@ -421,11 +424,11 @@ pub fn imr_chart(
 /// One `{ index, value, violations }` per input value, in input order.
 #[wasm_bindgen(unchecked_return_type = "ChartPointDto[]")]
 pub fn run_rules(
-    #[wasm_bindgen(unchecked_param_type = "number[]")] values: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] values: JsValue,
     #[wasm_bindgen(unchecked_param_type = "LimitsInputDto")] limits: JsValue,
     #[wasm_bindgen(unchecked_optional_param_type = "RuleOptions | null")] options: Option<JsValue>,
 ) -> Result<JsValue, JsValue> {
-    let values: Vec<f64> = from_js(values, "values")?;
+    let values = read_numbers(&values, "values").map_err(js_err)?;
     let limits: LimitsInputDto = from_js(limits, "limits")?;
     let rules = rules_option(options)?;
     to_js(&run_rules_dto(values, limits, rules).map_err(js_err)?)
