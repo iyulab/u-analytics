@@ -11,7 +11,7 @@
     <!-- NuGet Package Metadata -->
     <PackageId>UAnalytics</PackageId>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <Version>0.10.0</Version>
+    <Version>0.11.0</Version>
     <Authors>iyulab</Authors>
     <Company>iyulab</Company>
     <Product>UAnalytics</Product>
