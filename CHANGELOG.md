@@ -10,6 +10,15 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Added
 
+- WebAssembly hypothesis tests from `testing`: `one_sample_t_test`,
+  `two_sample_t_test` (Welch), `paired_t_test`, `mann_whitney_u_test`,
+  `wilcoxon_signed_rank_test`, `jarque_bera_test`, `shapiro_wilk_test`,
+  `mann_kendall_test`, `one_way_anova`, `kruskal_wallis_test`, `levene_test`,
+  `bartlett_test`, `chi_squared_goodness_of_fit`, `chi_squared_independence`,
+  `fisher_exact_test`. Each refuses with a `code` and the argument (and row for
+  `number[][]` input): too few values is `insufficient_data`, a sample with no
+  variation `invalid_input`, unequal pairs `dimension_mismatch`.
+
 - C FFI (and the `UAnalytics` .NET client) for the attributes and rare-event
   charts the WebAssembly binding already had: `uanalytics_np_chart`,
   `uanalytics_c_chart`, `uanalytics_u_chart` (Phase II `u_bar`, per-point

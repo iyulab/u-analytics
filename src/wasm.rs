@@ -18,12 +18,17 @@ use wasm_bindgen::prelude::*;
 // transports cannot drift apart again. See `crate::wire`.
 use crate::wire::{
     at_least, c_chart_dto, capability_dto, count_pairs, count_rows, default_cost, default_min_seg,
-    default_penalty, g_chart_dto, gage_rr_anova_dto, gage_rr_xbar_r_dto, imr_dto, laney_p_dto,
-    laney_u_dto, np_chart_dto, p_chart_dto, pelt_dto, percentile_capability_dto, rate_pairs,
-    rules_from_json, run_rules_dto, sample_size_value, t_chart_dto, u_chart_dto, xbar_r_dto,
-    xbar_s_dto, AttributeStandardDto, CapabilityInputDto, GageRRInputDto, LimitsInputDto,
-    PeltInputDto, PeltPenaltyDto, PeltResultDto, PercentileCapabilityInputDto, SeasonalityInputDto,
-    SpectralResidualInputDto, WireError,
+    default_penalty, g_chart_dto, gage_rr_anova_dto, gage_rr_xbar_r_dto,
+    hypothesis::{
+        chi_squared_gof_dto, chi_squared_independence_dto, fisher_exact_dto, groups_test_dto,
+        jarque_bera_dto, mann_kendall_dto, mann_whitney_dto, one_sample_t_dto, one_way_anova_dto,
+        paired_t_dto, shapiro_wilk_dto, two_sample_t_dto, wilcoxon_dto,
+    },
+    imr_dto, laney_p_dto, laney_u_dto, np_chart_dto, p_chart_dto, pelt_dto,
+    percentile_capability_dto, rate_pairs, rules_from_json, run_rules_dto, sample_size_value,
+    t_chart_dto, u_chart_dto, xbar_r_dto, xbar_s_dto, AttributeStandardDto, CapabilityInputDto,
+    GageRRInputDto, LimitsInputDto, PeltInputDto, PeltPenaltyDto, PeltResultDto,
+    PercentileCapabilityInputDto, SeasonalityInputDto, SpectralResidualInputDto, WireError,
 };
 
 // ---------------------------------------------------------------------------
@@ -277,6 +282,32 @@ fn read_numbers(value: &JsValue, param: &'static str) -> Result<Vec<f64>, WireEr
             None => Element::Other(item.js_typeof().as_string().unwrap_or_default()),
         }),
     )
+}
+
+/// Places a row reader's refusal at its row: `param[row][j]`, `index` = row.
+fn at_row(e: WireError, param: &'static str, row: usize) -> WireError {
+    let message = e.message.replacen(param, &format!("{param}[{row}]"), 1);
+    WireError::new(e.code, Some(row), message).about(param)
+}
+
+/// Reads a `number[][]` argument as sent -- each row as [`read_numbers`] does
+/// -- so `null` in a row is refused at that row rather than by the parser.
+fn read_number_rows(value: &JsValue, param: &'static str) -> Result<Vec<Vec<f64>>, WireError> {
+    use wasm_bindgen::JsCast;
+    if !js_sys::Array::is_array(value) {
+        return Err(WireError::new(
+            crate::wire::code::MALFORMED_INPUT,
+            None,
+            format!("{param}: expected an array of number arrays"),
+        )
+        .about(param));
+    }
+    let array: &js_sys::Array = value.unchecked_ref();
+    array
+        .iter()
+        .enumerate()
+        .map(|(row, item)| read_numbers(&item, param).map_err(|e| at_row(e, param, row)))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -775,6 +806,161 @@ pub fn t_chart(
 ) -> Result<JsValue, JsValue> {
     let times = read_numbers(&times, "times").map_err(js_err)?;
     to_js(&t_chart_dto(&times).map_err(js_err)?)
+}
+
+// ---------------------------------------------------------------------------
+// Hypothesis tests
+// ---------------------------------------------------------------------------
+//
+// Every sample is a `number[]` or `Float64Array` read as sent (`read_numbers`):
+// `null` or a string is `malformed_input` and a NaN `value_not_finite`, each at
+// its index. Too few values is `insufficient_data`; data with no variation,
+// for which the statistic is undefined, is `invalid_input`.
+
+/// One-sample t test of `H0: mean = mu0` (need >= 2 values).
+#[wasm_bindgen(unchecked_return_type = "TestResultDto")]
+pub fn one_sample_t_test(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] data: JsValue,
+    mu0: f64,
+) -> Result<JsValue, JsValue> {
+    let data = read_numbers(&data, "data").map_err(js_err)?;
+    to_js(&one_sample_t_dto(&data, mu0).map_err(js_err)?)
+}
+
+/// Welch's two-sample t test (unequal variances; need >= 2 values each).
+#[wasm_bindgen(unchecked_return_type = "TestResultDto")]
+pub fn two_sample_t_test(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] a: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] b: JsValue,
+) -> Result<JsValue, JsValue> {
+    let a = read_numbers(&a, "a").map_err(js_err)?;
+    let b = read_numbers(&b, "b").map_err(js_err)?;
+    to_js(&two_sample_t_dto(&a, &b).map_err(js_err)?)
+}
+
+/// Paired t test on `y - x` (same length, need >= 2 pairs).
+#[wasm_bindgen(unchecked_return_type = "TestResultDto")]
+pub fn paired_t_test(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] x: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] y: JsValue,
+) -> Result<JsValue, JsValue> {
+    let x = read_numbers(&x, "x").map_err(js_err)?;
+    let y = read_numbers(&y, "y").map_err(js_err)?;
+    to_js(&paired_t_dto(&x, &y).map_err(js_err)?)
+}
+
+/// Mann-Whitney U test, normal approximation with tie correction (need >= 2 values each).
+#[wasm_bindgen(unchecked_return_type = "TestResultDto")]
+pub fn mann_whitney_u_test(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] a: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] b: JsValue,
+) -> Result<JsValue, JsValue> {
+    let a = read_numbers(&a, "a").map_err(js_err)?;
+    let b = read_numbers(&b, "b").map_err(js_err)?;
+    to_js(&mann_whitney_dto(&a, &b).map_err(js_err)?)
+}
+
+/// Wilcoxon signed-rank test on paired samples (same length; pairs with `x = y` are dropped, >= 2 must remain).
+#[wasm_bindgen(unchecked_return_type = "TestResultDto")]
+pub fn wilcoxon_signed_rank_test(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] x: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] y: JsValue,
+) -> Result<JsValue, JsValue> {
+    let x = read_numbers(&x, "x").map_err(js_err)?;
+    let y = read_numbers(&y, "y").map_err(js_err)?;
+    to_js(&wilcoxon_dto(&x, &y).map_err(js_err)?)
+}
+
+/// Chi-squared goodness of fit: `observed` counts (>= 0) against `expected` frequencies (> 0), same length >= 2.
+#[wasm_bindgen(unchecked_return_type = "TestResultDto")]
+pub fn chi_squared_goodness_of_fit(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] observed: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] expected: JsValue,
+) -> Result<JsValue, JsValue> {
+    let observed = read_numbers(&observed, "observed").map_err(js_err)?;
+    let expected = read_numbers(&expected, "expected").map_err(js_err)?;
+    to_js(&chi_squared_gof_dto(&observed, &expected).map_err(js_err)?)
+}
+
+/// Jarque-Bera normality test (need >= 8 values).
+#[wasm_bindgen(unchecked_return_type = "TestResultDto")]
+pub fn jarque_bera_test(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] data: JsValue,
+) -> Result<JsValue, JsValue> {
+    let data = read_numbers(&data, "data").map_err(js_err)?;
+    to_js(&jarque_bera_dto(&data).map_err(js_err)?)
+}
+
+/// Shapiro-Wilk normality test, Royston (1995) (3 to 5000 values). Returns `{ w, p_value }`.
+#[wasm_bindgen(unchecked_return_type = "ShapiroWilkDto")]
+pub fn shapiro_wilk_test(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] data: JsValue,
+) -> Result<JsValue, JsValue> {
+    let data = read_numbers(&data, "data").map_err(js_err)?;
+    to_js(&shapiro_wilk_dto(&data).map_err(js_err)?)
+}
+
+/// Mann-Kendall trend test with Kendall's tau and Sen's slope (need >= 4 values).
+#[wasm_bindgen(unchecked_return_type = "MannKendallDto")]
+pub fn mann_kendall_test(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] data: JsValue,
+) -> Result<JsValue, JsValue> {
+    let data = read_numbers(&data, "data").map_err(js_err)?;
+    to_js(&mann_kendall_dto(&data).map_err(js_err)?)
+}
+
+/// One-way ANOVA across `groups` (>= 2 groups of >= 2 values).
+#[wasm_bindgen(unchecked_return_type = "AnovaDto")]
+pub fn one_way_anova(
+    #[wasm_bindgen(unchecked_param_type = "number[][]")] groups: JsValue,
+) -> Result<JsValue, JsValue> {
+    let groups = read_number_rows(&groups, "groups").map_err(js_err)?;
+    to_js(&one_way_anova_dto(&groups).map_err(js_err)?)
+}
+
+/// Kruskal-Wallis H test across `groups` (>= 2 groups of >= 2 values).
+#[wasm_bindgen(unchecked_return_type = "TestResultDto")]
+pub fn kruskal_wallis_test(
+    #[wasm_bindgen(unchecked_param_type = "number[][]")] groups: JsValue,
+) -> Result<JsValue, JsValue> {
+    let groups = read_number_rows(&groups, "groups").map_err(js_err)?;
+    to_js(&groups_test_dto("kruskal_wallis_test", &groups).map_err(js_err)?)
+}
+
+/// Levene's test (Brown-Forsythe, median-centred) for equal variances across `groups`.
+#[wasm_bindgen(unchecked_return_type = "TestResultDto")]
+pub fn levene_test(
+    #[wasm_bindgen(unchecked_param_type = "number[][]")] groups: JsValue,
+) -> Result<JsValue, JsValue> {
+    let groups = read_number_rows(&groups, "groups").map_err(js_err)?;
+    to_js(&groups_test_dto("levene_test", &groups).map_err(js_err)?)
+}
+
+/// Bartlett's test for equal variances across `groups` (each group must vary).
+#[wasm_bindgen(unchecked_return_type = "TestResultDto")]
+pub fn bartlett_test(
+    #[wasm_bindgen(unchecked_param_type = "number[][]")] groups: JsValue,
+) -> Result<JsValue, JsValue> {
+    let groups = read_number_rows(&groups, "groups").map_err(js_err)?;
+    to_js(&groups_test_dto("bartlett_test", &groups).map_err(js_err)?)
+}
+
+/// Chi-squared test of independence on a contingency `table` (>= 2 x 2, counts >= 0).
+#[wasm_bindgen(unchecked_return_type = "TestResultDto")]
+pub fn chi_squared_independence(
+    #[wasm_bindgen(unchecked_param_type = "number[][]")] table: JsValue,
+) -> Result<JsValue, JsValue> {
+    let table = read_number_rows(&table, "table").map_err(js_err)?;
+    to_js(&chi_squared_independence_dto(&table).map_err(js_err)?)
+}
+
+/// Fisher's exact test on a 2 x 2 `table` of whole counts `[[a, b], [c, d]]`.
+#[wasm_bindgen(unchecked_return_type = "TestResultDto")]
+pub fn fisher_exact_test(
+    #[wasm_bindgen(unchecked_param_type = "[[number, number], [number, number]]")] table: JsValue,
+) -> Result<JsValue, JsValue> {
+    let table: serde_json::Value = from_js(table, "table")?;
+    to_js(&fisher_exact_dto(&table).map_err(js_err)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -1542,6 +1728,62 @@ mod dto_strictness_tests {
 mod binding_contract_tests {
     use super::*;
     use crate::wire::each_within;
+
+    // --- hypothesis tests ---
+
+    #[test]
+    fn a_t_test_reports_what_the_crate_computes() {
+        let data = [5.1, 4.9, 5.3, 5.0, 5.2];
+        let dto = one_sample_t_dto(&data, 5.0).unwrap();
+        let direct = crate::testing::one_sample_t_test(&data, 5.0).unwrap();
+        assert_eq!(
+            (dto.statistic, dto.df, dto.p_value),
+            (direct.statistic, direct.df, direct.p_value)
+        );
+    }
+
+    #[test]
+    fn hypothesis_refusals_name_the_argument_and_row() {
+        let e = paired_t_dto(&[1.0, 2.0, 3.0], &[1.0, 2.0]).unwrap_err();
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("dimension_mismatch", Some("y"))
+        );
+
+        let e = one_way_anova_dto(&[vec![1.0, 2.0], vec![3.0]]).unwrap_err();
+        assert_eq!(
+            (e.code, e.index),
+            (crate::wire::code::INSUFFICIENT_DATA, Some(1))
+        );
+
+        let e = chi_squared_independence_dto(&[vec![1.0, 2.0], vec![3.0]]).unwrap_err();
+        assert_eq!((e.code, e.index), ("dimension_mismatch", Some(1)));
+
+        let e = one_sample_t_dto(&[2.0, 2.0, 2.0], 1.0).unwrap_err();
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            (crate::wire::code::INVALID_INPUT, Some("data"))
+        );
+
+        let e = chi_squared_gof_dto(&[3.0, 4.0], &[3.5, 0.0]).unwrap_err();
+        assert_eq!(
+            (e.code, e.index),
+            (crate::wire::code::PARAMETER_OUT_OF_RANGE, Some(1))
+        );
+    }
+
+    #[test]
+    fn fisher_reads_a_two_by_two_table_of_whole_counts() {
+        let ok = fisher_exact_dto(&serde_json::json!([[3, 1], [1, 3]])).unwrap();
+        assert!(ok.p_value > 0.0 && ok.p_value <= 1.0);
+        let e = fisher_exact_dto(&serde_json::json!([[3, 1.5], [1, 3]])).unwrap_err();
+        assert_eq!(
+            (e.code, e.index),
+            (crate::wire::code::COUNT_NOT_WHOLE, Some(1))
+        );
+        let e = fisher_exact_dto(&serde_json::json!([[3, 1, 2], [1, 3, 0]])).unwrap_err();
+        assert_eq!(e.code, "dimension_mismatch");
+    }
 
     // --- number arrays are read as sent ---
 

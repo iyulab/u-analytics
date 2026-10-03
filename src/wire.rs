@@ -915,6 +915,368 @@ pub(crate) fn t_chart_dto(times: &[f64]) -> Result<TChartDto, WireError> {
     })
 }
 
+// ---------------------------------------------------------------------------
+// Hypothesis tests (WebAssembly; the C transport does not carry them yet)
+// ---------------------------------------------------------------------------
+//
+// Each core checks what it can name -- sizes, shapes, the domain of a count or
+// an expected frequency -- and refuses with the argument and the row. What is
+// left when the test still returns `None` is data with no variation, refused
+// as `invalid_input` naming the argument.
+#[cfg(feature = "wasm")]
+pub(crate) mod hypothesis {
+    use super::*;
+
+    /// A test statistic, its degrees of freedom and two-sided p-value.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct TestResultDto {
+        pub(crate) statistic: f64,
+        pub(crate) df: f64,
+        pub(crate) p_value: f64,
+    }
+
+    impl From<crate::testing::TestResult> for TestResultDto {
+        fn from(r: crate::testing::TestResult) -> Self {
+            TestResultDto {
+                statistic: r.statistic,
+                df: r.df,
+                p_value: r.p_value,
+            }
+        }
+    }
+
+    /// One-way ANOVA table.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct AnovaDto {
+        pub(crate) f_statistic: f64,
+        pub(crate) df_between: usize,
+        pub(crate) df_within: usize,
+        pub(crate) p_value: f64,
+        pub(crate) ss_between: f64,
+        pub(crate) ss_within: f64,
+    }
+
+    /// Shapiro-Wilk W and its p-value.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct ShapiroWilkDto {
+        pub(crate) w: f64,
+        pub(crate) p_value: f64,
+    }
+
+    /// Mann-Kendall trend test with Sen's slope.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct MannKendallDto {
+        pub(crate) s_statistic: i64,
+        pub(crate) variance: f64,
+        pub(crate) z_statistic: f64,
+        pub(crate) p_value: f64,
+        pub(crate) kendall_tau: f64,
+        pub(crate) sen_slope: f64,
+    }
+
+    fn no_variation(test: &str, param: &'static str) -> WireError {
+        WireError::invalid_input(format!(
+            "{test}: {param} has no variation (every value is the same), so the statistic is undefined"
+        ))
+        .about(param)
+    }
+
+    fn both_constant(test: &str) -> WireError {
+        WireError::invalid_input(format!(
+            "{test}: a and b together have no variation, so the statistic is undefined"
+        ))
+    }
+
+    fn same_length(
+        x: &[f64],
+        y: &[f64],
+        xn: &'static str,
+        yn: &'static str,
+    ) -> Result<(), WireError> {
+        if x.len() == y.len() {
+            Ok(())
+        } else {
+            Err(WireError::new(
+                "dimension_mismatch",
+                None,
+                format!(
+                    "{yn} has {} values but {xn} has {}; the test pairs them",
+                    y.len(),
+                    x.len()
+                ),
+            )
+            .about(yn))
+        }
+    }
+
+    /// At least two groups, each with at least `min` values.
+    fn groups_of(groups: &[Vec<f64>], min: usize) -> Result<(), WireError> {
+        if groups.len() < 2 {
+            return Err(WireError::insufficient_data(format!(
+                "groups: at least 2 groups are needed, got {}",
+                groups.len()
+            ))
+            .about("groups"));
+        }
+        if let Some(i) = groups.iter().position(|g| g.len() < min) {
+            return Err(WireError::new(
+                code::INSUFFICIENT_DATA,
+                Some(i),
+                format!(
+                    "groups[{i}]: at least {min} values are needed, got {}",
+                    groups[i].len()
+                ),
+            )
+            .about("groups"));
+        }
+        Ok(())
+    }
+
+    fn as_slices(groups: &[Vec<f64>]) -> Vec<&[f64]> {
+        groups.iter().map(Vec::as_slice).collect()
+    }
+
+    pub(crate) fn one_sample_t_dto(data: &[f64], mu0: f64) -> Result<TestResultDto, WireError> {
+        let data = at_least(data.to_vec(), 2, "data")?;
+        if !mu0.is_finite() {
+            return Err(WireError::new(
+                code::VALUE_NOT_FINITE,
+                None,
+                format!("mu0: expected a finite number, got {mu0}"),
+            )
+            .about("mu0"));
+        }
+        crate::testing::one_sample_t_test(&data, mu0)
+            .map(Into::into)
+            .ok_or_else(|| no_variation("one_sample_t_test", "data"))
+    }
+
+    pub(crate) fn two_sample_t_dto(a: &[f64], b: &[f64]) -> Result<TestResultDto, WireError> {
+        let a = at_least(a.to_vec(), 2, "a")?;
+        let b = at_least(b.to_vec(), 2, "b")?;
+        crate::testing::two_sample_t_test(&a, &b)
+            .map(Into::into)
+            .ok_or_else(|| both_constant("two_sample_t_test"))
+    }
+
+    pub(crate) fn paired_t_dto(x: &[f64], y: &[f64]) -> Result<TestResultDto, WireError> {
+        same_length(x, y, "x", "y")?;
+        let x = at_least(x.to_vec(), 2, "x")?;
+        crate::testing::paired_t_test(&x, y)
+            .map(Into::into)
+            .ok_or_else(|| {
+                WireError::invalid_input(
+                    "paired_t_test: every difference y - x is the same, so the statistic is undefined",
+                )
+                .about("y")
+            })
+    }
+
+    pub(crate) fn mann_whitney_dto(a: &[f64], b: &[f64]) -> Result<TestResultDto, WireError> {
+        let a = at_least(a.to_vec(), 2, "a")?;
+        let b = at_least(b.to_vec(), 2, "b")?;
+        crate::testing::mann_whitney_u_test(&a, &b)
+            .map(Into::into)
+            .ok_or_else(|| both_constant("mann_whitney_u_test"))
+    }
+
+    pub(crate) fn wilcoxon_dto(x: &[f64], y: &[f64]) -> Result<TestResultDto, WireError> {
+        same_length(x, y, "x", "y")?;
+        let x = at_least(x.to_vec(), 2, "x")?;
+        crate::testing::wilcoxon_signed_rank_test(&x, y)
+            .map(Into::into)
+            .ok_or_else(|| {
+                WireError::insufficient_data(
+                    "wilcoxon_signed_rank_test: fewer than 2 pairs differ (pairs with x = y are dropped)",
+                )
+                .about("y")
+            })
+    }
+
+    pub(crate) fn jarque_bera_dto(data: &[f64]) -> Result<TestResultDto, WireError> {
+        let data = at_least(data.to_vec(), 8, "data")?;
+        crate::testing::jarque_bera_test(&data)
+            .map(Into::into)
+            .ok_or_else(|| no_variation("jarque_bera_test", "data"))
+    }
+
+    pub(crate) fn shapiro_wilk_dto(data: &[f64]) -> Result<ShapiroWilkDto, WireError> {
+        let data = at_least(data.to_vec(), 3, "data")?;
+        if data.len() > 5000 {
+            return Err(WireError::new(
+                code::PARAMETER_OUT_OF_RANGE,
+                None,
+                format!(
+                    "data: Shapiro-Wilk covers 3 to 5000 values (Royston 1995), got {}",
+                    data.len()
+                ),
+            )
+            .about("data"));
+        }
+        crate::testing::shapiro_wilk_test(&data)
+            .map(|r| ShapiroWilkDto {
+                w: r.w,
+                p_value: r.p_value,
+            })
+            .ok_or_else(|| no_variation("shapiro_wilk_test", "data"))
+    }
+
+    pub(crate) fn mann_kendall_dto(data: &[f64]) -> Result<MannKendallDto, WireError> {
+        let data = at_least(data.to_vec(), 4, "data")?;
+        crate::testing::mann_kendall_test(&data)
+            .map(|r| MannKendallDto {
+                s_statistic: r.s_statistic,
+                variance: r.variance,
+                z_statistic: r.z_statistic,
+                p_value: r.p_value,
+                kendall_tau: r.kendall_tau,
+                sen_slope: r.sen_slope,
+            })
+            .ok_or_else(|| no_variation("mann_kendall_test", "data"))
+    }
+
+    pub(crate) fn one_way_anova_dto(groups: &[Vec<f64>]) -> Result<AnovaDto, WireError> {
+        groups_of(groups, 2)?;
+        crate::testing::one_way_anova(&as_slices(groups))
+            .map(|r| AnovaDto {
+                f_statistic: r.f_statistic,
+                df_between: r.df_between,
+                df_within: r.df_within,
+                p_value: r.p_value,
+                ss_between: r.ss_between,
+                ss_within: r.ss_within,
+            })
+            .ok_or_else(|| no_variation("one_way_anova", "groups"))
+    }
+
+    /// Kruskal-Wallis, Levene or Bartlett: `test` names which.
+    pub(crate) fn groups_test_dto(
+        test: &str,
+        groups: &[Vec<f64>],
+    ) -> Result<TestResultDto, WireError> {
+        groups_of(groups, 2)?;
+        let slices = as_slices(groups);
+        let result = match test {
+            "kruskal_wallis_test" => crate::testing::kruskal_wallis_test(&slices),
+            "levene_test" => crate::testing::levene_test(&slices),
+            _ => crate::testing::bartlett_test(&slices),
+        };
+        result
+            .map(Into::into)
+            .ok_or_else(|| no_variation(test, "groups"))
+    }
+
+    pub(crate) fn chi_squared_gof_dto(
+        observed: &[f64],
+        expected: &[f64],
+    ) -> Result<TestResultDto, WireError> {
+        same_length(observed, expected, "observed", "expected")?;
+        let observed = at_least(observed.to_vec(), 2, "observed")?;
+        each_within(&observed, "observed", ">= 0", |v| v >= 0.0)?;
+        each_within(expected, "expected", "> 0", |v| v > 0.0)?;
+        crate::testing::chi_squared_goodness_of_fit(&observed, expected)
+            .map(Into::into)
+            .ok_or_else(|| WireError::invalid_input("chi_squared_goodness_of_fit: no statistic"))
+    }
+
+    /// Rows of a contingency table, all the same length.
+    fn rectangular(
+        table: &[Vec<f64>],
+        min_rows: usize,
+        min_cols: usize,
+    ) -> Result<usize, WireError> {
+        if table.len() < min_rows {
+            return Err(WireError::insufficient_data(format!(
+                "table: at least {min_rows} rows are needed, got {}",
+                table.len()
+            ))
+            .about("table"));
+        }
+        let cols = table[0].len();
+        if cols < min_cols {
+            return Err(WireError::insufficient_data(format!(
+                "table: at least {min_cols} columns are needed, got {cols}"
+            ))
+            .about("table"));
+        }
+        if let Some(i) = table.iter().position(|r| r.len() != cols) {
+            return Err(WireError::new(
+                "dimension_mismatch",
+                Some(i),
+                format!(
+                    "table[{i}] has {} cells but table[0] has {cols}; every row needs the same number",
+                    table[i].len()
+                ),
+            )
+            .about("table"));
+        }
+        Ok(cols)
+    }
+
+    pub(crate) fn chi_squared_independence_dto(
+        table: &[Vec<f64>],
+    ) -> Result<TestResultDto, WireError> {
+        let cols = rectangular(table, 2, 2)?;
+        let flat: Vec<f64> = table.iter().flatten().copied().collect();
+        each_within(&flat, "table", ">= 0", |v| v >= 0.0)?;
+        crate::testing::chi_squared_independence(&flat, table.len(), cols)
+            .map(Into::into)
+            .ok_or_else(|| {
+                WireError::invalid_input(
+                    "chi_squared_independence: a row or a column sums to 0, so its expected counts are 0",
+                )
+                .about("table")
+            })
+    }
+
+    pub(crate) fn fisher_exact_dto(table: &serde_json::Value) -> Result<TestResultDto, WireError> {
+        let rows = as_array(table, "table", "a 2 x 2 array of counts")?;
+        if rows.len() != 2 {
+            return Err(WireError::new(
+                "dimension_mismatch",
+                None,
+                format!(
+                    "table: Fisher's exact test takes 2 rows, got {}",
+                    rows.len()
+                ),
+            )
+            .about("table"));
+        }
+        let mut cells = Vec::with_capacity(4);
+        for (i, row) in rows.iter().enumerate() {
+            let row = count_rows(row, &format!("table[{i}]"))?;
+            if row.len() != 2 {
+                return Err(WireError::new(
+                    "dimension_mismatch",
+                    Some(i),
+                    format!(
+                        "table[{i}]: Fisher's exact test takes 2 columns, got {}",
+                        row.len()
+                    ),
+                )
+                .about("table"));
+            }
+            cells.extend(row);
+        }
+        crate::testing::fisher_exact_test(cells[0], cells[1], cells[2], cells[3])
+            .map(Into::into)
+            .ok_or_else(|| {
+                WireError::invalid_input(
+                    "fisher_exact_test: a row or a column of the table sums to 0",
+                )
+                .about("table")
+            })
+    }
+}
+
 /// Input for `process_capability`.
 ///
 /// Every field except `data` is optional, but at least one of `usl`/`lsl` must

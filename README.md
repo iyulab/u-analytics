@@ -579,6 +579,39 @@ anderson_darling_normality(data: number[] | Float64Array):
 // A number array is read as sent: `null` or a string at data[i] throws
 // malformed_input with index i (it is not averaged as 0).
 
+// Hypothesis tests. Samples are number[] | Float64Array; groups and tables are
+// number[][], refused at the row (`groups[1][2]: expected a number, got null`
+// -> index 1). Too few values -> insufficient_data; a sample with no variation,
+// for which the statistic is undefined -> invalid_input.
+type TestResult = { statistic: number, df: number, p_value: number }
+one_sample_t_test(data, mu0: number): TestResult          // >= 2 values
+two_sample_t_test(a, b): TestResult                       // Welch; >= 2 each
+paired_t_test(x, y): TestResult                           // same length, >= 2 pairs
+mann_whitney_u_test(a, b): TestResult                     // >= 2 each
+wilcoxon_signed_rank_test(x, y): TestResult               // pairs with x = y dropped, >= 2 remain
+jarque_bera_test(data): TestResult                        // >= 8 values
+shapiro_wilk_test(data): { w: number, p_value: number }   // 3 to 5000 values (Royston 1995)
+mann_kendall_test(data):                                  // >= 4 values
+  { s_statistic, variance, z_statistic, p_value, kendall_tau, sen_slope }
+one_way_anova(groups: number[][]):                        // >= 2 groups of >= 2
+  { f_statistic, df_between, df_within, p_value, ss_between, ss_within }
+kruskal_wallis_test(groups) | levene_test(groups) | bartlett_test(groups): TestResult
+chi_squared_goodness_of_fit(observed, expected): TestResult  // observed >= 0, expected > 0
+chi_squared_independence(table: number[][]): TestResult      // >= 2 x 2, counts >= 0
+fisher_exact_test(table: [[a, b], [c, d]]): TestResult       // whole counts
+```
+
+```js
+import { two_sample_t_test, one_way_anova } from "@iyulab/u-analytics";
+
+const t = two_sample_t_test([5.1, 4.9, 5.3, 5.0], [5.6, 5.8, 5.5, 5.9, 5.7]);
+const f = one_way_anova([[1, 2, 3], [2, 3, 4], [5, 6, 7]]);
+console.log(t.p_value < 0.05, f.df_between); // true 2
+if (!(t.p_value < 0.05) || f.df_between !== 2) throw new Error("unexpected");
+```
+
+```ts
+
 // Changepoints — PELT (Killick et al., 2012)
 detect_changepoints(input: {
   data: number[],

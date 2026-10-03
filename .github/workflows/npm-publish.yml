@@ -191,6 +191,14 @@ jobs:
             `t_chart([1, null, 2]) gave ${refused ? refused.code + '@' + refused.index : 'no error'}`)
           ok(m.g_chart(new Float64Array([10, 20, 30])).points.length === 3, 'g_chart(Float64Array) changed')
 
+          // Hypothesis tests refuse at the row of a number[][] argument.
+          let rowErr = null
+          try { m.kruskal_wallis_test([[1, 2, 3], [2, 3, null]]) } catch (err) { rowErr = err }
+          ok(rowErr && rowErr.code === 'malformed_input' && rowErr.index === 1 && rowErr.parameter === 'groups',
+            `kruskal_wallis_test null row: ${rowErr ? rowErr.code + '@' + rowErr.index : 'no error'}`)
+          const anova = m.one_way_anova([[1, 2, 3], [2, 3, 4], [5, 6, 7]])
+          ok(anova.df_between === 2 && anova.df_within === 6 && anova.f_statistic === 13, `anova ${JSON.stringify(anova)}`)
+
           console.log('binding behaviour gate: ok')
           EOF
           PKG_NAME="$PKG_NAME" node gate.mjs
