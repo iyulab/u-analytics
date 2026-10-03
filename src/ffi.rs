@@ -410,6 +410,206 @@ pub unsafe extern "C" fn uanalytics_laney_p_chart(
     })
 }
 
+// ── SPC: NP, C, U, Laney U', G and T charts ─────────────────
+
+/// `{ "defectives": [...], "sample_size": n }` for the NP chart.
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NpChartRequest {
+    defectives: serde_json::Value,
+    sample_size: serde_json::Value,
+}
+
+/// `{ "defects": [...] }` for the C chart.
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DefectsRequest {
+    defects: serde_json::Value,
+}
+
+/// `{ "samples": [[defects, units], ...], "u_bar"?, "phi"? }` for the U and
+/// Laney U' charts.
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RateSamplesRequest {
+    samples: serde_json::Value,
+    #[serde(default)]
+    u_bar: Option<f64>,
+    /// Laney U' only, together with `u_bar`.
+    #[serde(default)]
+    phi: Option<f64>,
+}
+
+#[cfg(feature = "ffi")]
+impl RateSamplesRequest {
+    fn standard(&self) -> crate::wire::AttributeStandardDto {
+        crate::wire::AttributeStandardDto {
+            p_bar: None,
+            u_bar: self.u_bar,
+            phi: self.phi,
+        }
+    }
+}
+
+/// `{ "gaps": [...] }` (G chart) or `{ "times": [...] }` (T chart).
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GapsRequest {
+    gaps: Vec<f64>,
+}
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TimesRequest {
+    times: Vec<f64>,
+}
+
+/// Parses `request_json` as `R` and writes what `compute` returns -- the
+/// shape every chart entry point below shares.
+#[cfg(feature = "ffi")]
+unsafe fn chart_entry<R, T, F>(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+    compute: F,
+) -> i32
+where
+    R: serde::de::DeserializeOwned,
+    T: Serialize,
+    F: FnOnce(R) -> Result<T, crate::wire::WireError>,
+{
+    let json = match unsafe { read_json(request_json) } {
+        Ok(j) => j,
+        Err(e) => return e,
+    };
+    let req: R = match parse_request(&json, result_ptr) {
+        Ok(r) => r,
+        Err(status) => return status,
+    };
+    match compute(req) {
+        Ok(dto) => write_json(result_ptr, &dto),
+        Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
+    }
+}
+
+/// SPC NP chart: defectives per subgroup of one fixed `sample_size`.
+///
+/// # Safety
+///
+/// As [`uanalytics_p_chart`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn uanalytics_np_chart(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+) -> i32 {
+    ffi_catch(result_ptr, || unsafe {
+        chart_entry(request_json, result_ptr, |req: NpChartRequest| {
+            let defectives = crate::wire::count_rows(&req.defectives, "defectives")?;
+            let size = crate::wire::sample_size_value(&req.sample_size, "sample_size")?;
+            crate::wire::np_chart_dto(&defectives, size)
+        })
+    })
+}
+
+/// SPC C chart: defects per inspection unit of one size.
+///
+/// # Safety
+///
+/// As [`uanalytics_p_chart`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn uanalytics_c_chart(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+) -> i32 {
+    ffi_catch(result_ptr, || unsafe {
+        chart_entry(request_json, result_ptr, |req: DefectsRequest| {
+            let defects = crate::wire::count_rows(&req.defects, "defects")?;
+            crate::wire::c_chart_dto(&defects)
+        })
+    })
+}
+
+/// SPC U chart: defects per unit when the quantity inspected varies; a known
+/// `u_bar` fixes the centre line (Phase II).
+///
+/// # Safety
+///
+/// As [`uanalytics_p_chart`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn uanalytics_u_chart(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+) -> i32 {
+    ffi_catch(result_ptr, || unsafe {
+        chart_entry(request_json, result_ptr, |req: RateSamplesRequest| {
+            let samples = crate::wire::rate_pairs(&req.samples, "samples")?;
+            crate::wire::u_chart_dto(&samples, &req.standard())
+        })
+    })
+}
+
+/// SPC Laney U' chart; `u_bar` and `phi` together fix the limits (Phase II).
+///
+/// # Safety
+///
+/// As [`uanalytics_p_chart`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn uanalytics_laney_u_chart(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+) -> i32 {
+    ffi_catch(result_ptr, || unsafe {
+        chart_entry(request_json, result_ptr, |req: RateSamplesRequest| {
+            let samples = crate::wire::rate_pairs(&req.samples, "samples")?;
+            crate::wire::laney_u_dto(&samples, &req.standard())
+        })
+    })
+}
+
+/// SPC G chart: inter-event conforming counts (rare events).
+///
+/// # Safety
+///
+/// As [`uanalytics_p_chart`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn uanalytics_g_chart(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+) -> i32 {
+    ffi_catch(result_ptr, || unsafe {
+        chart_entry(request_json, result_ptr, |req: GapsRequest| {
+            crate::wire::g_chart_dto(&req.gaps)
+        })
+    })
+}
+
+/// SPC T chart: inter-event times (rare events).
+///
+/// # Safety
+///
+/// As [`uanalytics_p_chart`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn uanalytics_t_chart(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+) -> i32 {
+    ffi_catch(result_ptr, || unsafe {
+        chart_entry(request_json, result_ptr, |req: TimesRequest| {
+            crate::wire::t_chart_dto(&req.times)
+        })
+    })
+}
+
 // ── Process Capability ──────────────────────────────────────
 
 /// Process capability analysis (Cp, Cpk, Pp, Ppk, Cpm).
@@ -939,6 +1139,78 @@ mod tests {
         let (code, body) = call(uanalytics_xbar_r_chart, "{not json");
         assert_eq!(code, -2);
         assert!(body["error"].is_string());
+    }
+
+    // -- NP, C, U, Laney U', G, T ----------------------------------------
+
+    #[test]
+    fn every_attributes_chart_the_wasm_binding_has_is_reachable_from_c() {
+        let cases: [(Entry, &str, &str); 6] = [
+            (
+                uanalytics_np_chart,
+                r#"{"defectives": [2, 3, 1, 4], "sample_size": 50}"#,
+                "cl",
+            ),
+            (uanalytics_c_chart, r#"{"defects": [3, 5, 2, 4]}"#, "cl"),
+            (
+                uanalytics_u_chart,
+                r#"{"samples": [[3, 1.5], [5, 2], [2, 1]]}"#,
+                "u_bar",
+            ),
+            (
+                uanalytics_laney_u_chart,
+                r#"{"samples": [[3, 1.5], [5, 2], [2, 1], [6, 2.5]]}"#,
+                "phi",
+            ),
+            (uanalytics_g_chart, r#"{"gaps": [10, 20, 30, 15]}"#, "g_bar"),
+            (
+                uanalytics_t_chart,
+                r#"{"times": [1.5, 2.0, 0.5, 3.0]}"#,
+                "t_bar",
+            ),
+        ];
+        for (entry, request, field) in cases {
+            let (code, body) = call(entry, request);
+            assert_eq!(code, 0, "{request}: {body}");
+            assert!(body[field].is_number(), "{request}: {body}");
+            assert!(
+                body["points"].as_array().is_some_and(|p| !p.is_empty()),
+                "{body}"
+            );
+        }
+    }
+
+    /// The same refusal, code and row as over WebAssembly: both transports
+    /// call one core in `wire`.
+    #[test]
+    fn attributes_refusals_carry_their_row() {
+        let (code, body) = call(uanalytics_c_chart, r#"{"defects": [3, 2.5, 4]}"#);
+        assert_eq!(code, -3, "{body}");
+        assert_eq!(body["code"], "count_not_whole", "{body}");
+        assert_eq!(body["index"], 1, "{body}");
+
+        let (code, body) = call(
+            uanalytics_u_chart,
+            r#"{"samples": [[3, 1.5]], "u_bar": -1}"#,
+        );
+        assert_eq!(code, -3, "{body}");
+        assert_eq!(body["code"], "standard_out_of_range", "{body}");
+
+        let (code, body) = call(uanalytics_t_chart, r#"{"times": [1, 0, 2]}"#);
+        assert_eq!(code, -3, "{body}");
+        assert_eq!(body["code"], "parameter_out_of_range", "{body}");
+        assert_eq!(body["index"], 1, "{body}");
+    }
+
+    #[test]
+    fn a_known_u_bar_fixes_the_centre_line() {
+        let (code, body) = call(
+            uanalytics_u_chart,
+            r#"{"samples": [[3, 1.5], [5, 2], [2, 1]], "u_bar": 2.0}"#,
+        );
+        assert_eq!(code, 0, "{body}");
+        assert_eq!(body["u_bar"], 2.0, "{body}");
+        assert!(body["points"][0]["z"].is_number(), "{body}");
     }
 
     // -- X-bar-R ----------------------------------------------------------

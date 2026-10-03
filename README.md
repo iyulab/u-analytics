@@ -693,6 +693,12 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_run_rules` | `run_rules(values, limits, { rules? })` | `{ values, limits: { ucl, cl, lcl }, rules? }` |
 | `uanalytics_p_chart` | `p_chart(samples, { p_bar? })` | `{ samples: [[defectives, sample_size], …], p_bar? }` |
 | `uanalytics_laney_p_chart` | `laney_p_chart(samples, { p_bar?, phi? })` | `{ samples: [[defectives, sample_size], …], p_bar?, phi? }` |
+| `uanalytics_np_chart` | `np_chart(defectives, sample_size)` | `{ defectives: [...], sample_size }` |
+| `uanalytics_c_chart` | `c_chart(defects)` | `{ defects: [...] }` |
+| `uanalytics_u_chart` | `u_chart(samples, { u_bar? })` | `{ samples: [[defects, units], …], u_bar? }` |
+| `uanalytics_laney_u_chart` | `laney_u_chart(samples, { u_bar?, phi? })` | `{ samples: [[defects, units], …], u_bar?, phi? }` |
+| `uanalytics_g_chart` | `g_chart(gaps)` | `{ gaps: [...] }` |
+| `uanalytics_t_chart` | `t_chart(times)` | `{ times: [...] }` |
 | `uanalytics_process_capability` | `process_capability(input)` | `input` as is |
 | `uanalytics_percentile_capability` | `percentile_capability(input)` | `input` as is |
 | `uanalytics_gage_rr_xbar_r` | `gage_rr_xbar_r(input)` | `input` as is |

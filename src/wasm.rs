@@ -17,13 +17,13 @@ use wasm_bindgen::prelude::*;
 // The shapes below are the wire contract, shared with the C FFI so the two
 // transports cannot drift apart again. See `crate::wire`.
 use crate::wire::{
-    add_rows, attribute_point_dtos, capability_dto, count_pairs, count_rows, default_cost,
-    default_min_seg, default_penalty, gage_rr_anova_dto, gage_rr_xbar_r_dto, imr_dto, laney_p_dto,
-    laney_point_dtos, p_chart_dto, pelt_dto, percentile_capability_dto, rate_pairs,
-    rules_from_json, run_rules_dto, sample_size_value, xbar_r_dto, xbar_s_dto,
-    AttributeChartPointDto, AttributeStandardDto, CapabilityInputDto, GageRRInputDto,
-    LimitsInputDto, PeltInputDto, PeltPenaltyDto, PeltResultDto, PercentileCapabilityInputDto,
-    SeasonalityInputDto, SpectralResidualInputDto, WireError,
+    at_least, c_chart_dto, capability_dto, count_pairs, count_rows, default_cost, default_min_seg,
+    default_penalty, g_chart_dto, gage_rr_anova_dto, gage_rr_xbar_r_dto, imr_dto, laney_p_dto,
+    laney_u_dto, np_chart_dto, p_chart_dto, pelt_dto, percentile_capability_dto, rate_pairs,
+    rules_from_json, run_rules_dto, sample_size_value, t_chart_dto, u_chart_dto, xbar_r_dto,
+    xbar_s_dto, AttributeStandardDto, CapabilityInputDto, GageRRInputDto, LimitsInputDto,
+    PeltInputDto, PeltPenaltyDto, PeltResultDto, PercentileCapabilityInputDto, SeasonalityInputDto,
+    SpectralResidualInputDto, WireError,
 };
 
 // ---------------------------------------------------------------------------
@@ -36,68 +36,6 @@ struct AdNormalityDto {
     statistic: f64,
     statistic_modified: f64,
     p_value: f64,
-}
-
-/// NP and C charts: one set of limits for every point.
-#[derive(Serialize, Debug, tsify::Tsify)]
-#[tsify(missing_as_null)]
-struct FixedLimitChartDto {
-    cl: f64,
-    ucl: f64,
-    lcl: f64,
-    points: Vec<AttributeChartPointDto>,
-    in_control: bool,
-}
-
-#[derive(Serialize, Debug, tsify::Tsify)]
-#[tsify(missing_as_null)]
-struct UChartDto {
-    u_bar: f64,
-    points: Vec<AttributeChartPointDto>,
-    in_control: bool,
-}
-
-#[derive(Serialize, Debug, tsify::Tsify)]
-#[tsify(missing_as_null)]
-struct LaneyUChartDto {
-    u_bar: f64,
-    phi: f64,
-    points: Vec<AttributeChartPointDto>,
-}
-#[derive(Serialize, tsify::Tsify)]
-#[tsify(missing_as_null)]
-struct GChartDto {
-    g_bar: f64,
-    points: Vec<GChartPointDto>,
-}
-
-#[derive(Serialize, tsify::Tsify)]
-#[tsify(missing_as_null)]
-struct GChartPointDto {
-    index: usize,
-    value: f64,
-    ucl: f64,
-    cl: f64,
-    lcl: f64,
-    out_of_control: bool,
-}
-
-#[derive(Serialize, tsify::Tsify)]
-#[tsify(missing_as_null)]
-struct TChartDto {
-    t_bar: f64,
-    points: Vec<TChartPointDto>,
-}
-
-#[derive(Serialize, tsify::Tsify)]
-#[tsify(missing_as_null)]
-struct TChartPointDto {
-    index: usize,
-    value: f64,
-    ucl: f64,
-    cl: f64,
-    lcl: f64,
-    out_of_control: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -339,38 +277,6 @@ fn read_numbers(value: &JsValue, param: &'static str) -> Result<Vec<f64>, WireEr
             None => Element::Other(item.js_typeof().as_string().unwrap_or_default()),
         }),
     )
-}
-
-/// `values` with at least `min` entries, or `insufficient_data` naming both.
-fn at_least(values: Vec<f64>, min: usize, param: &'static str) -> Result<Vec<f64>, WireError> {
-    if values.len() >= min {
-        Ok(values)
-    } else {
-        Err(WireError::insufficient_data(format!(
-            "{param}: at least {min} values are needed, got {}",
-            values.len()
-        ))
-        .about(param))
-    }
-}
-
-/// The first value that `allowed` rejects, as `parameter_out_of_range` at its
-/// index; `bound` states the domain in the message.
-fn each_within(
-    values: &[f64],
-    param: &'static str,
-    bound: &str,
-    allowed: impl Fn(f64) -> bool,
-) -> Result<(), WireError> {
-    match values.iter().position(|&v| !allowed(v)) {
-        Some(i) => Err(WireError::new(
-            crate::wire::code::PARAMETER_OUT_OF_RANGE,
-            Some(i),
-            format!("{param}[{i}]: must be {bound}, got {}", values[i]),
-        )
-        .about(param)),
-        None => Ok(()),
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -832,85 +738,6 @@ pub fn laney_u_chart(
 // carries the index of the wrong row. The cores refuse such a row by its index
 // before the chart sees it.
 
-fn np_chart_dto(defectives: &[u64], sample_size: u64) -> Result<FixedLimitChartDto, WireError> {
-    use crate::spc::NPChart;
-
-    let mut chart =
-        NPChart::new(sample_size).map_err(|e| WireError::chart("sample_size", None, &e))?;
-    add_rows(defectives, "defectives", |&d| chart.add_sample(d))?;
-    let (ucl, cl, lcl) = chart
-        .control_limits()
-        .ok_or_else(|| WireError::insufficient_data("defectives must not be empty"))?;
-    Ok(FixedLimitChartDto {
-        cl,
-        ucl,
-        lcl,
-        points: attribute_point_dtos(chart.points()),
-        in_control: chart.is_in_control(),
-    })
-}
-
-fn c_chart_dto(defects: &[u64]) -> Result<FixedLimitChartDto, WireError> {
-    use crate::spc::CChart;
-
-    let mut chart = CChart::new();
-    for &c in defects {
-        chart.add_sample(c);
-    }
-    let (ucl, cl, lcl) = chart
-        .control_limits()
-        .ok_or_else(|| WireError::insufficient_data("defects must not be empty"))?;
-    Ok(FixedLimitChartDto {
-        cl,
-        ucl,
-        lcl,
-        points: attribute_point_dtos(chart.points()),
-        in_control: chart.is_in_control(),
-    })
-}
-
-fn u_chart_dto(
-    raw: &[(u64, f64)],
-    standard: &AttributeStandardDto,
-) -> Result<UChartDto, WireError> {
-    use crate::spc::UChart;
-
-    standard.refuse(
-        "u_chart",
-        &[
-            ("p_bar", standard.p_bar.is_some()),
-            ("phi", standard.phi.is_some()),
-        ],
-    )?;
-    let mut chart = match standard.u_bar {
-        Some(u) => UChart::with_center(u).map_err(|e| WireError::chart("options", None, &e))?,
-        None => UChart::new(),
-    };
-    add_rows(raw, "samples", |&(d, u)| chart.add_sample(d, u))?;
-    let u_bar = chart
-        .u_bar()
-        .ok_or_else(|| WireError::insufficient_data("samples must not be empty"))?;
-    Ok(UChartDto {
-        u_bar,
-        points: attribute_point_dtos(chart.points()),
-        in_control: chart.is_in_control(),
-    })
-}
-
-fn laney_u_dto(
-    raw: &[(u64, f64)],
-    standard: &AttributeStandardDto,
-) -> Result<LaneyUChartDto, WireError> {
-    standard.refuse("laney_u_chart", &[("p_bar", standard.p_bar.is_some())])?;
-    let laney = standard.laney(standard.u_bar, "u_bar")?;
-    let chart =
-        crate::spc::laney_u_chart(raw, laney).map_err(|e| WireError::chart_input("samples", &e))?;
-    Ok(LaneyUChartDto {
-        u_bar: chart.u_bar,
-        phi: chart.phi,
-        points: laney_point_dtos(&chart.points),
-    })
-}
 /// Compute the G chart for rare-event monitoring (inter-event conforming counts).
 ///
 /// Suitable when defect rates are very low (< 1%).
@@ -927,29 +754,8 @@ fn laney_u_dto(
 pub fn g_chart(
     #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] gaps: JsValue,
 ) -> Result<JsValue, JsValue> {
-    let gaps = at_least(read_numbers(&gaps, "gaps").map_err(js_err)?, 3, "gaps").map_err(js_err)?;
-    each_within(&gaps, "gaps", ">= 0", |v| v >= 0.0).map_err(js_err)?;
-    let chart =
-        crate::spc::g_chart(&gaps).expect("three or more finite counts >= 0 make a G chart");
-
-    let points = chart
-        .points
-        .iter()
-        .map(|p| GChartPointDto {
-            index: p.index,
-            value: p.value,
-            ucl: p.ucl,
-            cl: p.cl,
-            lcl: p.lcl,
-            out_of_control: p.out_of_control,
-        })
-        .collect();
-
-    let dto = GChartDto {
-        g_bar: chart.g_bar,
-        points,
-    };
-    to_js(&dto)
+    let gaps = read_numbers(&gaps, "gaps").map_err(js_err)?;
+    to_js(&g_chart_dto(&gaps).map_err(js_err)?)
 }
 
 /// Compute the T chart for rare-event monitoring (inter-event times).
@@ -967,29 +773,8 @@ pub fn g_chart(
 pub fn t_chart(
     #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] times: JsValue,
 ) -> Result<JsValue, JsValue> {
-    let times =
-        at_least(read_numbers(&times, "times").map_err(js_err)?, 3, "times").map_err(js_err)?;
-    each_within(&times, "times", "> 0", |v| v > 0.0).map_err(js_err)?;
-    let chart = crate::spc::t_chart(&times).expect("three or more finite times > 0 make a T chart");
-
-    let points = chart
-        .points
-        .iter()
-        .map(|p| TChartPointDto {
-            index: p.index,
-            value: p.value,
-            ucl: p.ucl,
-            cl: p.cl,
-            lcl: p.lcl,
-            out_of_control: p.out_of_control,
-        })
-        .collect();
-
-    let dto = TChartDto {
-        t_bar: chart.t_bar,
-        points,
-    };
-    to_js(&dto)
+    let times = read_numbers(&times, "times").map_err(js_err)?;
+    to_js(&t_chart_dto(&times).map_err(js_err)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -1756,6 +1541,7 @@ mod dto_strictness_tests {
 #[cfg(test)]
 mod binding_contract_tests {
     use super::*;
+    use crate::wire::each_within;
 
     // --- number arrays are read as sent ---
 

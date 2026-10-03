@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace UAnalytics.Interop;
 
@@ -14,6 +14,24 @@ internal static partial class NativeInterop
 
     [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
     public static partial int uanalytics_laney_p_chart(string requestJson, out IntPtr resultPtr);
+
+    [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int uanalytics_np_chart(string requestJson, out IntPtr resultPtr);
+
+    [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int uanalytics_c_chart(string requestJson, out IntPtr resultPtr);
+
+    [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int uanalytics_u_chart(string requestJson, out IntPtr resultPtr);
+
+    [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int uanalytics_laney_u_chart(string requestJson, out IntPtr resultPtr);
+
+    [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int uanalytics_g_chart(string requestJson, out IntPtr resultPtr);
+
+    [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int uanalytics_t_chart(string requestJson, out IntPtr resultPtr);
 
     [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
     public static partial int uanalytics_xbar_s_chart(string requestJson, out IntPtr resultPtr);

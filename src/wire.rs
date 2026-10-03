@@ -675,6 +675,246 @@ pub(crate) fn laney_p_dto(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Attributes and rare-event charts beyond P / Laney P'
+// ---------------------------------------------------------------------------
+//
+// Shared by the WebAssembly and C transports, so a row refused over one is
+// refused over the other with the same code and index.
+
+/// NP and C charts: one set of limits for every point.
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct FixedLimitChartDto {
+    pub(crate) cl: f64,
+    pub(crate) ucl: f64,
+    pub(crate) lcl: f64,
+    pub(crate) points: Vec<AttributeChartPointDto>,
+    pub(crate) in_control: bool,
+}
+
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct UChartDto {
+    pub(crate) u_bar: f64,
+    pub(crate) points: Vec<AttributeChartPointDto>,
+    pub(crate) in_control: bool,
+}
+
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct LaneyUChartDto {
+    pub(crate) u_bar: f64,
+    pub(crate) phi: f64,
+    pub(crate) points: Vec<AttributeChartPointDto>,
+}
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct GChartDto {
+    pub(crate) g_bar: f64,
+    pub(crate) points: Vec<GChartPointDto>,
+}
+
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct GChartPointDto {
+    pub(crate) index: usize,
+    pub(crate) value: f64,
+    pub(crate) ucl: f64,
+    pub(crate) cl: f64,
+    pub(crate) lcl: f64,
+    pub(crate) out_of_control: bool,
+}
+
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct TChartDto {
+    pub(crate) t_bar: f64,
+    pub(crate) points: Vec<TChartPointDto>,
+}
+
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct TChartPointDto {
+    pub(crate) index: usize,
+    pub(crate) value: f64,
+    pub(crate) ucl: f64,
+    pub(crate) cl: f64,
+    pub(crate) lcl: f64,
+    pub(crate) out_of_control: bool,
+}
+
+/// `values` with at least `min` entries, or `insufficient_data` naming both.
+pub(crate) fn at_least(
+    values: Vec<f64>,
+    min: usize,
+    param: &'static str,
+) -> Result<Vec<f64>, WireError> {
+    if values.len() >= min {
+        Ok(values)
+    } else {
+        Err(WireError::insufficient_data(format!(
+            "{param}: at least {min} values are needed, got {}",
+            values.len()
+        ))
+        .about(param))
+    }
+}
+
+/// The first value that `allowed` rejects, as `parameter_out_of_range` at its
+/// index; `bound` states the domain in the message.
+pub(crate) fn each_within(
+    values: &[f64],
+    param: &'static str,
+    bound: &str,
+    allowed: impl Fn(f64) -> bool,
+) -> Result<(), WireError> {
+    match values.iter().position(|&v| !allowed(v)) {
+        Some(i) => Err(WireError::new(
+            crate::wire::code::PARAMETER_OUT_OF_RANGE,
+            Some(i),
+            format!("{param}[{i}]: must be {bound}, got {}", values[i]),
+        )
+        .about(param)),
+        None => Ok(()),
+    }
+}
+
+pub(crate) fn np_chart_dto(
+    defectives: &[u64],
+    sample_size: u64,
+) -> Result<FixedLimitChartDto, WireError> {
+    use crate::spc::NPChart;
+
+    let mut chart =
+        NPChart::new(sample_size).map_err(|e| WireError::chart("sample_size", None, &e))?;
+    add_rows(defectives, "defectives", |&d| chart.add_sample(d))?;
+    let (ucl, cl, lcl) = chart
+        .control_limits()
+        .ok_or_else(|| WireError::insufficient_data("defectives must not be empty"))?;
+    Ok(FixedLimitChartDto {
+        cl,
+        ucl,
+        lcl,
+        points: attribute_point_dtos(chart.points()),
+        in_control: chart.is_in_control(),
+    })
+}
+
+pub(crate) fn c_chart_dto(defects: &[u64]) -> Result<FixedLimitChartDto, WireError> {
+    use crate::spc::CChart;
+
+    let mut chart = CChart::new();
+    for &c in defects {
+        chart.add_sample(c);
+    }
+    let (ucl, cl, lcl) = chart
+        .control_limits()
+        .ok_or_else(|| WireError::insufficient_data("defects must not be empty"))?;
+    Ok(FixedLimitChartDto {
+        cl,
+        ucl,
+        lcl,
+        points: attribute_point_dtos(chart.points()),
+        in_control: chart.is_in_control(),
+    })
+}
+
+pub(crate) fn u_chart_dto(
+    raw: &[(u64, f64)],
+    standard: &AttributeStandardDto,
+) -> Result<UChartDto, WireError> {
+    use crate::spc::UChart;
+
+    standard.refuse(
+        "u_chart",
+        &[
+            ("p_bar", standard.p_bar.is_some()),
+            ("phi", standard.phi.is_some()),
+        ],
+    )?;
+    let mut chart = match standard.u_bar {
+        Some(u) => UChart::with_center(u).map_err(|e| WireError::chart("options", None, &e))?,
+        None => UChart::new(),
+    };
+    add_rows(raw, "samples", |&(d, u)| chart.add_sample(d, u))?;
+    let u_bar = chart
+        .u_bar()
+        .ok_or_else(|| WireError::insufficient_data("samples must not be empty"))?;
+    Ok(UChartDto {
+        u_bar,
+        points: attribute_point_dtos(chart.points()),
+        in_control: chart.is_in_control(),
+    })
+}
+
+pub(crate) fn laney_u_dto(
+    raw: &[(u64, f64)],
+    standard: &AttributeStandardDto,
+) -> Result<LaneyUChartDto, WireError> {
+    standard.refuse("laney_u_chart", &[("p_bar", standard.p_bar.is_some())])?;
+    let laney = standard.laney(standard.u_bar, "u_bar")?;
+    let chart =
+        crate::spc::laney_u_chart(raw, laney).map_err(|e| WireError::chart_input("samples", &e))?;
+    Ok(LaneyUChartDto {
+        u_bar: chart.u_bar,
+        phi: chart.phi,
+        points: laney_point_dtos(&chart.points),
+    })
+}
+
+/// G chart: inter-event conforming counts, at least 3, each `>= 0`.
+pub(crate) fn g_chart_dto(gaps: &[f64]) -> Result<GChartDto, WireError> {
+    let gaps = at_least(gaps.to_vec(), 3, "gaps")?;
+    each_within(&gaps, "gaps", ">= 0", |v| v >= 0.0)?;
+    let chart =
+        crate::spc::g_chart(&gaps).expect("three or more finite counts >= 0 make a G chart");
+    Ok(GChartDto {
+        g_bar: chart.g_bar,
+        points: chart
+            .points
+            .iter()
+            .map(|p| GChartPointDto {
+                index: p.index,
+                value: p.value,
+                ucl: p.ucl,
+                cl: p.cl,
+                lcl: p.lcl,
+                out_of_control: p.out_of_control,
+            })
+            .collect(),
+    })
+}
+
+/// T chart: inter-event times, at least 3, each `> 0`.
+pub(crate) fn t_chart_dto(times: &[f64]) -> Result<TChartDto, WireError> {
+    let times = at_least(times.to_vec(), 3, "times")?;
+    each_within(&times, "times", "> 0", |v| v > 0.0)?;
+    let chart = crate::spc::t_chart(&times).expect("three or more finite times > 0 make a T chart");
+    Ok(TChartDto {
+        t_bar: chart.t_bar,
+        points: chart
+            .points
+            .iter()
+            .map(|p| TChartPointDto {
+                index: p.index,
+                value: p.value,
+                ucl: p.ucl,
+                cl: p.cl,
+                lcl: p.lcl,
+                out_of_control: p.out_of_control,
+            })
+            .collect(),
+    })
+}
+
 /// Input for `process_capability`.
 ///
 /// Every field except `data` is optional, but at least one of `usl`/`lsl` must

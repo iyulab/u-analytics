@@ -69,6 +69,56 @@ public sealed class AnalyticsClient : IDisposable
         => CallNative(NativeInterop.uanalytics_laney_p_chart, new { samples, pBar, phi });
 
     /// <summary>
+    /// NP chart: defectives per subgroup when every subgroup has the same
+    /// <paramref name="sampleSize"/>. Returns <c>cl</c>, <c>ucl</c>, <c>lcl</c>,
+    /// per-point <c>points</c> and <c>in_control</c>.
+    /// </summary>
+    public JsonElement NpChart(ulong[] defectives, ulong sampleSize)
+        => CallNative(NativeInterop.uanalytics_np_chart, new { defectives, sampleSize });
+
+    /// <summary>
+    /// C chart: defects per inspection unit of one size. Returns <c>cl</c>, <c>ucl</c>,
+    /// <c>lcl</c>, per-point <c>points</c> and <c>in_control</c>.
+    /// </summary>
+    public JsonElement CChart(ulong[] defects)
+        => CallNative(NativeInterop.uanalytics_c_chart, new { defects });
+
+    /// <summary>
+    /// U chart: defects per unit when the quantity inspected varies. Each sample is
+    /// <c>[defects, units]</c> (<c>units</c> may be fractional, and must be positive).
+    /// Returns <c>u_bar</c>, per-point <c>points</c> (with <c>z</c>) and <c>in_control</c>.
+    /// </summary>
+    /// <param name="samples"><c>[defects, units]</c> pairs.</param>
+    /// <param name="uBar">A known centre line from a Phase I study (Phase II); positive.</param>
+    public JsonElement UChart(double[][] samples, double? uBar = null)
+        => CallNative(NativeInterop.uanalytics_u_chart, new { samples, uBar });
+
+    /// <summary>
+    /// Laney U' chart for over- or under-dispersed rates. Same samples as
+    /// <see cref="UChart"/>; at least three when u-bar and phi are estimated.
+    /// Returns <c>u_bar</c>, <c>phi</c> and per-point <c>points</c> (with <c>z</c>).
+    /// </summary>
+    /// <param name="samples"><c>[defects, units]</c> pairs.</param>
+    /// <param name="uBar">Phase I u-bar; given together with <paramref name="phi"/> or not at all.</param>
+    /// <param name="phi">Phase I sigma-inflation factor (&#8805; 0); given together with <paramref name="uBar"/>.</param>
+    public JsonElement LaneyUChart(double[][] samples, double? uBar = null, double? phi = null)
+        => CallNative(NativeInterop.uanalytics_laney_u_chart, new { samples, uBar, phi });
+
+    /// <summary>
+    /// G chart for rare events: conforming counts between events (at least three,
+    /// each &#8805; 0). Returns <c>g_bar</c> and per-point <c>points</c>.
+    /// </summary>
+    public JsonElement GChart(double[] gaps)
+        => CallNative(NativeInterop.uanalytics_g_chart, new { gaps });
+
+    /// <summary>
+    /// T chart for rare events: times between events (at least three, each &gt; 0).
+    /// Returns <c>t_bar</c> and per-point <c>points</c>.
+    /// </summary>
+    public JsonElement TChart(double[] times)
+        => CallNative(NativeInterop.uanalytics_t_chart, new { times });
+
+    /// <summary>
     /// X-bar/S chart. Same request and response shape as <see cref="XbarRChart"/> with
     /// <c>s_*</c> limits in place of <c>r_*</c>; the usual choice once subgroups exceed about
     /// ten values. Returns <c>sigma_hat</c> (<c>S-bar / c4</c>).

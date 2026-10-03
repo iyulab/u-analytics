@@ -8,6 +8,16 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- C FFI (and the `UAnalytics` .NET client) for the attributes and rare-event
+  charts the WebAssembly binding already had: `uanalytics_np_chart`,
+  `uanalytics_c_chart`, `uanalytics_u_chart` (Phase II `u_bar`, per-point
+  `z`), `uanalytics_laney_u_chart` (`u_bar` + `phi`), `uanalytics_g_chart`,
+  `uanalytics_t_chart` — `NpChart`, `CChart`, `UChart`, `LaneyUChart`,
+  `GChart`, `TChart` in C#. Both transports call one core per chart, so a row
+  is refused with the same `code` and `index` over either.
+
 ### Changed
 
 - **Breaking:** `anderson_darling_normality`, `g_chart` and `t_chart` in the
