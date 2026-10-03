@@ -35,6 +35,11 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   string `NaN`. An element that is not a number now throws `malformed_input`
   and a NaN or ±Infinity `value_not_finite`, both with `parameter` and
   `index`. The argument is declared `number[] | Float64Array`.
+- `xbar_r_chart`, `xbar_s_chart` (`data: number[][]`), `imr_chart` and
+  `run_rules` (`values`) read their arrays the same way: a `null` or a string
+  is refused where it sits (`parameter` the path to its array, e.g.
+  `data[1]`, and `index` its position) instead of by the JSON parser with no
+  position. `values` is declared `number[] | Float64Array`.
 
 ### Fixed
 
