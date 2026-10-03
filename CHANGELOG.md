@@ -18,6 +18,9 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   `fisher_exact_test`. Each refuses with a `code` and the argument (and row for
   `number[][]` input): too few values is `insufficient_data`, a sample with no
   variation `invalid_input`, unequal pairs `dimension_mismatch`.
+- WebAssembly `bonferroni_correction` and `benjamini_hochberg`: adjusted
+  p-values in input order; a value outside `[0, 1]` is
+  `parameter_out_of_range` at its `index`.
 
 - C FFI (and the `UAnalytics` .NET client) for the attributes and rare-event
   charts the WebAssembly binding already had: `uanalytics_np_chart`,
@@ -43,6 +46,9 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Fixed
 
+- `bonferroni_correction` and `benjamini_hochberg` return `None` for a value
+  that is not a probability in `[0, 1]`; they adjusted 1.5 or -0.1 as if it
+  were one.
 - The same three refusals said why: fewer than 3 values is
   `insufficient_data` (the messages claimed 2 were enough, which the charts
   never accepted), a gap below 0 or a time not above 0 is

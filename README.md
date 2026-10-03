@@ -599,6 +599,8 @@ kruskal_wallis_test(groups) | levene_test(groups) | bartlett_test(groups): TestR
 chi_squared_goodness_of_fit(observed, expected): TestResult  // observed >= 0, expected > 0
 chi_squared_independence(table: number[][]): TestResult      // >= 2 x 2, counts >= 0
 fisher_exact_test(table: [[a, b], [c, d]]): TestResult       // whole counts
+bonferroni_correction(p_values): Float64Array                // min(p * m, 1), input order
+benjamini_hochberg(p_values): Float64Array                   // FDR (1995), input order; p in [0, 1]
 ```
 
 ```js

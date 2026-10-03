@@ -1237,6 +1237,20 @@ pub(crate) mod hypothesis {
             })
     }
 
+    /// Bonferroni or Benjamini-Hochberg adjusted p-values, in input order.
+    pub(crate) fn p_adjust_dto(test: &str, p_values: &[f64]) -> Result<Vec<f64>, WireError> {
+        let p = at_least(p_values.to_vec(), 1, "p_values")?;
+        each_within(&p, "p_values", "a probability in [0, 1]", |v| {
+            (0.0..=1.0).contains(&v)
+        })?;
+        let adjusted = if test == "bonferroni_correction" {
+            crate::testing::bonferroni_correction(&p)
+        } else {
+            crate::testing::benjamini_hochberg(&p)
+        };
+        Ok(adjusted.expect("probabilities in [0, 1] are adjusted"))
+    }
+
     pub(crate) fn fisher_exact_dto(table: &serde_json::Value) -> Result<TestResultDto, WireError> {
         let rows = as_array(table, "table", "a 2 x 2 array of counts")?;
         if rows.len() != 2 {

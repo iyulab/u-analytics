@@ -22,7 +22,7 @@ use crate::wire::{
     hypothesis::{
         chi_squared_gof_dto, chi_squared_independence_dto, fisher_exact_dto, groups_test_dto,
         jarque_bera_dto, mann_kendall_dto, mann_whitney_dto, one_sample_t_dto, one_way_anova_dto,
-        paired_t_dto, shapiro_wilk_dto, two_sample_t_dto, wilcoxon_dto,
+        p_adjust_dto, paired_t_dto, shapiro_wilk_dto, two_sample_t_dto, wilcoxon_dto,
     },
     imr_dto, laney_p_dto, laney_u_dto, np_chart_dto, p_chart_dto, pelt_dto,
     percentile_capability_dto, rate_pairs, rules_from_json, run_rules_dto, sample_size_value,
@@ -964,6 +964,24 @@ pub fn fisher_exact_test(
 ) -> Result<JsValue, JsValue> {
     let table: serde_json::Value = from_js(table, "table")?;
     to_js(&fisher_exact_dto(&table).map_err(js_err)?)
+}
+
+/// Bonferroni-adjusted p-values, `min(p * m, 1)`, in input order.
+#[wasm_bindgen]
+pub fn bonferroni_correction(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] p_values: JsValue,
+) -> Result<Vec<f64>, JsValue> {
+    let p = read_numbers(&p_values, "p_values").map_err(js_err)?;
+    p_adjust_dto("bonferroni_correction", &p).map_err(js_err)
+}
+
+/// Benjamini-Hochberg (1995) FDR-adjusted p-values, in input order.
+#[wasm_bindgen]
+pub fn benjamini_hochberg(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] p_values: JsValue,
+) -> Result<Vec<f64>, JsValue> {
+    let p = read_numbers(&p_values, "p_values").map_err(js_err)?;
+    p_adjust_dto("benjamini_hochberg", &p).map_err(js_err)
 }
 
 // ---------------------------------------------------------------------------

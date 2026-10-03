@@ -1486,9 +1486,10 @@ pub fn levene_test(groups: &[&[f64]]) -> Option<TestResult> {
 ///
 /// # Returns
 ///
-/// `None` if the slice is empty or contains non-finite values.
+/// `None` if the slice is empty or a value is not a probability in `[0, 1]`
+/// (a NaN included).
 pub fn bonferroni_correction(p_values: &[f64]) -> Option<Vec<f64>> {
-    if p_values.is_empty() || p_values.iter().any(|v| !v.is_finite()) {
+    if p_values.is_empty() || p_values.iter().any(|v| !(0.0..=1.0).contains(v)) {
         return None;
     }
     let m = p_values.len() as f64;
@@ -1507,7 +1508,8 @@ pub fn bonferroni_correction(p_values: &[f64]) -> Option<Vec<f64>> {
 ///
 /// # Returns
 ///
-/// `None` if the slice is empty or contains non-finite values.
+/// `None` if the slice is empty or a value is not a probability in `[0, 1]`
+/// (a NaN included).
 ///
 /// # References
 ///
@@ -1515,7 +1517,7 @@ pub fn bonferroni_correction(p_values: &[f64]) -> Option<Vec<f64>> {
 /// JRSS-B, 57(1), 289–300.
 pub fn benjamini_hochberg(p_values: &[f64]) -> Option<Vec<f64>> {
     let m = p_values.len();
-    if m == 0 || p_values.iter().any(|v| !v.is_finite()) {
+    if m == 0 || p_values.iter().any(|v| !(0.0..=1.0).contains(v)) {
         return None;
     }
 
@@ -2287,6 +2289,13 @@ fn adf_critical_values(model: AdfModel, n: usize) -> [f64; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn corrections_refuse_what_is_not_a_probability() {
+        assert!(bonferroni_correction(&[0.01, 1.5]).is_none());
+        assert!(benjamini_hochberg(&[-0.1, 0.2]).is_none());
+        assert_eq!(bonferroni_correction(&[0.01, 0.2]), Some(vec![0.02, 0.4]));
+    }
 
     // -----------------------------------------------------------------------
     // Anderson-Darling large-n p-value overflow (upstream-014)
