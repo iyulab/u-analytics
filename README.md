@@ -256,6 +256,7 @@ interface AnalyticsError extends Error {
 | `insufficient_data` | fewer samples than the chart needs (`index: null`) |
 | `standard_out_of_range` | a Phase I `p_bar`/`u_bar`/`phi` outside its domain — `parameter` names which |
 | `parameter_out_of_range` | an option outside its domain — `parameter` names which, and `message` states what it has to satisfy |
+| `value_not_finite` | a NaN or ±Infinity anywhere in an argument — `parameter` is the path to it (`input.data`), `index` its position in that array, or `null` |
 | `malformed_input` | not the shape the function takes — a row that is not a pair, an unknown field |
 | `invalid_input` | any other refusal; the message says what |
 

@@ -246,7 +246,7 @@ pub(crate) struct WireError {
     /// name lives only in `message`, which is the one field documented as free
     /// to change -- so a consumer wanting to point at the setting has to parse
     /// prose, or re-derive the rule itself.
-    pub(crate) parameter: Option<&'static str>,
+    pub(crate) parameter: Option<std::borrow::Cow<'static, str>>,
     /// Human-readable description.
     pub(crate) message: String,
 }
@@ -302,8 +302,8 @@ impl WireError {
     }
 
     /// Names the option a refusal is about, alongside its code.
-    pub(crate) fn about(mut self, parameter: &'static str) -> Self {
-        self.parameter = Some(parameter);
+    pub(crate) fn about(mut self, parameter: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+        self.parameter = Some(parameter.into());
         self
     }
 
@@ -332,7 +332,7 @@ impl WireError {
         match error {
             // The domain error already names the parameter; the wire record
             // should not make a consumer read it back out of the message.
-            crate::spc::ControlChartError::InvalidStandard { parameter } => wire.about(parameter),
+            crate::spc::ControlChartError::InvalidStandard { parameter } => wire.about(*parameter),
             _ => wire,
         }
     }
@@ -1563,7 +1563,7 @@ mod input_error_tests {
         ] {
             let e = request(body).expect_err("refused");
             assert_eq!(e.code, code::PARAMETER_OUT_OF_RANGE, "{}", e.message);
-            assert_eq!(e.parameter, Some(option), "{}", e.message);
+            assert_eq!(e.parameter.as_deref(), Some(option), "{}", e.message);
             assert!(e.message.starts_with(option), "{}", e.message);
         }
 
