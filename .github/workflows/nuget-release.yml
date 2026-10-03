@@ -69,7 +69,9 @@ jobs:
             target: x86_64-pc-windows-msvc
             rid: win-x64
             artifact: u_analytics.dll
-          - os: ubuntu-latest
+          # Not ubuntu-latest: the library links against the build host's glibc,
+          # so the image decides the oldest Linux it loads on. 24.04 = glibc 2.39.
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             rid: linux-x64
             artifact: libu_analytics.so
