@@ -273,6 +273,106 @@ fn from_json<T: serde::de::DeserializeOwned>(
     })
 }
 
+/// One element of a JS number array, as found.
+#[derive(Debug, Clone, PartialEq)]
+enum Element {
+    Number(f64),
+    /// Anything else, by its JS type name (`"null"`, `"string"`, …).
+    Other(String),
+}
+
+/// The values of a number array, refusing the first element that is not a
+/// finite number at its index. Kept apart from the `JsValue` walk so it runs
+/// off `wasm32`.
+fn numbers_from(
+    param: &'static str,
+    elements: impl IntoIterator<Item = Element>,
+) -> Result<Vec<f64>, WireError> {
+    let mut out = Vec::new();
+    for (i, element) in elements.into_iter().enumerate() {
+        match element {
+            Element::Number(x) if x.is_finite() => out.push(x),
+            Element::Number(x) => {
+                return Err(WireError::new(
+                    crate::wire::code::VALUE_NOT_FINITE,
+                    Some(i),
+                    format!("{param}[{i}]: expected a finite number, got {x}"),
+                )
+                .about(param))
+            }
+            Element::Other(kind) => {
+                return Err(WireError::new(
+                    crate::wire::code::MALFORMED_INPUT,
+                    Some(i),
+                    format!("{param}[{i}]: expected a number, got {kind}"),
+                )
+                .about(param))
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Reads a `number[]` or `Float64Array` argument as sent.
+///
+/// A `&[f64]` parameter would let the generated glue copy a plain array into a
+/// typed array first, so `null` would arrive as 0 and a string as NaN.
+fn read_numbers(value: &JsValue, param: &'static str) -> Result<Vec<f64>, WireError> {
+    use wasm_bindgen::JsCast;
+    if let Some(typed) = value.dyn_ref::<js_sys::Float64Array>() {
+        return numbers_from(param, typed.to_vec().into_iter().map(Element::Number));
+    }
+    if !js_sys::Array::is_array(value) {
+        return Err(WireError::new(
+            crate::wire::code::MALFORMED_INPUT,
+            None,
+            format!("{param}: expected an array of numbers or a Float64Array"),
+        )
+        .about(param));
+    }
+    let array: &js_sys::Array = value.unchecked_ref();
+    numbers_from(
+        param,
+        array.iter().map(|item| match item.as_f64() {
+            Some(x) => Element::Number(x),
+            None if item.is_null() => Element::Other("null".to_string()),
+            None => Element::Other(item.js_typeof().as_string().unwrap_or_default()),
+        }),
+    )
+}
+
+/// `values` with at least `min` entries, or `insufficient_data` naming both.
+fn at_least(values: Vec<f64>, min: usize, param: &'static str) -> Result<Vec<f64>, WireError> {
+    if values.len() >= min {
+        Ok(values)
+    } else {
+        Err(WireError::insufficient_data(format!(
+            "{param}: at least {min} values are needed, got {}",
+            values.len()
+        ))
+        .about(param))
+    }
+}
+
+/// The first value that `allowed` rejects, as `parameter_out_of_range` at its
+/// index; `bound` states the domain in the message.
+fn each_within(
+    values: &[f64],
+    param: &'static str,
+    bound: &str,
+    allowed: impl Fn(f64) -> bool,
+) -> Result<(), WireError> {
+    match values.iter().position(|&v| !allowed(v)) {
+        Some(i) => Err(WireError::new(
+            crate::wire::code::PARAMETER_OUT_OF_RANGE,
+            Some(i),
+            format!("{param}[{i}]: must be {bound}, got {}", values[i]),
+        )
+        .about(param)),
+        None => Ok(()),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // WASM exports
 // ---------------------------------------------------------------------------
@@ -547,15 +647,23 @@ pub fn process_capability(
 ///
 /// # Parameters
 ///
-/// - `data`: slice of observations (need >= 3)
+/// - `data`: `number[]` or `Float64Array` of observations (need >= 3, not all equal)
 ///
 /// # Output JSON
 ///
 /// Object with fields: `statistic` (A²), `statistic_modified` (A²*), `p_value`.
 #[wasm_bindgen(unchecked_return_type = "AdNormalityDto")]
-pub fn anderson_darling_normality(data: &[f64]) -> Result<JsValue, JsValue> {
-    let result = crate::testing::anderson_darling_normality(data).ok_or_else(|| {
-        js_err("insufficient or invalid data (need >= 3 finite non-constant values)")
+pub fn anderson_darling_normality(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] data: JsValue,
+) -> Result<JsValue, JsValue> {
+    let data = at_least(read_numbers(&data, "data").map_err(js_err)?, 3, "data").map_err(js_err)?;
+    let result = crate::testing::anderson_darling_normality(&data).ok_or_else(|| {
+        js_err(
+            WireError::invalid_input(
+                "data: every value is the same, so normality cannot be tested",
+            )
+            .about("data"),
+        )
     })?;
 
     let dto = AdNormalityDto {
@@ -809,15 +917,20 @@ fn laney_u_dto(
 ///
 /// # Parameters
 ///
-/// - `gaps`: slice of inter-event conforming counts (need >= 2 finite positive values)
+/// - `gaps`: `number[]` or `Float64Array` of inter-event conforming counts
+///   (need >= 3, each >= 0)
 ///
 /// # Output JSON
 ///
 /// Object with fields: `g_bar`, `points` (array with ucl/cl/lcl/out_of_control).
 #[wasm_bindgen(unchecked_return_type = "GChartDto")]
-pub fn g_chart(gaps: &[f64]) -> Result<JsValue, JsValue> {
-    let chart = crate::spc::g_chart(gaps)
-        .ok_or_else(|| js_err("insufficient data (need >= 2 finite positive values)"))?;
+pub fn g_chart(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] gaps: JsValue,
+) -> Result<JsValue, JsValue> {
+    let gaps = at_least(read_numbers(&gaps, "gaps").map_err(js_err)?, 3, "gaps").map_err(js_err)?;
+    each_within(&gaps, "gaps", ">= 0", |v| v >= 0.0).map_err(js_err)?;
+    let chart =
+        crate::spc::g_chart(&gaps).expect("three or more finite counts >= 0 make a G chart");
 
     let points = chart
         .points
@@ -845,15 +958,19 @@ pub fn g_chart(gaps: &[f64]) -> Result<JsValue, JsValue> {
 ///
 /// # Parameters
 ///
-/// - `times`: slice of inter-event times (need >= 2 finite positive values)
+/// - `times`: `number[]` or `Float64Array` of inter-event times (need >= 3, each > 0)
 ///
 /// # Output JSON
 ///
 /// Object with fields: `t_bar`, `points` (array with ucl/cl/lcl/out_of_control).
 #[wasm_bindgen(unchecked_return_type = "TChartDto")]
-pub fn t_chart(times: &[f64]) -> Result<JsValue, JsValue> {
-    let chart = crate::spc::t_chart(times)
-        .ok_or_else(|| js_err("insufficient data (need >= 2 finite positive values)"))?;
+pub fn t_chart(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] times: JsValue,
+) -> Result<JsValue, JsValue> {
+    let times =
+        at_least(read_numbers(&times, "times").map_err(js_err)?, 3, "times").map_err(js_err)?;
+    each_within(&times, "times", "> 0", |v| v > 0.0).map_err(js_err)?;
+    let chart = crate::spc::t_chart(&times).expect("three or more finite times > 0 make a T chart");
 
     let points = chart
         .points
@@ -1639,6 +1756,51 @@ mod dto_strictness_tests {
 #[cfg(test)]
 mod binding_contract_tests {
     use super::*;
+
+    // --- number arrays are read as sent ---
+
+    #[test]
+    fn null_in_a_number_array_is_refused_at_its_index() {
+        let e = numbers_from(
+            "data",
+            [
+                Element::Number(1.0),
+                Element::Other("null".into()),
+                Element::Number(3.0),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(e.code, crate::wire::code::MALFORMED_INPUT);
+        assert_eq!(e.index, Some(1));
+        assert_eq!(e.parameter.as_deref(), Some("data"));
+    }
+
+    #[test]
+    fn a_non_finite_element_is_value_not_finite() {
+        let e = numbers_from("gaps", [2.0, f64::NAN].map(Element::Number)).unwrap_err();
+        assert_eq!(e.code, crate::wire::code::VALUE_NOT_FINITE);
+        assert_eq!(e.index, Some(1));
+    }
+
+    #[test]
+    fn rare_event_charts_need_three_values_and_say_so() {
+        let e = at_least(vec![1.0, 2.0], 3, "times").unwrap_err();
+        assert_eq!(e.code, crate::wire::code::INSUFFICIENT_DATA);
+        assert!(e.message.contains("at least 3"), "{}", e.message);
+        // The binding's minimum is the chart's: two values make no chart.
+        assert!(crate::spc::t_chart(&[1.0, 2.0]).is_none());
+        assert!(crate::spc::t_chart(&[1.0, 2.0, 3.0]).is_some());
+        assert!(crate::spc::g_chart(&[1.0, 2.0]).is_none());
+    }
+
+    #[test]
+    fn a_value_outside_the_domain_is_named_where_it_sits() {
+        let e = each_within(&[1.0, 0.0, 2.0], "times", "> 0", |v| v > 0.0).unwrap_err();
+        assert_eq!(e.code, crate::wire::code::PARAMETER_OUT_OF_RANGE);
+        assert_eq!(e.index, Some(1));
+        assert_eq!(e.parameter.as_deref(), Some("times"));
+        assert!(each_within(&[0.0, 2.0], "gaps", ">= 0", |v| v >= 0.0).is_ok());
+    }
 
     // --- rules option on xbar_r_chart ---
 

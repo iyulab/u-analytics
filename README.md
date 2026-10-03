@@ -569,13 +569,15 @@ an `Error` carrying `code` and `index` (see **Errors**). The shapes below are th
 the sections above have not already spelled out.
 
 ```ts
-// Rare-event charts
-g_chart(gaps: number[]):  { g_bar: number, points: AttrPoint[] }    // events between occurrences
-t_chart(times: number[]): { t_bar: number, points: AttrPoint[] }    // time between occurrences
+// Rare-event charts — at least 3 values; gaps >= 0, times > 0
+g_chart(gaps: number[] | Float64Array):  { g_bar: number, points: AttrPoint[] }    // events between occurrences
+t_chart(times: number[] | Float64Array): { t_bar: number, points: AttrPoint[] }    // time between occurrences
 
-// Normality
-anderson_darling_normality(data: number[]):
+// Normality — at least 3 values, not all equal
+anderson_darling_normality(data: number[] | Float64Array):
   { statistic: number, statistic_modified: number, p_value: number }
+// A number array is read as sent: `null` or a string at data[i] throws
+// malformed_input with index i (it is not averaged as 0).
 
 // Changepoints — PELT (Killick et al., 2012)
 detect_changepoints(input: {

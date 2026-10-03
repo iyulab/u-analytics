@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.5.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking:** `anderson_darling_normality`, `g_chart` and `t_chart` in the
+  WebAssembly binding read their number array as sent. Before, the generated
+  glue copied a plain array into a typed array, so `null` became `0` and a
+  string `NaN`. An element that is not a number now throws `malformed_input`
+  and a NaN or ±Infinity `value_not_finite`, both with `parameter` and
+  `index`. The argument is declared `number[] | Float64Array`.
+
+### Fixed
+
+- The same three refusals said why: fewer than 3 values is
+  `insufficient_data` (the messages claimed 2 were enough, which the charts
+  never accepted), a gap below 0 or a time not above 0 is
+  `parameter_out_of_range` at its `index`, and constant data for the
+  normality test is `invalid_input` naming `data`. All three used to throw
+  `invalid_input` with one message for every cause.
+
 ## [0.16.1] - 2026-10-03
 
 ### Fixed

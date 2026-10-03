@@ -183,6 +183,14 @@ jobs:
           ok(p2.p_bar === 0.0514 && p2.points[0].out_of_control, 'Phase II uses the given standard')
           ok(p2.points[0].z > 3, `z=${p2.points[0].z} must exceed the +3 limit`)
 
+          // A number array is read as sent: null is refused at its index,
+          // not turned into 0 by the glue's typed-array copy.
+          let refused = null
+          try { m.t_chart([1, null, 2]) } catch (err) { refused = err }
+          ok(refused && refused.code === 'malformed_input' && refused.index === 1,
+            `t_chart([1, null, 2]) gave ${refused ? refused.code + '@' + refused.index : 'no error'}`)
+          ok(m.g_chart(new Float64Array([10, 20, 30])).points.length === 3, 'g_chart(Float64Array) changed')
+
           console.log('binding behaviour gate: ok')
           EOF
           PKG_NAME="$PKG_NAME" node gate.mjs
