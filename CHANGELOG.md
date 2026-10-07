@@ -14,6 +14,8 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Changed
 
+- Follows u-numflow's `TransformError`, whose input variants now carry fields;
+  `NonNormalCapabilityError` reads them as before.
 - **Breaking (`UAnalytics`):** every `AnalyticsClient` method returns a typed record
   instead of a `JsonElement` — `XbarRChartResult`, `CapabilityResult`,
   `TrendTestResult`, `TestResult`, … — with the engine's fields as properties

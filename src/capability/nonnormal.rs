@@ -96,13 +96,16 @@ impl std::error::Error for NonNormalCapabilityError {}
 impl From<TransformError> for NonNormalCapabilityError {
     fn from(e: TransformError) -> Self {
         match e {
-            TransformError::NonPositiveData => NonNormalCapabilityError::NonPositiveData,
-            TransformError::NonFiniteData => NonNormalCapabilityError::NonFiniteData,
-            TransformError::InsufficientData => NonNormalCapabilityError::InsufficientData,
+            TransformError::NonPositiveData { .. } => NonNormalCapabilityError::NonPositiveData,
+            TransformError::NonFiniteData { .. } => NonNormalCapabilityError::NonFiniteData,
+            TransformError::InsufficientData { .. } => NonNormalCapabilityError::InsufficientData,
             TransformError::InvalidInverse => NonNormalCapabilityError::SpecTransformError,
-            // The data at the estimated λ does not fit in f64: nothing to compute on.
-            TransformError::InvalidTransform => NonNormalCapabilityError::CapabilityError,
-            TransformError::InvalidLambdaRange => NonNormalCapabilityError::InvalidLambdaRange,
+            TransformError::InvalidLambdaRange { .. } => {
+                NonNormalCapabilityError::InvalidLambdaRange
+            }
+            // The data at the estimated λ does not fit in f64: nothing to compute on
+            // (and any reason u-numflow adds later is a failure to compute, not input).
+            _ => NonNormalCapabilityError::CapabilityError,
         }
     }
 }
