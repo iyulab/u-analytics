@@ -1288,164 +1288,31 @@ pub unsafe extern "C" fn uanalytics_spectral_residual(
     })
 }
 
-// ── Correlation Matrix ──────────────────────────────────────
+// ── Correlation, simple regression, distribution fitting ─────
 
-#[cfg(feature = "ffi")]
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CorrelationRequest {
-    variables: Vec<Vec<f64>>,
-}
+wire_export!(
+    /// Correlation matrix: `{variables, method?}` (`"pearson"` default, `"spearman"`,
+    /// `"kendall"`) → `{matrix}` with `matrix[i][j]` the correlation of variables i and j.
+    uanalytics_correlation_matrix,
+    crate::wire::CorrelationInputDto,
+    |r| crate::wire::correlation_matrix_dto(r)
+);
 
-/// Correlation matrix (Pearson)
-///
-/// # Safety
-///
-/// `request_json` must be null or point to a NUL-terminated string, and
-/// `result_ptr` must be null or valid for writing one pointer. A string written
-/// there is owned by the caller and must be released with
-/// [`uanalytics_free_string`].
-#[cfg(feature = "ffi")]
-#[no_mangle]
-pub unsafe extern "C" fn uanalytics_correlation_matrix(
-    request_json: *const libc::c_char,
-    result_ptr: *mut *mut libc::c_char,
-) -> i32 {
-    ffi_catch(result_ptr, || {
-        let json = match unsafe { read_json(request_json) } {
-            Ok(j) => j,
-            Err(e) => return e,
-        };
+wire_export!(
+    /// Simple linear regression `{x, y}` → slope, intercept, fit statistics, their
+    /// t and p values, the F test, residuals and fitted values.
+    uanalytics_simple_regression,
+    crate::wire::RegressionInputDto,
+    |r| crate::wire::simple_regression_dto(r)
+);
 
-        let req: CorrelationRequest = match parse_request(&json, result_ptr) {
-            Ok(r) => r,
-            Err(status) => return status,
-        };
-
-        let refs: Vec<&[f64]> = req.variables.iter().map(|v| v.as_slice()).collect();
-
-        match crate::correlation::correlation_matrix(&refs) {
-            Some(matrix) => {
-                let resp = serde_json::json!({
-                    "rows": matrix.rows(),
-                    "cols": matrix.cols(),
-                    "data": matrix.data(),
-                });
-                write_json(result_ptr, &resp)
-            }
-            None => write_error(
-                result_ptr,
-                ERR_COMPUTE,
-                "Correlation matrix computation failed",
-            ),
-        }
-    })
-}
-
-// ── Simple Regression ───────────────────────────────────────
-
-#[cfg(feature = "ffi")]
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RegressionRequest {
-    x: Vec<f64>,
-    y: Vec<f64>,
-}
-
-/// Simple linear regression
-///
-/// # Safety
-///
-/// `request_json` must be null or point to a NUL-terminated string, and
-/// `result_ptr` must be null or valid for writing one pointer. A string written
-/// there is owned by the caller and must be released with
-/// [`uanalytics_free_string`].
-#[cfg(feature = "ffi")]
-#[no_mangle]
-pub unsafe extern "C" fn uanalytics_simple_regression(
-    request_json: *const libc::c_char,
-    result_ptr: *mut *mut libc::c_char,
-) -> i32 {
-    ffi_catch(result_ptr, || {
-        let json = match unsafe { read_json(request_json) } {
-            Ok(j) => j,
-            Err(e) => return e,
-        };
-
-        let req: RegressionRequest = match parse_request(&json, result_ptr) {
-            Ok(r) => r,
-            Err(status) => return status,
-        };
-
-        match crate::regression::simple_linear_regression(&req.x, &req.y) {
-            Some(result) => {
-                let resp = serde_json::json!({
-                    "slope": result.slope,
-                    "intercept": result.intercept,
-                    "r_squared": result.r_squared,
-                    "adjusted_r_squared": result.adjusted_r_squared,
-                    "slope_se": result.slope_se,
-                    "intercept_se": result.intercept_se,
-                });
-                write_json(result_ptr, &resp)
-            }
-            None => write_error(result_ptr, ERR_COMPUTE, "Regression computation failed"),
-        }
-    })
-}
-
-// ── Distribution Fit ────────────────────────────────────────
-
-#[cfg(feature = "ffi")]
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FitBestRequest {
-    data: Vec<f64>,
-}
-
-/// Fit best distribution
-///
-/// # Safety
-///
-/// `request_json` must be null or point to a NUL-terminated string, and
-/// `result_ptr` must be null or valid for writing one pointer. A string written
-/// there is owned by the caller and must be released with
-/// [`uanalytics_free_string`].
-#[cfg(feature = "ffi")]
-#[no_mangle]
-pub unsafe extern "C" fn uanalytics_fit_best(
-    request_json: *const libc::c_char,
-    result_ptr: *mut *mut libc::c_char,
-) -> i32 {
-    ffi_catch(result_ptr, || {
-        let json = match unsafe { read_json(request_json) } {
-            Ok(j) => j,
-            Err(e) => return e,
-        };
-
-        let req: FitBestRequest = match parse_request(&json, result_ptr) {
-            Ok(r) => r,
-            Err(status) => return status,
-        };
-
-        let results = crate::distribution::fit_best(&req.data);
-
-        let resp: Vec<serde_json::Value> = results
-            .iter()
-            .map(|r| {
-                serde_json::json!({
-                    "distribution": r.distribution,
-                    "parameters": r.parameters,
-                    "log_likelihood": r.log_likelihood,
-                    "aic": r.aic,
-                    "bic": r.bic,
-                })
-            })
-            .collect();
-
-        write_json(result_ptr, &resp)
-    })
-}
+wire_export!(
+    /// Every continuous family that fits `{data}`, best AIC first:
+    /// `[{distribution, parameters: {name: value}, log_likelihood, aic, bic}]`.
+    uanalytics_fit_best,
+    DataReq,
+    |r| crate::wire::fit_best_dto(&r.data)
+);
 
 // ── Memory Management ───────────────────────────────────────
 
@@ -1676,6 +1543,113 @@ mod tests {
                 b["got"].as_f64()
             ),
             (-3, Some("insufficient_data"), Some(8.0), Some(3.0))
+        );
+    }
+
+    #[test]
+    fn correlation_regression_and_fitting_round_trip_and_name_their_refusals() {
+        let req = serde_json::json!({
+            "variables": [[1, 2, 3, 4, 5], [2, 4, 5, 4, 5], [5, 4, 3, 2, 1]],
+            "method": "spearman"
+        });
+        let (code, b) = call(uanalytics_correlation_matrix, &req.to_string());
+        assert_eq!(code, 0, "{b}");
+        let wire =
+            crate::wire::correlation_matrix_dto(serde_json::from_value(req).unwrap()).unwrap();
+        assert_eq!(b, serde_json::to_value(&wire).unwrap());
+        assert!(
+            (b["matrix"][0][2].as_f64().unwrap() + 1.0).abs() < 1e-12,
+            "{b}"
+        );
+        assert_eq!(b["matrix"][1][1].as_f64(), Some(1.0), "{b}");
+        let (code, b) = call(
+            uanalytics_correlation_matrix,
+            r#"{"variables": [[1, 2, 3], [4, 4, 4]]}"#,
+        );
+        assert_eq!(
+            (code, b["code"].as_str(), b["index"].as_u64()),
+            (-3, Some("invalid_input"), Some(1)),
+            "{b}"
+        );
+        let (_, b) = call(
+            uanalytics_correlation_matrix,
+            r#"{"variables": [[1, 2, 3], [4, 5]]}"#,
+        );
+        assert_eq!(
+            (b["code"].as_str(), b["index"].as_u64()),
+            (Some("dimension_mismatch"), Some(1))
+        );
+        let (_, b) = call(
+            uanalytics_correlation_matrix,
+            r#"{"variables": [[1, 2, 3], [3, 2, 1]], "method": "rank"}"#,
+        );
+        assert_eq!(b["code"], "unknown_option");
+
+        let (code, b) = call(
+            uanalytics_simple_regression,
+            r#"{"x": [1, 2, 3, 4, 5], "y": [2.1, 3.9, 6.2, 7.8, 10.1]}"#,
+        );
+        assert_eq!(code, 0, "{b}");
+        assert!((b["slope"].as_f64().unwrap() - 1.99).abs() < 1e-9, "{b}");
+        assert!(b["slope_p"].as_f64().unwrap() < 1e-3, "{b}");
+        assert_eq!(b["residuals"].as_array().unwrap().len(), 5);
+        // An exact fit: the t ratio has no finite value, and says so as null
+        // (the C body and the WebAssembly value cannot disagree about infinity).
+        let (_, b) = call(
+            uanalytics_simple_regression,
+            r#"{"x": [1, 2, 3], "y": [2, 4, 6]}"#,
+        );
+        assert!(b["slope_t"].is_null() && b["f_statistic"].is_null(), "{b}");
+        let (_, b) = call(
+            uanalytics_simple_regression,
+            r#"{"x": [1, 2, 3], "y": [2, 4]}"#,
+        );
+        assert_eq!(
+            (
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["expected"].as_f64()
+            ),
+            (Some("dimension_mismatch"), Some("y"), Some(3.0))
+        );
+        let (_, b) = call(
+            uanalytics_simple_regression,
+            r#"{"x": [2, 2, 2], "y": [1, 2, 3]}"#,
+        );
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("invalid_input"), Some("x"))
+        );
+
+        let (code, b) = call(
+            uanalytics_fit_best,
+            r#"{"data": [12, 25, 31, 44, 52, 60, 71, 85]}"#,
+        );
+        assert_eq!(code, 0, "{b}");
+        let names: Vec<&str> = b
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["distribution"].as_str().unwrap())
+            .collect();
+        assert!(
+            names.contains(&"Weibull") && !names.contains(&"Poisson"),
+            "{names:?}"
+        );
+        let weibull = b
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["distribution"] == "Weibull")
+            .unwrap();
+        assert!(
+            weibull["parameters"]["shape"].as_f64().unwrap() > 1.0,
+            "{weibull}"
+        );
+        let (_, b) = call(uanalytics_fit_best, r#"{"data": [3, 3, 3]}"#);
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("invalid_input"), Some("data"))
         );
     }
 
@@ -2429,8 +2403,8 @@ mod tests {
             "{body}"
         );
 
-        // The four entry points the WASM binding does not carry hold the same
-        // line: a request type is a contract, not a suggestion.
+        // Every entry point holds the same line: a request type is a contract,
+        // not a suggestion.
         let (code, body) = call(
             uanalytics_simple_regression,
             r#"{"x": [1.0, 2.0, 3.0], "y": [2.0, 4.0, 6.1], "weights": [1.0, 1.0, 1.0]}"#,

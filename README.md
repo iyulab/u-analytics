@@ -640,6 +640,19 @@ adf_test(input: { data: number[], model?: "none" | "constant" | "constant_trend"
                   max_lags?: number | null }):
   { statistic: number, n_lags: number, n_obs: number,
     levels: { level: number, critical_value: number, rejected: boolean }[] }  // 1 %, 5 %, 10 %
+
+// Association and fitting
+correlation_matrix(variables: number[][], options?: { method?: "pearson" | "spearman" | "kendall" } | null):
+  { matrix: number[][] }        // >= 2 variables of one length >= 3; a constant one -> invalid_input at its index
+simple_regression(x: number[] | Float64Array, y: number[] | Float64Array):
+  { slope, intercept, r_squared, adjusted_r_squared, slope_se, intercept_se,
+    slope_t: number | null, intercept_t: number | null, slope_p, intercept_p, residual_se,
+    f_statistic: number | null, f_p_value, residuals: number[], fitted: number[] }  // null t/F: exact fit
+fit_best(data: number[] | Float64Array):  // >= 2 values, not all equal; best AIC first
+  { distribution: string, parameters: Record<string, number>, log_likelihood, aic, bic }[]
+// fit_best ranks continuous families only (Normal; Exponential, Gamma, LogNormal,
+// Weibull for positive data; Beta for (0, 1)) -- a probability mass is not ranked
+// against densities, so count data get no Poisson entry here.
 // A number array is read as sent: `null` or a string at data[i] throws
 // malformed_input with index i (it is not averaged as 0).
 
@@ -828,6 +841,9 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_ewma` | `ewma(input)` | `input` as is |
 | `uanalytics_anderson_darling_test` | `anderson_darling_test(data)` | `{ data: [...] }` |
 | `uanalytics_adf_test` | `adf_test(input)` | `input` as is |
+| `uanalytics_correlation_matrix` | `correlation_matrix(variables, { method? })` | `{ variables, method? }` |
+| `uanalytics_simple_regression` | `simple_regression(x, y)` | `{ x, y }` |
+| `uanalytics_fit_best` | `fit_best(data)` | `{ data: [...] }` |
 | `uanalytics_estimate_period` | `estimate_period(input)` | `input` as is |
 | `uanalytics_spectral_residual` | `spectral_residual(input)` | `input` as is |
 
@@ -857,16 +873,6 @@ results — `uanalytics_one_sample_t_test` `{data, mu0}`, `uanalytics_two_sample
 `{observed, expected}`, `uanalytics_chi_squared_independence` / `uanalytics_fisher_exact_test`
 `{table}`, and `uanalytics_bonferroni_correction` / `uanalytics_benjamini_hochberg`
 `{p_values}` → `{values}`.
-
-Three entry points exist only on the FFI:
-
-```ts
-uanalytics_correlation_matrix { variables: number[][] }    → { rows: number, cols: number, data: number[] } // row-major
-uanalytics_simple_regression  { x: number[], y: number[] } → { slope, intercept, r_squared, adjusted_r_squared,
-                                                                slope_se, intercept_se: number }
-uanalytics_fit_best           { data: number[] }           → { distribution: string, parameters: [name: string, value: number][],
-                                                                log_likelihood, aic, bic: number }[] // ascending AIC
-```
 
 The .NET client (`bindings/csharp/UAnalytics`, package `UAnalytics`) wraps each
 entry point as a method on `AnalyticsClient` — `XbarRChart`, `ImrChart`, `PChart(samples, pBar)`, `LaneyPChart(samples, pBar, phi)`,

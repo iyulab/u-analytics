@@ -853,12 +853,14 @@ pub fn fit_lognormal(data: &[f64]) -> Option<FitResult> {
 ///
 /// # Estimators
 ///
-/// λ̂ = x̄ (sample mean). Data should be non-negative integers
+/// λ̂ = x̄ (sample mean). Data are counts: non-negative integers
 /// (represented as f64 for API consistency).
 ///
 /// # Returns
 ///
-/// `None` if fewer than 2 data points, negative values, or non-finite values.
+/// `None` if fewer than 2 data points, a value that is not a non-negative
+/// integer, all zeros, or non-finite values. (A non-integer has no Poisson
+/// probability; `ln Γ(x + 1)` would extend the formula past where it means one.)
 ///
 /// # Examples
 ///
@@ -875,7 +877,7 @@ pub fn fit_poisson(data: &[f64]) -> Option<FitResult> {
     if n < 2 || data.iter().any(|v| !v.is_finite()) {
         return None;
     }
-    if data.iter().any(|&v| v < 0.0) {
+    if data.iter().any(|&v| v < 0.0 || v.fract() != 0.0) {
         return None;
     }
 
@@ -1031,11 +1033,56 @@ pub fn fit_beta(data: &[f64]) -> Option<FitResult> {
     })
 }
 
-/// Fits multiple distributions and returns results sorted by AIC (best first).
+/// Fits a two-parameter Weibull distribution by maximum likelihood
+/// ([`crate::weibull::weibull_mle`]), as a [`FitResult`] for comparison with
+/// the other families.
 ///
-/// Tries Normal, Exponential, Gamma, LogNormal, and Poisson fits.
-/// Beta is excluded since it requires data in (0, 1).
-/// Only distributions that successfully fit are included in the output.
+/// # Returns
+///
+/// `None` if fewer than 2 data points, a value that is not strictly positive
+/// and finite, or the fit does not converge.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::distribution::fit_weibull;
+///
+/// let data = [12.0, 25.0, 31.0, 44.0, 52.0, 60.0, 71.0, 85.0];
+/// let fit = fit_weibull(&data).unwrap();
+/// assert_eq!(fit.distribution, "Weibull");
+/// assert_eq!(fit.parameters[0].0, "shape");
+/// ```
+pub fn fit_weibull(data: &[f64]) -> Option<FitResult> {
+    if data.len() < 2 || data.iter().any(|&v| !(v.is_finite() && v > 0.0)) {
+        return None;
+    }
+    let r = crate::weibull::weibull_mle(data)?;
+    let nf = data.len() as f64;
+    let k = 2;
+    Some(FitResult {
+        distribution: "Weibull".to_string(),
+        parameters: vec![
+            ("shape".to_string(), r.shape),
+            ("scale".to_string(), r.scale),
+        ],
+        log_likelihood: r.log_likelihood,
+        aic: -2.0 * r.log_likelihood + 2.0 * k as f64,
+        bic: -2.0 * r.log_likelihood + k as f64 * nf.ln(),
+        n_params: k,
+    })
+}
+
+/// Fits the continuous families that apply to the data and returns them sorted
+/// by AIC (best first).
+///
+/// Tries Normal, Exponential, Gamma, LogNormal, Weibull and Beta; each is kept
+/// only if it fits (the positive families need data > 0, Beta needs data in
+/// (0, 1)).
+///
+/// Poisson is not a candidate: its likelihood is a probability mass, the
+/// others' a density, and AIC compares likelihoods only on the same footing --
+/// a density's value changes with the unit of measurement, a mass does not.
+/// Fit count data with [`fit_poisson`] directly.
 ///
 /// # Examples
 ///
@@ -1065,7 +1112,10 @@ pub fn fit_best(data: &[f64]) -> Vec<FitResult> {
     if let Some(r) = fit_lognormal(data) {
         results.push(r);
     }
-    if let Some(r) = fit_poisson(data) {
+    if let Some(r) = fit_weibull(data) {
+        results.push(r);
+    }
+    if let Some(r) = fit_beta(data) {
         results.push(r);
     }
 
@@ -1583,6 +1633,7 @@ mod tests {
         assert!(fit_poisson(&[1.0]).is_none()); // < 2
         assert!(fit_poisson(&[1.0, -1.0]).is_none()); // negative
         assert!(fit_poisson(&[0.0, 0.0]).is_none()); // all zeros
+        assert!(fit_poisson(&[1.0, 2.5]).is_none()); // not a count
     }
 
     // -----------------------------------------------------------------------
@@ -1628,16 +1679,52 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn fit_best_includes_lognormal_and_poisson() {
+    fn fit_best_compares_the_continuous_families_that_apply() {
         let data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
         let fits = fit_best(&data);
         let names: Vec<&str> = fits.iter().map(|f| f.distribution.as_str()).collect();
-        // All > 0, so should include Normal, Exponential, Gamma, LogNormal, Poisson
-        assert!(names.contains(&"Normal"), "should include Normal");
-        assert!(names.contains(&"Exponential"), "should include Exponential");
-        assert!(names.contains(&"Gamma"), "should include Gamma");
-        assert!(names.contains(&"LogNormal"), "should include LogNormal");
-        assert!(names.contains(&"Poisson"), "should include Poisson");
+        // All > 0 and above 1: every positive family, not Beta.
+        for family in ["Normal", "Exponential", "Gamma", "LogNormal", "Weibull"] {
+            assert!(
+                names.contains(&family),
+                "should include {family}: {names:?}"
+            );
+        }
+        assert!(!names.contains(&"Beta"), "{names:?}");
+        // Counts are still data a density is fitted to; a mass is not ranked
+        // against densities.
+        assert!(!names.contains(&"Poisson"), "{names:?}");
+
+        let proportions = [0.2, 0.35, 0.5, 0.15, 0.45, 0.3, 0.6, 0.25, 0.4, 0.55];
+        let names: Vec<String> = fit_best(&proportions)
+            .into_iter()
+            .map(|f| f.distribution)
+            .collect();
+        assert!(names.iter().any(|n| n == "Beta"), "{names:?}");
+    }
+
+    /// The ranking a mass and a density cannot share: rescaling continuous
+    /// data moves every density's log-likelihood by n·ln(scale) and leaves the
+    /// order among densities alone -- so the winner must not depend on units.
+    #[test]
+    fn fit_best_ranking_does_not_depend_on_the_unit() {
+        let data = [2.0, 3.0, 1.0, 4.0, 2.0, 3.0, 5.0, 2.0, 3.0, 4.0];
+        let in_thousandths: Vec<f64> = data.iter().map(|v| v * 1000.0).collect();
+        let order = |d: &[f64]| -> Vec<String> {
+            fit_best(d).into_iter().map(|f| f.distribution).collect()
+        };
+        assert_eq!(order(&data), order(&in_thousandths));
+    }
+
+    #[test]
+    fn fit_weibull_matches_the_weibull_mle() {
+        let data = [12.0, 25.0, 31.0, 44.0, 52.0, 60.0, 71.0, 85.0];
+        let fit = fit_weibull(&data).expect("positive data");
+        let mle = crate::weibull::weibull_mle(&data).expect("same data");
+        assert_eq!(fit.parameters[0], ("shape".to_string(), mle.shape));
+        assert_eq!(fit.parameters[1], ("scale".to_string(), mle.scale));
+        assert!((fit.aic - (-2.0 * mle.log_likelihood + 4.0)).abs() < 1e-12);
+        assert!(fit_weibull(&[1.0, 0.0, 2.0]).is_none());
     }
 }
 

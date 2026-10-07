@@ -2251,6 +2251,230 @@ pub(crate) fn ewma_dto(input: EwmaInputDto) -> Result<EwmaDto, WireError> {
     })
 }
 
+// ── Correlation, simple regression and distribution fitting ────────────────
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CorrelationInputDto {
+    /// Each inner array is one variable; all the same length.
+    pub(crate) variables: Vec<Vec<f64>>,
+    #[serde(default = "default_correlation_method")]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(
+        feature = "wasm",
+        tsify(type = "\"pearson\" | \"spearman\" | \"kendall\"")
+    )]
+    pub(crate) method: String,
+}
+
+pub(crate) fn default_correlation_method() -> String {
+    "pearson".to_owned()
+}
+
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct CorrelationMatrixDto {
+    /// `matrix[i][j]` is the correlation of variables `i` and `j`.
+    pub(crate) matrix: Vec<Vec<f64>>,
+}
+
+/// The index of the first variable whose values are all the same, for which
+/// no correlation (and no regression slope) is defined.
+fn first_constant(variables: &[Vec<f64>]) -> Option<usize> {
+    variables.iter().position(|v| v.iter().all(|&x| x == v[0]))
+}
+
+pub(crate) fn correlation_matrix_dto(
+    input: CorrelationInputDto,
+) -> Result<CorrelationMatrixDto, WireError> {
+    type MatrixFn = fn(&[&[f64]]) -> Option<u_numflow::matrix::Matrix>;
+    let compute: MatrixFn = match input.method.as_str() {
+        "pearson" => crate::correlation::correlation_matrix,
+        "spearman" => crate::correlation::spearman_matrix,
+        "kendall" => crate::correlation::kendall_matrix,
+        other => {
+            return Err(WireError::unknown_option(
+                "method",
+                other,
+                &["pearson", "spearman", "kendall"],
+            ))
+        }
+    };
+    let variables = input.variables;
+    if variables.len() < 2 {
+        return Err(WireError::too_few(
+            "variables",
+            2,
+            variables.len(),
+            format!(
+                "variables: a correlation matrix needs at least 2 variables, got {}",
+                variables.len()
+            ),
+        ));
+    }
+    let n = variables[0].len();
+    if let Some(i) = variables.iter().position(|v| v.len() != n) {
+        let got = variables[i].len();
+        return Err(WireError::new(
+            code::DIMENSION_MISMATCH,
+            Some(i),
+            format!("variables[{i}] has {got} values; variables[0] has {n}"),
+        )
+        .about("variables")
+        .with("expected", Detail::Num(n as f64))
+        .with("got", Detail::Num(got as f64)));
+    }
+    if n < 3 {
+        return Err(WireError::too_few(
+            "variables",
+            3,
+            n,
+            format!("variables: each variable needs at least 3 values, got {n}"),
+        ));
+    }
+    if let Some(i) = first_constant(&variables) {
+        return Err(WireError::new(
+            code::INVALID_INPUT,
+            Some(i),
+            format!("variables[{i}]: every value is the same, so its correlation is undefined"),
+        )
+        .about("variables"));
+    }
+    let refs: Vec<&[f64]> = variables.iter().map(Vec::as_slice).collect();
+    let m = compute(&refs).ok_or_else(|| {
+        WireError::invalid_input(format!(
+            "correlation_matrix: the {} correlation is undefined for these variables",
+            input.method
+        ))
+        .about("variables")
+    })?;
+    Ok(CorrelationMatrixDto {
+        matrix: (0..m.rows())
+            .map(|i| (0..m.cols()).map(|j| m.get(i, j)).collect())
+            .collect(),
+    })
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RegressionInputDto {
+    pub(crate) x: Vec<f64>,
+    pub(crate) y: Vec<f64>,
+}
+
+/// Ordinary least squares `y = intercept + slope · x`.
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct RegressionDto {
+    pub(crate) slope: f64,
+    pub(crate) intercept: f64,
+    pub(crate) r_squared: f64,
+    pub(crate) adjusted_r_squared: f64,
+    pub(crate) slope_se: f64,
+    pub(crate) intercept_se: f64,
+    /// `null` when the fit is exact (a standard error of 0).
+    pub(crate) slope_t: Option<f64>,
+    /// `null` when the fit is exact (a standard error of 0).
+    pub(crate) intercept_t: Option<f64>,
+    pub(crate) slope_p: f64,
+    pub(crate) intercept_p: f64,
+    pub(crate) residual_se: f64,
+    /// `null` when the fit is exact.
+    pub(crate) f_statistic: Option<f64>,
+    pub(crate) f_p_value: f64,
+    /// `y[i]` minus its fitted value, in input order.
+    pub(crate) residuals: Vec<f64>,
+    pub(crate) fitted: Vec<f64>,
+}
+
+fn finite(v: f64) -> Option<f64> {
+    v.is_finite().then_some(v)
+}
+
+pub(crate) fn simple_regression_dto(input: RegressionInputDto) -> Result<RegressionDto, WireError> {
+    let RegressionInputDto { x, y } = input;
+    if y.len() != x.len() {
+        return Err(WireError::new(
+            code::DIMENSION_MISMATCH,
+            None,
+            format!("y has {} values; x has {}", y.len(), x.len()),
+        )
+        .about("y")
+        .with("expected", Detail::Num(x.len() as f64))
+        .with("got", Detail::Num(y.len() as f64)));
+    }
+    let x = at_least(x, 3, "x")?;
+    if first_constant(std::slice::from_ref(&x)).is_some() {
+        return Err(
+            WireError::invalid_input("x: every value is the same, so no slope is defined")
+                .about("x"),
+        );
+    }
+    let r = crate::regression::simple_linear_regression(&x, &y)
+        .expect("lengths, size and variation of x were checked above; values are finite");
+    Ok(RegressionDto {
+        slope: r.slope,
+        intercept: r.intercept,
+        r_squared: r.r_squared,
+        adjusted_r_squared: r.adjusted_r_squared,
+        slope_se: r.slope_se,
+        intercept_se: r.intercept_se,
+        slope_t: finite(r.slope_t),
+        intercept_t: finite(r.intercept_t),
+        slope_p: r.slope_p,
+        intercept_p: r.intercept_p,
+        residual_se: r.residual_se,
+        f_statistic: finite(r.f_statistic),
+        f_p_value: r.f_p_value,
+        residuals: r.residuals,
+        fitted: r.fitted,
+    })
+}
+
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct DistributionFitDto {
+    /// `"Normal"`, `"Exponential"`, `"Gamma"`, `"LogNormal"`, `"Weibull"` or `"Beta"`.
+    pub(crate) distribution: String,
+    /// Estimated parameters by name (`mu`/`sigma`, `lambda`, `alpha`/`beta`,
+    /// `shape`/`scale`).
+    #[cfg_attr(feature = "wasm", tsify(type = "Record<string, number>"))]
+    pub(crate) parameters: std::collections::BTreeMap<String, f64>,
+    pub(crate) log_likelihood: f64,
+    pub(crate) aic: f64,
+    pub(crate) bic: f64,
+}
+
+/// Every continuous family that fits `data`, best AIC first.
+pub(crate) fn fit_best_dto(data: &[f64]) -> Result<Vec<DistributionFitDto>, WireError> {
+    let data = at_least(data.to_vec(), 2, "data")?;
+    if first_constant(std::slice::from_ref(&data)).is_some() {
+        return Err(WireError::invalid_input(
+            "data: every value is the same, so no distribution can be fitted",
+        )
+        .about("data"));
+    }
+    let fits = crate::distribution::fit_best(&data);
+    debug_assert!(!fits.is_empty(), "Normal fits any non-constant finite data");
+    Ok(fits
+        .into_iter()
+        .map(|f| DistributionFitDto {
+            distribution: f.distribution,
+            parameters: f.parameters.into_iter().collect(),
+            log_likelihood: f.log_likelihood,
+            aic: f.aic,
+            bic: f.bic,
+        })
+        .collect())
+}
+
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]

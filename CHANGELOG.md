@@ -19,9 +19,28 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   terms, `max_lags` is refused above what the series leaves room for
   (`parameter_out_of_range` with `max`), and the result lists `level`,
   `critical_value` and `rejected` for 1 %, 5 % and 10 %.
+- `correlation_matrix`, `simple_regression` and `fit_best` over WebAssembly (they
+  were C ABI only). `correlation_matrix` takes `method`: `pearson` (default),
+  `spearman` or `kendall`. `simple_regression` also returns the t and p values,
+  `residual_se`, the F test, `residuals` and `fitted`.
+- `distribution::fit_weibull`; `fit_best` also tries Weibull, and Beta when the
+  data lie in (0, 1).
 
 ### Changed
 
+- **Breaking:** `fit_best` no longer ranks Poisson. Its likelihood is a probability
+  mass and the others' a density; AIC cannot compare the two, and the ranking
+  moved with the unit of measurement (the same counts in thousandths put Poisson
+  last instead of fourth). `fit_poisson` is still there for count data, and now
+  refuses a value that is not a non-negative integer.
+- **Breaking:** C ABI `uanalytics_correlation_matrix` returns `{ matrix }`, an
+  array of rows, instead of `{ rows, cols, data }` row-major; `uanalytics_fit_best`
+  returns `parameters` as an object (`{ "mu": …, "sigma": … }`) instead of
+  `[name, value]` pairs. All three former C-only entry points refuse with a code
+  and the place (`dimension_mismatch` at the variable, a constant variable or `x`
+  as `invalid_input`, too few values as `insufficient_data`) instead of
+  "computation failed", and `uanalytics_fit_best` no longer returns an empty list
+  for data it cannot fit.
 - **Breaking:** the two Anderson-Darling normality tests were one computation
   (the same A², A²* and p-value approximation) under two names with different
   minimum sizes. `testing::anderson_darling_normality` and `AdNormalityResult` are

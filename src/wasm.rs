@@ -17,8 +17,9 @@ use wasm_bindgen::prelude::*;
 // The shapes below are the wire contract, shared with the C FFI so the two
 // transports cannot drift apart again. See `crate::wire`.
 use crate::wire::{
-    c_chart_dto, capability_dto, count_pairs, count_rows, cusum_dto, ewma_dto, g_chart_dto,
-    gage_rr_anova_dto, gage_rr_xbar_r_dto,
+    c_chart_dto, capability_dto, correlation_matrix_dto, count_pairs, count_rows, cusum_dto,
+    default_correlation_method, ewma_dto, fit_best_dto, g_chart_dto, gage_rr_anova_dto,
+    gage_rr_xbar_r_dto,
     hypothesis::{
         adf_dto, anderson_darling_dto, chi_squared_gof_dto, chi_squared_independence_dto,
         fisher_exact_dto, groups_test_dto, jarque_bera_dto, mann_kendall_dto, mann_whitney_dto,
@@ -36,9 +37,10 @@ use crate::wire::{
         weibull_mrr_dto, weibull_reliability_dto, BoxcoxCapabilityInputDto,
         WeibullReliabilityInputDto,
     },
-    rules_from_json, run_rules_dto, sample_size_value, t_chart_dto, u_chart_dto, xbar_r_dto,
-    xbar_s_dto, AttributeStandardDto, CapabilityInputDto, CusumInputDto, EwmaInputDto,
-    GageRRInputDto, LimitsInputDto, MultiPeltInputDto, PeltInputDto, PercentileCapabilityInputDto,
+    rules_from_json, run_rules_dto, sample_size_value, simple_regression_dto, t_chart_dto,
+    u_chart_dto, xbar_r_dto, xbar_s_dto, AttributeStandardDto, CapabilityInputDto,
+    CorrelationInputDto, CusumInputDto, EwmaInputDto, GageRRInputDto, LimitsInputDto,
+    MultiPeltInputDto, PeltInputDto, PercentileCapabilityInputDto, RegressionInputDto,
     SeasonalityInputDto, SpectralResidualInputDto, WireError,
 };
 
@@ -635,6 +637,68 @@ pub fn adf_test(
 ) -> Result<JsValue, JsValue> {
     let input: AdfInputDto = from_js(input, "input")?;
     to_js(&adf_dto(input).map_err(js_err)?)
+}
+
+// ---------------------------------------------------------------------------
+// Correlation, simple regression, distribution fitting
+// ---------------------------------------------------------------------------
+
+/// `{ method? }` for [`correlation_matrix`].
+#[derive(serde::Deserialize, Default, tsify::Tsify)]
+#[tsify(missing_as_null)]
+#[serde(deny_unknown_fields)]
+struct CorrelationOptions {
+    #[serde(default)]
+    #[tsify(optional, type = "\"pearson\" | \"spearman\" | \"kendall\"")]
+    method: Option<String>,
+}
+
+/// Correlation matrix of `variables` (each a `number[]`, all the same length,
+/// at least 3 values, at least 2 variables). `method` is `"pearson"` (default),
+/// `"spearman"` or `"kendall"` (tau-b). Returns `{ matrix: number[][] }`.
+#[wasm_bindgen(unchecked_return_type = "CorrelationMatrixDto")]
+pub fn correlation_matrix(
+    #[wasm_bindgen(unchecked_param_type = "number[][]")] variables: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "CorrelationOptions | null")] options: Option<
+        JsValue,
+    >,
+) -> Result<JsValue, JsValue> {
+    let variables = read_number_rows(&variables, "variables").map_err(js_err)?;
+    let options: CorrelationOptions = match options {
+        Some(v) if !v.is_null() && !v.is_undefined() => from_js(v, "options")?,
+        _ => CorrelationOptions::default(),
+    };
+    let input = CorrelationInputDto {
+        variables,
+        method: options.method.unwrap_or_else(default_correlation_method),
+    };
+    to_js(&correlation_matrix_dto(input).map_err(js_err)?)
+}
+
+/// Simple linear regression of `y` on `x` (same length, at least 3, `x` not
+/// constant): slope, intercept, R², their standard errors, t and p values, the
+/// F test, residuals and fitted values. A t or F with no finite value (an exact
+/// fit) is `null`.
+#[wasm_bindgen(unchecked_return_type = "RegressionDto")]
+pub fn simple_regression(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] x: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] y: JsValue,
+) -> Result<JsValue, JsValue> {
+    let x = read_numbers(&x, "x").map_err(js_err)?;
+    let y = read_numbers(&y, "y").map_err(js_err)?;
+    to_js(&simple_regression_dto(RegressionInputDto { x, y }).map_err(js_err)?)
+}
+
+/// Every continuous family that fits `data` (at least 2 values, not all equal),
+/// best AIC first: `[{ distribution, parameters: { name: value }, log_likelihood,
+/// aic, bic }]`. Normal always; Exponential, Gamma, LogNormal and Weibull for
+/// positive data; Beta for data in (0, 1).
+#[wasm_bindgen(unchecked_return_type = "DistributionFitDto[]")]
+pub fn fit_best(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] data: JsValue,
+) -> Result<JsValue, JsValue> {
+    let data = read_numbers(&data, "data").map_err(js_err)?;
+    to_js(&fit_best_dto(&data).map_err(js_err)?)
 }
 
 /// Compute the Laney P' chart from (defectives, sample_size) pairs.

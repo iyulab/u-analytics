@@ -442,18 +442,39 @@ public sealed class AnalyticsClient : IDisposable
 
     // ── Correlation ──
 
-    public JsonElement CorrelationMatrix(double[][] variables)
+    /// <summary>
+    /// Correlation matrix of <paramref name="variables"/> (at least 2, each with the same
+    /// number of values, at least 3). <paramref name="method"/> is <c>"pearson"</c> (default),
+    /// <c>"spearman"</c> or <c>"kendall"</c> (tau-b). Returns <c>matrix</c>, an array of rows:
+    /// <c>matrix[i][j]</c> is the correlation of variables i and j. A constant variable is
+    /// refused at its <see cref="AnalyticsException.Index"/>.
+    /// </summary>
+    public JsonElement CorrelationMatrix(double[][] variables, string method = "pearson")
         => CallNative(NativeInterop.uanalytics_correlation_matrix,
-            new { variables });
+            new { variables, method });
 
     // ── Regression ──
 
+    /// <summary>
+    /// Simple linear regression of <paramref name="y"/> on <paramref name="x"/> (same length,
+    /// at least 3, <paramref name="x"/> not constant). Returns <c>slope</c>, <c>intercept</c>,
+    /// <c>r_squared</c>, <c>adjusted_r_squared</c>, their standard errors, <c>slope_t</c> /
+    /// <c>intercept_t</c> and p values, <c>residual_se</c>, <c>f_statistic</c> /
+    /// <c>f_p_value</c>, <c>residuals</c> and <c>fitted</c>. A t or F with no finite value
+    /// (an exact fit) is <c>null</c>.
+    /// </summary>
     public JsonElement SimpleRegression(double[] x, double[] y)
         => CallNative(NativeInterop.uanalytics_simple_regression,
             new { x, y });
 
     // ── Distribution ──
 
+    /// <summary>
+    /// Every continuous family that fits <paramref name="data"/> (at least 2 values, not all
+    /// equal), best AIC first: each with <c>distribution</c>, <c>parameters</c> (an object of
+    /// name → value), <c>log_likelihood</c>, <c>aic</c>, <c>bic</c>. Normal always;
+    /// Exponential, Gamma, LogNormal and Weibull for positive data; Beta for data in (0, 1).
+    /// </summary>
     public JsonElement FitBest(double[] data)
         => CallNative(NativeInterop.uanalytics_fit_best,
             new { data });
