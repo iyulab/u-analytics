@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- `UAnalytics` carries the native library for `linux-arm64` (glibc 2.39 or later).
+
 ### Changed
 
 - **Breaking (`UAnalytics`):** every `AnalyticsClient` method returns a typed record
