@@ -1871,6 +1871,7 @@ mod binding_contract_tests {
 
     fn dto(v: serde_json::Value) -> Result<crate::wire::CapabilityDto, String> {
         capability_dto(from_json::<CapabilityInputDto>(v, "input").map_err(|e| e.message)?)
+            .map_err(|e| format!("{} [{}]", e.message, e.parameter.as_deref().unwrap_or("-")))
     }
 
     /// `sigma_hat` from the chart the measurements actually came from -- the
@@ -1996,7 +1997,7 @@ mod binding_contract_tests {
         for bad in [0.0, -1.0] {
             let v = json!({ "data": flat(), "usl": 11.0, "lsl": 9.0, "sigma_within": bad });
             let e = dto(v).expect_err("a non-positive sigma is not a standard deviation");
-            assert!(e.contains("sigma_within"), "{bad} -> {e}");
+            assert!(e.ends_with("[sigma_within]"), "{bad} -> {e}");
         }
 
         // NaN and infinity are *not* representable in JSON, so the wire cannot
@@ -2013,7 +2014,11 @@ mod binding_contract_tests {
                 target: None,
             };
             let e = capability_dto(input).expect_err("non-finite sigma must be refused");
-            assert!(e.contains("sigma_within"), "{bad} -> {e}");
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some("sigma_within")),
+                "{bad} -> {e}"
+            );
         }
     }
 
@@ -2021,7 +2026,11 @@ mod binding_contract_tests {
     fn too_little_data_is_an_error_not_a_nan() {
         let e = dto(json!({ "data": [1.0], "usl": 11.0, "lsl": 9.0 }))
             .expect_err("one point has no dispersion");
-        assert!(e.contains("insufficient"), "{e}");
+        // insufficient_data on `data`, with min 2 and got 1
+        assert!(
+            e.contains("at least 2 values") && e.ends_with("[data]"),
+            "{e}"
+        );
     }
 
     // --- #220: X-bar-S, I-MR and the standalone rule engine ---
@@ -2184,7 +2193,8 @@ mod binding_contract_tests {
             lcl: 0.0,
         };
         let e = run_rules_dto(vec![1.0], limits, RuleSet::default()).expect_err("cl above ucl");
-        assert!(e.contains("lcl <= cl <= ucl"), "{e}");
+        assert!(e.message.contains("lcl <= cl <= ucl"), "{e}");
+        assert_eq!(e.code, "parameter_out_of_range");
     }
 
     #[test]

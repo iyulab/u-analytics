@@ -97,7 +97,8 @@ impl AttributeStandardDto {
                 code::MALFORMED_INPUT,
                 None,
                 format!("options: {chart} does not take `{name}`"),
-            )),
+            )
+            .about(name.to_string())),
             None => Ok(()),
         }
     }
@@ -111,10 +112,20 @@ impl AttributeStandardDto {
         match (center, self.phi) {
             (Some(center), Some(phi)) => Ok(Some(crate::spc::LaneyStandard { center, phi })),
             (None, None) => Ok(None),
-            _ => Err(WireError::invalid_input(format!(
-                "options: `{center_name}` and `phi` are given together -- a Phase I standard \
-                 fixes both, since phi scales the error about that centre"
-            ))),
+            // Named by the one that is missing.
+            (Some(_), None) | (None, Some(_)) => Err(WireError::new(
+                code::INVALID_OPTION,
+                None,
+                format!(
+                    "options: `{center_name}` and `phi` are given together -- a Phase I \
+                     standard fixes both, since phi scales the error about that centre"
+                ),
+            )
+            .about(if center.is_some() {
+                "phi".to_string()
+            } else {
+                center_name.to_string()
+            })),
         }
     }
 }
@@ -341,6 +352,9 @@ pub(crate) mod code {
     pub(crate) const EMPTY_INPUT: &str = "empty_input";
     /// A value that must be `> 0` is not (Box-Cox data, failure times).
     pub(crate) const NON_POSITIVE_DATA: &str = "non_positive_data";
+    /// A capability index with neither specification limit: there is nothing
+    /// to measure the spread against. `expected` lists the two options.
+    pub(crate) const NO_SPECIFICATION: &str = "no_specification";
     /// A setting refused for a reason a range cannot state (`[lo, hi]` with
     /// `lo >= hi`).
     pub(crate) const INVALID_OPTION: &str = "invalid_option";
@@ -754,12 +768,16 @@ pub(crate) fn xbar_r_dto(
         .map_err(|e| WireError::chart("subgroups", None, &e))?
         .with_rules(rules);
     add_rows(&subgroups, "subgroups", |g| chart.add_sample(g))?;
-    let x = chart
-        .control_limits()
-        .ok_or("insufficient data for control limits")?;
-    let r = chart
-        .r_limits()
-        .ok_or("insufficient data for R chart limits")?;
+    let too_few = || {
+        WireError::too_few(
+            "subgroups",
+            1,
+            0,
+            "subgroups: at least one subgroup is needed",
+        )
+    };
+    let x = chart.control_limits().ok_or_else(too_few)?;
+    let r = chart.r_limits().ok_or_else(too_few)?;
     Ok(XbarRChartDto {
         xbar_cl: x.cl,
         xbar_ucl: x.ucl,
@@ -1459,7 +1477,12 @@ pub(crate) mod hypothesis {
         each_within(expected, "expected", "> 0", |v| v > 0.0)?;
         crate::testing::chi_squared_goodness_of_fit(&observed, expected)
             .map(Into::into)
-            .ok_or_else(|| WireError::invalid_input("chi_squared_goodness_of_fit: no statistic"))
+            .ok_or_else(|| {
+                WireError::invalid_input(
+                    "chi_squared_goodness_of_fit: no statistic -- the observed counts sum to 0",
+                )
+                .about("observed")
+            })
     }
 
     /// Rows of a contingency table, all the same length.
@@ -1636,17 +1659,24 @@ pub(crate) struct CapabilityDto {
 /// only reachable from a browser or Node. Everything this function decides
 /// (which index family is computed, which fields come back `null`, which
 /// specification shapes are legal) is the part a consumer actually observes.
-pub(crate) fn capability_dto(input: CapabilityInputDto) -> Result<CapabilityDto, String> {
+pub(crate) fn capability_dto(input: CapabilityInputDto) -> Result<CapabilityDto, WireError> {
     use crate::capability::ProcessCapability;
 
+    check_specification(input.usl, input.lsl)?;
     let mut spec = ProcessCapability::new(input.usl, input.lsl)
-        .map_err(|e| format!("invalid specification limits: {e}"))?;
+        .map_err(|e| WireError::invalid_input(format!("invalid specification limits: {e}")))?;
     if let Some(target) = input.target {
         if !target.is_finite() {
-            return Err("target must be finite".to_string());
+            return Err(WireError::new(
+                code::VALUE_NOT_FINITE,
+                None,
+                format!("target must be finite, got {target}"),
+            )
+            .about("target"));
         }
         spec = spec.with_target(target);
     }
+    let data = at_least(input.data, 2, "data")?;
 
     // The crate decides what a missing within sigma means: `compute_overall`
     // reports the long-term indices only, so the short-term quartet and
@@ -1654,15 +1684,25 @@ pub(crate) fn capability_dto(input: CapabilityInputDto) -> Result<CapabilityDto,
     let indices = match input.sigma_within {
         Some(sigma_within) => {
             if !sigma_within.is_finite() || sigma_within <= 0.0 {
-                return Err("sigma_within must be a positive, finite number \
-                     (R-bar/d2 or S-bar/c4 from the control chart)"
-                    .to_string());
+                return Err(WireError::out_of_range(
+                    "sigma_within",
+                    Some(0.0),
+                    None,
+                    sigma_within,
+                    format!(
+                        "sigma_within must be a positive, finite number (R-bar/d2 or \
+                         S-bar/c4 from the control chart), got {sigma_within}"
+                    ),
+                ));
             }
-            spec.compute(&input.data, sigma_within)
+            spec.compute(&data, sigma_within)
         }
-        None => spec.compute_overall(&input.data),
+        None => spec.compute_overall(&data),
     }
-    .ok_or("insufficient or invalid data (need >= 2 finite values)")?;
+    .ok_or_else(|| {
+        WireError::invalid_input("data: every value is the same, so no spread to measure against")
+            .about("data")
+    })?;
 
     let dto = CapabilityDto {
         mean: indices.mean,
@@ -1865,11 +1905,97 @@ pub(crate) fn default_min_seg() -> usize {
     2
 }
 
+/// The specification limits a capability index is measured against, refused
+/// by name: neither given (`no_specification`), or `usl` not above `lsl`
+/// (`parameter_out_of_range` on `usl`, with `lsl` as its exclusive floor).
+pub(crate) fn check_specification(usl: Option<f64>, lsl: Option<f64>) -> Result<(), WireError> {
+    match (usl, lsl) {
+        (None, None) => Err(WireError::new(
+            code::NO_SPECIFICATION,
+            None,
+            "at least one specification limit (usl or lsl) is required",
+        )
+        .with("expected", Detail::List(vec!["usl", "lsl"]))),
+        (Some(u), Some(l)) if u <= l => Err(WireError::out_of_range(
+            "usl",
+            Some(l),
+            None,
+            u,
+            format!("usl must be greater than lsl ({l}), got {u}"),
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// The measurements of a Gage R&R study, `measurements[part][operator][trial]`,
+/// refused where they go wrong: too few parts, operators or trials, or a cell
+/// of another size than the first (`dimension_mismatch` naming the part).
+fn check_gage_shape(measurements: &[Vec<Vec<f64>>]) -> Result<(usize, usize, usize), WireError> {
+    let parts = measurements.len();
+    if parts < 2 {
+        return Err(WireError::too_few(
+            "measurements",
+            2,
+            parts,
+            format!("measurements: at least 2 parts are needed, got {parts}"),
+        ));
+    }
+    let operators = measurements[0].len();
+    if operators < 2 {
+        return Err(WireError::too_few(
+            "measurements[0]",
+            2,
+            operators,
+            format!("measurements[0]: at least 2 operators are needed, got {operators}"),
+        ));
+    }
+    let trials = measurements[0][0].len();
+    if trials < 2 {
+        return Err(WireError::too_few(
+            "measurements[0][0]",
+            2,
+            trials,
+            format!("measurements[0][0]: at least 2 trials are needed, got {trials}"),
+        ));
+    }
+    for (p, part) in measurements.iter().enumerate() {
+        if part.len() != operators {
+            return Err(WireError::new(
+                code::DIMENSION_MISMATCH,
+                Some(p),
+                format!(
+                    "measurements[{p}] has {} operators; measurements[0] has {operators}",
+                    part.len()
+                ),
+            )
+            .about("measurements")
+            .with("expected", Detail::Num(operators as f64))
+            .with("got", Detail::Num(part.len() as f64)));
+        }
+        if let Some(o) = part.iter().position(|cell| cell.len() != trials) {
+            return Err(WireError::new(
+                code::DIMENSION_MISMATCH,
+                Some(o),
+                format!(
+                    "measurements[{p}][{o}] has {} trials; measurements[0][0] has {trials}",
+                    part[o].len()
+                ),
+            )
+            .about(format!("measurements[{p}]"))
+            .with("expected", Detail::Num(trials as f64))
+            .with("got", Detail::Num(part[o].len() as f64)));
+        }
+    }
+    Ok((parts, operators, trials))
+}
+
 pub(crate) fn percentile_capability_dto(
     input: PercentileCapabilityInputDto,
-) -> Result<PercentileCapabilityDto, String> {
-    let result = crate::capability::percentile_capability(&input.data, input.lsl, input.usl)
-        .map_err(|e| e.to_string())?;
+) -> Result<PercentileCapabilityDto, WireError> {
+    check_specification(input.usl, input.lsl)?;
+    let data = at_least(input.data, 20, "data")?;
+    let result = crate::capability::percentile_capability(&data, input.lsl, input.usl)
+        .map_err(|e| WireError::invalid_input(e).about("data"))?;
     Ok(PercentileCapabilityDto {
         cp_star: result.cp_star,
         cpk_star: result.cpk_star,
@@ -1881,12 +2007,35 @@ pub(crate) fn percentile_capability_dto(
     })
 }
 
-pub(crate) fn gage_rr_xbar_r_dto(dto: GageRRInputDto) -> Result<GageRRResultDto, String> {
+pub(crate) fn gage_rr_xbar_r_dto(dto: GageRRInputDto) -> Result<GageRRResultDto, WireError> {
+    let (parts, operators, trials) = check_gage_shape(&dto.measurements)?;
+    // The method's K-factor tables cover these sizes only.
+    for (name, at, got, max) in [
+        ("trials", "measurements[0][0]", trials, 3),
+        ("operators", "measurements[0]", operators, 3),
+        ("parts", "measurements", parts, 10),
+    ] {
+        if got > max {
+            return Err(WireError::out_of_range(
+                // `parameter` names the array whose length it is.
+                match at {
+                    "measurements" => "measurements",
+                    "measurements[0]" => "measurements[0]",
+                    _ => "measurements[0][0]",
+                },
+                Some(2.0),
+                Some(max as f64),
+                got as f64,
+                format!("{at}: the X̄-R method supports 2 to {max} {name}, got {got}"),
+            ));
+        }
+    }
     let input = crate::msa::GageRRInput {
         measurements: dto.measurements,
         tolerance: dto.tolerance,
     };
-    let result = crate::msa::gage_rr_xbar_r(&input).map_err(|e| e.to_string())?;
+    let result = crate::msa::gage_rr_xbar_r(&input)
+        .map_err(|e| WireError::invalid_input(e).about("measurements"))?;
     Ok(GageRRResultDto {
         range_chart: result.range_chart.into(),
         average_chart: result.average_chart.into(),
@@ -1905,12 +2054,14 @@ pub(crate) fn gage_rr_xbar_r_dto(dto: GageRRInputDto) -> Result<GageRRResultDto,
     })
 }
 
-pub(crate) fn gage_rr_anova_dto(dto: GageRRInputDto) -> Result<GageRRAnovaResultDto, String> {
+pub(crate) fn gage_rr_anova_dto(dto: GageRRInputDto) -> Result<GageRRAnovaResultDto, WireError> {
+    check_gage_shape(&dto.measurements)?;
     let input = crate::msa::GageRRInput {
         measurements: dto.measurements,
         tolerance: dto.tolerance,
     };
-    let result = crate::msa::gage_rr_anova(&input).map_err(|e| e.to_string())?;
+    let result = crate::msa::gage_rr_anova(&input)
+        .map_err(|e| WireError::invalid_input(e).about("measurements"))?;
     let anova_table = result
         .anova_table
         .rows
@@ -2539,12 +2690,16 @@ pub(crate) fn xbar_s_dto(
         .map_err(|e| WireError::chart("subgroups", None, &e))?
         .with_rules(rules);
     add_rows(&subgroups, "subgroups", |g| chart.add_sample(g))?;
-    let x = chart
-        .control_limits()
-        .ok_or("insufficient data for control limits")?;
-    let s = chart
-        .s_limits()
-        .ok_or("insufficient data for S chart limits")?;
+    let too_few = || {
+        WireError::too_few(
+            "subgroups",
+            1,
+            0,
+            "subgroups: at least one subgroup is needed",
+        )
+    };
+    let x = chart.control_limits().ok_or_else(too_few)?;
+    let s = chart.s_limits().ok_or_else(too_few)?;
     Ok(XbarSChartDto {
         xbar_cl: x.cl,
         xbar_ucl: x.ucl,
@@ -2569,12 +2724,17 @@ pub(crate) fn imr_dto(
     add_rows(&values, "values", |x| {
         chart.add_sample(std::slice::from_ref(x))
     })?;
-    let i = chart
-        .control_limits()
-        .ok_or("at least two values are needed for control limits")?;
-    let mr = chart
-        .mr_limits()
-        .ok_or("at least two values are needed for control limits")?;
+    let n = values.len();
+    let too_few = || {
+        WireError::too_few(
+            "values",
+            2,
+            n,
+            format!("values: at least two values are needed for control limits, got {n}"),
+        )
+    };
+    let i = chart.control_limits().ok_or_else(too_few)?;
+    let mr = chart.mr_limits().ok_or_else(too_few)?;
     Ok(ImrChartDto {
         i_cl: i.cl,
         i_ucl: i.ucl,
@@ -2593,18 +2753,33 @@ pub(crate) fn run_rules_dto(
     values: Vec<f64>,
     limits: LimitsInputDto,
     rules: crate::spc::RuleSet,
-) -> Result<Vec<ChartPointDto>, String> {
+) -> Result<Vec<ChartPointDto>, WireError> {
     use crate::spc::{ChartPoint, ControlLimits, RunRule};
 
     let LimitsInputDto { ucl, cl, lcl } = limits;
-    // Written so that a NaN fails it too.
+    // Written so that a NaN fails it too. The centre line is the one the
+    // other two are ordered about, so the refusal names the limit out of place.
     if !(lcl <= cl && cl <= ucl) {
-        return Err(format!(
-            "limits: need lcl <= cl <= ucl, got lcl={lcl} cl={cl} ucl={ucl}"
+        let (parameter, min, max, got) = if lcl <= cl {
+            ("limits.ucl", Some(cl), None, ucl)
+        } else {
+            ("limits.lcl", None, Some(cl), lcl)
+        };
+        return Err(WireError::out_of_range(
+            parameter,
+            min,
+            max,
+            got,
+            format!("limits: need lcl <= cl <= ucl, got lcl={lcl} cl={cl} ucl={ucl}"),
         ));
     }
     if let Some(i) = values.iter().position(|x| !x.is_finite()) {
-        return Err(format!("values[{i}] is not a finite number"));
+        return Err(WireError::new(
+            code::VALUE_NOT_FINITE,
+            Some(i),
+            format!("values[{i}] is not a finite number"),
+        )
+        .about("values"));
     }
 
     let mut points: Vec<ChartPoint> = values
@@ -2657,15 +2832,23 @@ pub(crate) struct SeasonalityDto {
     pub(crate) power_threshold: f64,
 }
 
-pub(crate) fn seasonality_dto(input: SeasonalityInputDto) -> Result<SeasonalityDto, String> {
+pub(crate) fn seasonality_dto(input: SeasonalityInputDto) -> Result<SeasonalityDto, WireError> {
     if let Some(i) = input.data.iter().position(|x| !x.is_finite()) {
-        return Err(format!("data[{i}] is not a finite number"));
+        return Err(WireError::new(
+            code::VALUE_NOT_FINITE,
+            Some(i),
+            format!("data[{i}] is not a finite number"),
+        )
+        .about("data"));
     }
+    let n = input.data.len();
     let r = crate::seasonality::estimate_period(&input.data).ok_or_else(|| {
-        format!(
-            "data must have at least {} observations, got {}",
-            crate::seasonality::MIN_OBSERVATIONS,
-            input.data.len()
+        let min = crate::seasonality::MIN_OBSERVATIONS;
+        WireError::too_few(
+            "data",
+            min,
+            n,
+            format!("data must have at least {min} observations, got {n}"),
         )
     })?;
     Ok(SeasonalityDto {
@@ -2754,7 +2937,9 @@ impl From<crate::detection::SpectralResidualError> for WireError {
             E::OptionOutOfRange { option, .. } => {
                 WireError::new(code::PARAMETER_OUT_OF_RANGE, None, message).about(option)
             }
-            E::TooFewObservations { .. } => WireError::insufficient_data(message),
+            E::TooFewObservations { needed, got } => {
+                WireError::too_few("data", needed, got, message)
+            }
             E::ValueNotFinite { index } => {
                 WireError::new(code::VALUE_NOT_FINITE, Some(index), message)
             }
@@ -3444,6 +3629,92 @@ pub(crate) mod point_process {
 
 #[cfg(test)]
 mod input_error_tests {
+    /// Every refusal names what it is about (C464): these were strings that
+    /// left `parameter` empty, several naming two settings in one sentence.
+    #[test]
+    fn refusals_name_their_parameter() {
+        use super::*;
+        let cap = |v: serde_json::Value| {
+            capability_dto(serde_json::from_value(v).expect("valid shape")).expect_err("refused")
+        };
+        let e = cap(serde_json::json!({ "data": [1.0, 2.0, 3.0] }));
+        assert_eq!((e.code, e.parameter.as_deref()), ("no_specification", None));
+        let e = cap(serde_json::json!({ "data": [1.0, 2.0, 3.0], "usl": 1.0, "lsl": 2.0 }));
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("parameter_out_of_range", Some("usl"))
+        );
+        let e = cap(serde_json::json!({ "data": [1.0], "usl": 2.0 }));
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("insufficient_data", Some("data"))
+        );
+
+        let e = percentile_capability_dto(
+            serde_json::from_value(
+                serde_json::json!({ "data": [1.0, 2.0, 3.0, 4.0, 5.0], "usl": 2.0 }),
+            )
+            .unwrap(),
+        )
+        .err()
+        .expect("5 < 20");
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("insufficient_data", Some("data"))
+        );
+
+        let grr = |m: serde_json::Value| {
+            gage_rr_xbar_r_dto(
+                serde_json::from_value(serde_json::json!({ "measurements": m })).unwrap(),
+            )
+            .err()
+            .expect("refused")
+        };
+        let e = grr(serde_json::json!([
+            [[1.0, 2.0], [1.0, 2.0]],
+            [[1.0, 2.0], [1.0]]
+        ]));
+        assert_eq!(
+            (e.code, e.parameter.as_deref(), e.index),
+            ("dimension_mismatch", Some("measurements[1]"), Some(1))
+        );
+        let e = grr(serde_json::json!([
+            [[1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0]],
+            [[1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0]]
+        ]));
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("parameter_out_of_range", Some("measurements[0][0]"))
+        );
+
+        let e = imr_dto(vec![1.0], crate::spc::RuleSet::default()).expect_err("one value");
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("insufficient_data", Some("values"))
+        );
+
+        let e = run_rules_dto(
+            vec![1.0],
+            LimitsInputDto {
+                ucl: 1.0,
+                cl: 2.0,
+                lcl: 0.0,
+            },
+            crate::spc::RuleSet::default(),
+        )
+        .expect_err("ucl below cl");
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("parameter_out_of_range", Some("limits.ucl"))
+        );
+
+        let e = seasonality_dto(SeasonalityInputDto { data: vec![1.0; 3] }).expect_err("too short");
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("insufficient_data", Some("data"))
+        );
+    }
+
     /// Row walkers reported the row (`index`) but not whose rows they were.
     #[test]
     fn count_rows_name_their_argument_alongside_the_row() {
@@ -3753,7 +4024,7 @@ mod input_error_tests {
 
         // Half a Laney standard is refused, not completed by estimation.
         let (c, _, m) = err(laney_p_dto(&samples, &standard(json!({ "p_bar": 0.05 }))));
-        assert_eq!(c, code::INVALID_INPUT, "{m}");
+        assert_eq!(c, code::INVALID_OPTION, "{m}");
         // A key the chart does not take is refused, not ignored.
         let (c, _, m) = err(p_chart_dto(&samples, &standard(json!({ "phi": 1.0 }))));
         assert_eq!(c, code::MALFORMED_INPUT, "{m}");

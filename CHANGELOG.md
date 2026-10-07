@@ -28,6 +28,20 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Changed
 
+- **Breaking:** refusals that named no parameter now name one. Process and
+  percentile capability: neither limit is the new `no_specification` (with
+  `expected`), `usl` not above `lsl` is `parameter_out_of_range` on `usl`, too few
+  values is `insufficient_data` on `data` with `min` and `got`, a bad `sigma_within`
+  is `parameter_out_of_range`. Gage R&R: too few parts, operators or trials is
+  `insufficient_data` on `measurements`, `measurements[0]` or `measurements[0][0]`;
+  a part or cell of another size is `dimension_mismatch` at it; sizes the X̄-R
+  tables do not cover are `parameter_out_of_range`. X̄-R / X̄-S with no subgroup and
+  I-MR with one value are `insufficient_data`; `run_rules` limits out of order are
+  `parameter_out_of_range` on `limits.ucl` or `limits.lcl`, a non-finite value is
+  `value_not_finite` at its `index`; `estimate_period` and `spectral_residual` with
+  too few values are `insufficient_data` on `data`; a Laney standard given in half
+  is `invalid_option` naming the missing part; an option a chart does not take
+  names it. All were `invalid_input` (or a bare message) with no `parameter`.
 - **Breaking:** `fit_best` no longer ranks Poisson. Its likelihood is a probability
   mass and the others' a density; AIC cannot compare the two, and the ranking
   moved with the unit of measurement (the same counts in thousandths put Poisson

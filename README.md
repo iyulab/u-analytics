@@ -284,6 +284,7 @@ interface AnalyticsError extends Error {
 | `subgroup_length_mismatch` | a subgroup of a different length than the first |
 | `subgroup_size_out_of_range` | a subgroup size the factor tables do not cover |
 | `insufficient_data` | fewer values than the function needs — `parameter` names the argument, `min` and `got` the counts (`index: null`) |
+| `no_specification` | `expected` (`["usl", "lsl"]`) | a capability index with neither specification limit — there is nothing to measure the spread against (`index` and `parameter` are `null`) |
 | `empty_input` | an argument with nothing in it (`parameter`) |
 | `dimension_mismatch` | arrays that must have the same length do not — `index` is the first that differs, `expected` and `got` the lengths |
 | `standard_out_of_range` | a Phase I `p_bar`/`u_bar`/`phi` outside its domain — `parameter` names which |
