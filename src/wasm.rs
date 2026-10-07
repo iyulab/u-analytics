@@ -189,10 +189,17 @@ fn find_non_finite(value: &JsValue, parameter: &str, allow_nan: bool) -> Option<
 /// message and prefixing the offending parameter name to any serde error.
 fn from_js<T: serde::de::DeserializeOwned>(value: JsValue, param: &str) -> Result<T, JsValue> {
     if value.as_string().is_some() {
-        return Err(js_err(format!(
-            "{param}: expected a native JS object/array, got a string — \
-             pass the value directly, not JSON.stringify(...)"
-        )));
+        return Err(js_err(
+            WireError::new(
+                crate::wire::code::MALFORMED_INPUT,
+                None,
+                format!(
+                    "{param}: expected a native JS object/array, got a string — \
+                     pass the value directly, not JSON.stringify(...)"
+                ),
+            )
+            .about(param.to_owned()),
+        ));
     }
     if let Some(found) = find_non_finite(&value, param, false) {
         return Err(js_err(
@@ -225,13 +232,54 @@ fn from_json<T: serde::de::DeserializeOwned>(
     json: serde_json::Value,
     param: &str,
 ) -> Result<T, WireError> {
-    serde_json::from_value(json).map_err(|e| {
+    serde_path_to_error::deserialize(json).map_err(|e| {
+        let (parameter, index) = failure_site(param, e.path());
         WireError::new(
             crate::wire::code::MALFORMED_INPUT,
-            None,
-            format!("{param}: {e}"),
+            index,
+            format!("{param}: {}: {}", e.path(), e.inner()),
         )
+        .about(parameter)
     })
+}
+
+/// Where in the argument `param` a request stopped deserializing, as the
+/// refusal reports it: the field (`design[1]`, `points[0].y`) and, when the
+/// failure sits in an array, its position there -- the same `parameter` /
+/// `index` a number array read element by element reports. Without it a
+/// `null` three levels down was "invalid type: null, expected f64" with no
+/// way to say which row (the gap `read_numbers` closed for bare arrays).
+fn failure_site(param: &str, path: &serde_path_to_error::Path) -> (String, Option<usize>) {
+    use serde_path_to_error::Segment;
+    let segments: Vec<&Segment> = path.iter().collect();
+    let index = segments.iter().rev().find_map(|s| match s {
+        Segment::Seq { index } => Some(*index),
+        _ => None,
+    });
+    // A trailing `[i]` is the index, not part of the name.
+    let named = match segments.last() {
+        Some(Segment::Seq { .. }) => &segments[..segments.len() - 1],
+        _ => &segments[..],
+    };
+    let mut name = String::new();
+    for segment in named {
+        match segment {
+            Segment::Seq { index } => name.push_str(&format!("[{index}]")),
+            Segment::Map { key } | Segment::Enum { variant: key } => {
+                if !name.is_empty() {
+                    name.push('.');
+                }
+                name.push_str(key);
+            }
+            Segment::Unknown => name.push_str(".?"),
+        }
+    }
+    // A top-level array argument (`data[1][2]`) or a failure at the root
+    // (a missing field) is named by the argument itself.
+    if name.is_empty() || name.starts_with('[') {
+        name.insert_str(0, param);
+    }
+    (name, index)
 }
 
 /// One element of a JS number array, as found.
@@ -2351,6 +2399,50 @@ mod binding_contract_tests {
         assert!(crate::capability::ppm_to_sigma(0.0).is_none());
         assert!(crate::capability::ppm_to_sigma(1_000_000.0).is_none());
         assert!(crate::capability::ppm_to_sigma(-1.0).is_none());
+    }
+
+    // ── Where a request stopped deserializing ───────────────────────
+
+    #[test]
+    fn a_bad_value_inside_an_input_object_is_refused_where_it_sits() {
+        let e = super::from_json::<super::CusumInputDto>(
+            json!({ "data": [1.0, null, 3.0], "target": 1.0, "sigma": 1.0 }),
+            "input",
+        )
+        .err()
+        .expect("null is not a number");
+        assert_eq!(
+            (e.code, e.parameter.as_deref(), e.index),
+            ("malformed_input", Some("data"), Some(1)),
+            "{e}"
+        );
+
+        let e = super::from_json::<super::MultiPeltInputDto>(
+            json!({ "signals": [[1.0, 2.0], [3.0, "4"]] }),
+            "input",
+        )
+        .err()
+        .expect("a string is not a number");
+        assert_eq!(
+            (e.parameter.as_deref(), e.index),
+            (Some("signals[1]"), Some(1)),
+            "{e}"
+        );
+
+        // Not inside an array: the field, no index.
+        let e = super::from_json::<super::CusumInputDto>(
+            json!({ "data": [1.0], "target": "ten", "sigma": 1.0 }),
+            "input",
+        )
+        .err()
+        .expect("target is a number");
+        assert_eq!((e.parameter.as_deref(), e.index), (Some("target"), None));
+
+        // A missing field is the argument's.
+        let e = super::from_json::<super::CusumInputDto>(json!({ "data": [1.0] }), "input")
+            .err()
+            .expect("target is required");
+        assert_eq!(e.parameter.as_deref(), Some("input"), "{e}");
     }
 
     // ── CUSUM / EWMA ────────────────────────────────────────────────

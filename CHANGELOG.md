@@ -58,6 +58,15 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Fixed
 
+- WebAssembly: a value of the wrong type inside an argument -- a `null` or a
+  string where a number belongs (`signals[1]`, `data`), or a missing field -- is refused as
+  `malformed_input` with `parameter` naming the field and `index` its position in
+  its array. It named only the argument ("invalid type: null, expected f64"),
+  so a caller could not say which row was wrong.
+- The count and rate rows of the attribute charts and Fisher's exact test name
+  their argument (`parameter`: `samples`, `defects`, `table`) alongside the row
+  `index`; a JSON string passed instead of a value is `malformed_input` with
+  `parameter` (it was `invalid_input` with none).
 - `adf_test` reported an exact fit as a decisive rejection. When the lagged
   differences explain the differences exactly (a deterministic series -- a
   sinusoid with a trend, or differences that repeat with a period the lags

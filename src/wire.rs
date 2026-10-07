@@ -642,7 +642,9 @@ pub(crate) fn count_rows(value: &serde_json::Value, label: &str) -> Result<Vec<u
         .iter()
         .enumerate()
         .map(|(i, v)| whole_count(v, &format!("{label}[{i}]"), Some(i), COUNT))
-        .collect()
+        .collect::<Result<Vec<_>, _>>()
+        // Every refusal in the rows is about this argument.
+        .map_err(|e: WireError| e.about(label.to_owned()))
 }
 
 /// The one sample size an NP chart applies to every row. Not an element of an
@@ -650,7 +652,7 @@ pub(crate) fn count_rows(value: &serde_json::Value, label: &str) -> Result<Vec<u
 // Only the WASM binding carries the NP, C and U charts; the FFI has no caller.
 #[cfg_attr(not(feature = "wasm"), allow(dead_code))]
 pub(crate) fn sample_size_value(value: &serde_json::Value, label: &str) -> Result<u64, WireError> {
-    whole_count(value, label, None, SAMPLE_SIZE)
+    whole_count(value, label, None, SAMPLE_SIZE).map_err(|e| e.about(label.to_owned()))
 }
 
 /// `[[defectives, sample_size], ...]` pairs.
@@ -674,7 +676,9 @@ pub(crate) fn count_pairs(
                 )?,
             ))
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()
+        // Every refusal in the rows is about this argument.
+        .map_err(|e: WireError| e.about(label.to_owned()))
 }
 
 /// `[[defects, units], ...]` pairs; `units` may be fractional.
@@ -700,7 +704,9 @@ pub(crate) fn rate_pairs(
             })?;
             Ok((defects, units))
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()
+        // Every refusal in the rows is about this argument.
+        .map_err(|e: WireError| e.about(label.to_owned()))
 }
 
 pub(crate) fn attribute_point_dtos(
@@ -3438,6 +3444,28 @@ pub(crate) mod point_process {
 
 #[cfg(test)]
 mod input_error_tests {
+    /// Row walkers reported the row (`index`) but not whose rows they were.
+    #[test]
+    fn count_rows_name_their_argument_alongside_the_row() {
+        let e = super::count_pairs(&serde_json::json!([[1, 10], [2]]), "samples")
+            .expect_err("a row that is not a pair");
+        assert_eq!(
+            (e.code, e.parameter.as_deref(), e.index),
+            ("malformed_input", Some("samples"), Some(1))
+        );
+        let e = super::rate_pairs(&serde_json::json!([[1, 2.0], [1.5, 2.0]]), "samples")
+            .expect_err("1.5 defects");
+        assert_eq!(
+            (e.parameter.as_deref(), e.index),
+            (Some("samples"), Some(1))
+        );
+        let e = super::count_rows(&serde_json::json!([3, -1]), "defects").expect_err("negative");
+        assert_eq!(
+            (e.parameter.as_deref(), e.index),
+            (Some("defects"), Some(1))
+        );
+    }
+
     #[test]
     fn pelt_options_are_refused_by_name_with_their_values() {
         use super::{pelt_dto, Detail, PeltInputDto, PeltPenaltyDto};
