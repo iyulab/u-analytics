@@ -1,6 +1,6 @@
 [package]
 name = "u-analytics"
-version = "0.17.0"
+version = "0.18.0"
 rust-version = "1.85"
 edition = "2021"
 authors = ["iyulab"]
@@ -19,7 +19,7 @@ wasm = ["dep:wasm-bindgen", "dep:js-sys", "dep:serde-wasm-bindgen", "dep:serde_j
 ffi = ["dep:serde", "dep:serde_json", "dep:libc"]
 
 [dependencies]
-u-numflow = "0.8"
+u-numflow = "0.9"
 serde = { version = "1", features = ["derive"], optional = true }
 # Derives the TypeScript declaration from the same struct serde reads, so the
 # published .d.ts cannot drift from the shape the binding actually returns.
