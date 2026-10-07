@@ -855,6 +855,193 @@ wire_export!(
         .map(|v| serde_json::json!({ "value": v }))
 );
 
+// ── Hypothesis tests ───────────────────────────────────────
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TwoReqAB {
+    a: Vec<f64>,
+    b: Vec<f64>,
+}
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TwoReqXY {
+    x: Vec<f64>,
+    y: Vec<f64>,
+}
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DataReq {
+    data: Vec<f64>,
+}
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OneSampleReq {
+    data: Vec<f64>,
+    mu0: f64,
+}
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GroupsReq {
+    groups: Vec<Vec<f64>>,
+}
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GofReq {
+    observed: Vec<f64>,
+    expected: Vec<f64>,
+}
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TableReq {
+    table: Vec<Vec<f64>>,
+}
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FisherReq {
+    table: serde_json::Value,
+}
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PValuesReq {
+    p_values: Vec<f64>,
+}
+
+wire_export!(
+    /// One-sample t test of `data` against `mu0`: → `{statistic, df, p_value}`, the WebAssembly binding's result.
+    uanalytics_one_sample_t_test,
+    OneSampleReq,
+    |r| crate::wire::hypothesis::one_sample_t_dto(&r.data, r.mu0)
+);
+
+wire_export!(
+    /// Welch two-sample t test of `a` and `b`: → `{statistic, df, p_value}`, the WebAssembly binding's result.
+    uanalytics_two_sample_t_test,
+    TwoReqAB,
+    |r| crate::wire::hypothesis::two_sample_t_dto(&r.a, &r.b)
+);
+
+wire_export!(
+    /// Mann-Whitney U test of `a` and `b`: → `{statistic, df, p_value}`, the WebAssembly binding's result.
+    uanalytics_mann_whitney_u_test,
+    TwoReqAB,
+    |r| crate::wire::hypothesis::mann_whitney_dto(&r.a, &r.b)
+);
+
+wire_export!(
+    /// Paired t test of `x` and `y`: → `{statistic, df, p_value}`, the WebAssembly binding's result.
+    uanalytics_paired_t_test,
+    TwoReqXY,
+    |r| crate::wire::hypothesis::paired_t_dto(&r.x, &r.y)
+);
+
+wire_export!(
+    /// Wilcoxon signed-rank test of `x` and `y`: → `{statistic, df, p_value}`, the WebAssembly binding's result.
+    uanalytics_wilcoxon_signed_rank_test,
+    TwoReqXY,
+    |r| crate::wire::hypothesis::wilcoxon_dto(&r.x, &r.y)
+);
+
+wire_export!(
+    /// Jarque-Bera normality test: → `{statistic, df, p_value}`, the WebAssembly binding's result.
+    uanalytics_jarque_bera_test,
+    DataReq,
+    |r| crate::wire::hypothesis::jarque_bera_dto(&r.data)
+);
+
+wire_export!(
+    /// Shapiro-Wilk normality test (Royston 1995): → `{w, p_value}`, the WebAssembly binding's result.
+    uanalytics_shapiro_wilk_test,
+    DataReq,
+    |r| crate::wire::hypothesis::shapiro_wilk_dto(&r.data)
+);
+
+wire_export!(
+    /// Mann-Kendall trend test with Sen's slope: → `{s_statistic, variance, z_statistic, p_value, kendall_tau, sen_slope}`, the WebAssembly binding's result.
+    uanalytics_mann_kendall_test,
+    DataReq,
+    |r| crate::wire::hypothesis::mann_kendall_dto(&r.data)
+);
+
+wire_export!(
+    /// One-way ANOVA: → `{f_statistic, df_between, df_within, p_value, ss_between, ss_within}`, the WebAssembly binding's result.
+    uanalytics_one_way_anova,
+    GroupsReq,
+    |r| crate::wire::hypothesis::one_way_anova_dto(&r.groups)
+);
+
+wire_export!(
+    /// Kruskal-Wallis test: → `{statistic, df, p_value}`, the WebAssembly binding's result.
+    uanalytics_kruskal_wallis_test,
+    GroupsReq,
+    |r| crate::wire::hypothesis::groups_test_dto("kruskal_wallis_test", &r.groups)
+);
+
+wire_export!(
+    /// Levene test of equal variances: → `{statistic, df, p_value}`, the WebAssembly binding's result.
+    uanalytics_levene_test,
+    GroupsReq,
+    |r| crate::wire::hypothesis::groups_test_dto("levene_test", &r.groups)
+);
+
+wire_export!(
+    /// Bartlett test of equal variances: → `{statistic, df, p_value}`, the WebAssembly binding's result.
+    uanalytics_bartlett_test,
+    GroupsReq,
+    |r| crate::wire::hypothesis::groups_test_dto("bartlett_test", &r.groups)
+);
+
+wire_export!(
+    /// Chi-squared goodness of fit: → `{statistic, df, p_value}`, the WebAssembly binding's result.
+    uanalytics_chi_squared_goodness_of_fit,
+    GofReq,
+    |r| crate::wire::hypothesis::chi_squared_gof_dto(&r.observed, &r.expected)
+);
+
+wire_export!(
+    /// Chi-squared test of independence on a contingency table: → `{statistic, df, p_value}`, the WebAssembly binding's result.
+    uanalytics_chi_squared_independence,
+    TableReq,
+    |r| crate::wire::hypothesis::chi_squared_independence_dto(&r.table)
+);
+
+wire_export!(
+    /// Fisher's exact test on a 2×2 table of whole counts: → `{statistic, df, p_value}`, the WebAssembly binding's result.
+    uanalytics_fisher_exact_test,
+    FisherReq,
+    |r| crate::wire::hypothesis::fisher_exact_dto(&r.table)
+);
+
+wire_export!(
+    /// Bonferroni-adjusted p-values, input order: → `{values}`, the WebAssembly binding's result.
+    uanalytics_bonferroni_correction,
+    PValuesReq,
+    |r| crate::wire::hypothesis::p_adjust_dto("bonferroni_correction", &r.p_values).map(|v| serde_json::json!({ "values": v }))
+);
+
+wire_export!(
+    /// Benjamini-Hochberg (FDR) adjusted p-values, input order: → `{values}`, the WebAssembly binding's result.
+    uanalytics_benjamini_hochberg,
+    PValuesReq,
+    |r| crate::wire::hypothesis::p_adjust_dto("benjamini_hochberg", &r.p_values).map(|v| serde_json::json!({ "values": v }))
+);
+
 // ── Point processes (event-time trend) ─────────────────────
 
 #[cfg(feature = "ffi")]
@@ -1265,6 +1452,51 @@ mod tests {
         unsafe { uanalytics_free_string(out) };
         let value = serde_json::from_str(&body).expect("body is JSON");
         (code, value)
+    }
+
+    #[test]
+    fn hypothesis_tests_round_trip_with_the_wasm_codes() {
+        let (code, b) = call(
+            uanalytics_two_sample_t_test,
+            r#"{"a": [5.1, 4.9, 5.3, 5.0], "b": [5.6, 5.8, 5.5, 5.9, 5.7]}"#,
+        );
+        assert_eq!(code, 0, "{b}");
+        assert!(b["p_value"].as_f64().unwrap() < 0.05);
+        let (code, b) = call(
+            uanalytics_one_way_anova,
+            r#"{"groups": [[1, 2, 3], [2, 3, 4], [5, 6, 7]]}"#,
+        );
+        assert_eq!((code, b["df_between"].as_u64()), (0, Some(2)), "{b}");
+        let (_, b) = call(
+            uanalytics_fisher_exact_test,
+            r#"{"table": [[8, 2], [1, 5]]}"#,
+        );
+        assert!(b["p_value"].as_f64().unwrap() < 0.05, "{b}");
+        let (_, b) = call(
+            uanalytics_benjamini_hochberg,
+            r#"{"p_values": [0.01, 0.04, 0.03, 0.2]}"#,
+        );
+        let v: Vec<f64> = serde_json::from_value(b["values"].clone()).unwrap();
+        assert!((v[1] - 0.04 / 3.0 * 4.0).abs() < 1e-12 && (v[3] - 0.2).abs() < 1e-12);
+        let (code, b) = call(uanalytics_paired_t_test, r#"{"x": [1, 2, 3], "y": [1, 2]}"#);
+        assert_eq!(
+            (code, b["code"].as_str()),
+            (-3, Some("dimension_mismatch")),
+            "{b}"
+        );
+        let (code, b) = call(uanalytics_mann_kendall_test, r#"{"data": [1, 2]}"#);
+        assert_eq!(
+            (code, b["code"].as_str(), b["min"].as_f64()),
+            (-3, Some("insufficient_data"), Some(4.0))
+        );
+        let (code, b) = call(
+            uanalytics_bonferroni_correction,
+            r#"{"p_values": [0.5, 1.5]}"#,
+        );
+        assert_eq!(
+            (code, b["code"].as_str(), b["index"].as_u64()),
+            (-3, Some("parameter_out_of_range"), Some(1))
+        );
     }
 
     #[test]

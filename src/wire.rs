@@ -344,9 +344,7 @@ pub(crate) mod code {
     /// A setting refused for a reason a range cannot state (`[lo, hi]` with
     /// `lo >= hi`).
     pub(crate) const INVALID_OPTION: &str = "invalid_option";
-    /// Arrays that must have the same length do not. (Its users -- the
-    /// hypothesis tests and multi-signal PELT -- are WebAssembly-only so far.)
-    #[cfg(feature = "wasm")]
+    /// Arrays that must have the same length do not.
     pub(crate) const DIMENSION_MISMATCH: &str = "dimension_mismatch";
     /// An option given a name the function does not know. `parameter` names it.
     pub(crate) const UNKNOWN_OPTION: &str = "unknown_option";
@@ -1063,7 +1061,6 @@ pub(crate) fn t_chart_dto(times: &[f64]) -> Result<TChartDto, WireError> {
 // an expected frequency -- and refuses with the argument and the row. What is
 // left when the test still returns `None` is data with no variation, refused
 // as `invalid_input` naming the argument.
-#[cfg(feature = "wasm")]
 pub(crate) mod hypothesis {
     use super::*;
 

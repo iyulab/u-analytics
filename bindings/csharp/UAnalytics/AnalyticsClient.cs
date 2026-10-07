@@ -233,6 +233,79 @@ public sealed class AnalyticsClient : IDisposable
     public double PpmToSigma(double ppm)
         => CallNative(NativeInterop.uanalytics_ppm_to_sigma, new { ppm }).GetProperty("value").GetDouble();
 
+    // ── Hypothesis tests (same results as the WASM binding) ──
+
+    /// <summary>One-sample t test of <paramref name="data"/> against <paramref name="mu0"/>: <c>statistic</c>, <c>df</c>, <c>p_value</c>.</summary>
+    public JsonElement OneSampleTTest(double[] data, double mu0)
+        => CallNative(NativeInterop.uanalytics_one_sample_t_test, new { data, mu0 });
+
+    /// <summary>Welch two-sample t test: <c>statistic</c>, <c>df</c>, <c>p_value</c>.</summary>
+    public JsonElement TwoSampleTTest(double[] a, double[] b)
+        => CallNative(NativeInterop.uanalytics_two_sample_t_test, new { a, b });
+
+    /// <summary>Paired t test (same length): <c>statistic</c>, <c>df</c>, <c>p_value</c>.</summary>
+    public JsonElement PairedTTest(double[] x, double[] y)
+        => CallNative(NativeInterop.uanalytics_paired_t_test, new { x, y });
+
+    /// <summary>Mann-Whitney U test: <c>statistic</c>, <c>df</c>, <c>p_value</c>.</summary>
+    public JsonElement MannWhitneyUTest(double[] a, double[] b)
+        => CallNative(NativeInterop.uanalytics_mann_whitney_u_test, new { a, b });
+
+    /// <summary>Wilcoxon signed-rank test (pairs with x = y dropped): <c>statistic</c>, <c>df</c>, <c>p_value</c>.</summary>
+    public JsonElement WilcoxonSignedRankTest(double[] x, double[] y)
+        => CallNative(NativeInterop.uanalytics_wilcoxon_signed_rank_test, new { x, y });
+
+    /// <summary>Jarque-Bera normality test: <c>statistic</c>, <c>df</c>, <c>p_value</c>.</summary>
+    public JsonElement JarqueBeraTest(double[] data)
+        => CallNative(NativeInterop.uanalytics_jarque_bera_test, new { data });
+
+    /// <summary>Shapiro-Wilk normality test (Royston 1995): <c>w</c>, <c>p_value</c>.</summary>
+    public JsonElement ShapiroWilkTest(double[] data)
+        => CallNative(NativeInterop.uanalytics_shapiro_wilk_test, new { data });
+
+    /// <summary>Mann-Kendall trend test with Kendall's tau and Sen's slope.</summary>
+    public JsonElement MannKendallTest(double[] data)
+        => CallNative(NativeInterop.uanalytics_mann_kendall_test, new { data });
+
+    /// <summary>One-way ANOVA across <paramref name="groups"/>.</summary>
+    public JsonElement OneWayAnova(double[][] groups)
+        => CallNative(NativeInterop.uanalytics_one_way_anova, new { groups });
+
+    /// <summary>Kruskal-Wallis test across <paramref name="groups"/>.</summary>
+    public JsonElement KruskalWallisTest(double[][] groups)
+        => CallNative(NativeInterop.uanalytics_kruskal_wallis_test, new { groups });
+
+    /// <summary>Levene test of equal variances across <paramref name="groups"/>.</summary>
+    public JsonElement LeveneTest(double[][] groups)
+        => CallNative(NativeInterop.uanalytics_levene_test, new { groups });
+
+    /// <summary>Bartlett test of equal variances across <paramref name="groups"/>.</summary>
+    public JsonElement BartlettTest(double[][] groups)
+        => CallNative(NativeInterop.uanalytics_bartlett_test, new { groups });
+
+    /// <summary>Chi-squared goodness of fit of <paramref name="observed"/> counts against <paramref name="expected"/>.</summary>
+    public JsonElement ChiSquaredGoodnessOfFit(double[] observed, double[] expected)
+        => CallNative(NativeInterop.uanalytics_chi_squared_goodness_of_fit, new { observed, expected });
+
+    /// <summary>Chi-squared test of independence on a contingency <paramref name="table"/>.</summary>
+    public JsonElement ChiSquaredIndependence(double[][] table)
+        => CallNative(NativeInterop.uanalytics_chi_squared_independence, new { table });
+
+    /// <summary>Fisher's exact test on a 2×2 <paramref name="table"/> of whole counts.</summary>
+    public JsonElement FisherExactTest(long[][] table)
+        => CallNative(NativeInterop.uanalytics_fisher_exact_test, new { table });
+
+    /// <summary>Bonferroni-adjusted p-values, in input order.</summary>
+    public double[] BonferroniCorrection(double[] pValues)
+        => Values(CallNative(NativeInterop.uanalytics_bonferroni_correction, new { p_values = pValues }));
+
+    /// <summary>Benjamini-Hochberg (false discovery rate) adjusted p-values, in input order.</summary>
+    public double[] BenjaminiHochberg(double[] pValues)
+        => Values(CallNative(NativeInterop.uanalytics_benjamini_hochberg, new { p_values = pValues }));
+
+    private static double[] Values(JsonElement body)
+        => body.GetProperty("values").EnumerateArray().Select(v => v.GetDouble()).ToArray();
+
     // ── Event-time trend (one unit's events: failures of a repairable system, incidents, ...) ──
 
     /// <summary>

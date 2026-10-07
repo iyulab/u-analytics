@@ -833,6 +833,17 @@ scalar as `{ "sigma": s }` / `{ "ppm": p }` → `{ "value": … }` (`uanalytics_
 `uanalytics_ppm_to_sigma`), and take `{ "failure_times": [...] }` for the fits
 (`uanalytics_weibull_mle`, `uanalytics_weibull_mrr`); the responses are the WASM ones.
 
+The hypothesis tests take their WASM arguments as one object and return the WASM
+results — `uanalytics_one_sample_t_test` `{data, mu0}`, `uanalytics_two_sample_t_test` /
+`uanalytics_mann_whitney_u_test` `{a, b}`, `uanalytics_paired_t_test` /
+`uanalytics_wilcoxon_signed_rank_test` `{x, y}`, `uanalytics_jarque_bera_test` /
+`uanalytics_shapiro_wilk_test` / `uanalytics_mann_kendall_test` `{data}`,
+`uanalytics_one_way_anova` / `uanalytics_kruskal_wallis_test` / `uanalytics_levene_test` /
+`uanalytics_bartlett_test` `{groups}`, `uanalytics_chi_squared_goodness_of_fit`
+`{observed, expected}`, `uanalytics_chi_squared_independence` / `uanalytics_fisher_exact_test`
+`{table}`, and `uanalytics_bonferroni_correction` / `uanalytics_benjamini_hochberg`
+`{p_values}` → `{values}`.
+
 Three entry points exist only on the FFI:
 
 ```ts

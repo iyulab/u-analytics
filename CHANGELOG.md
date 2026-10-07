@@ -40,6 +40,13 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   `uanalytics_boxcox_capability`, `uanalytics_sigma_to_ppm` and
   `uanalytics_ppm_to_sigma` — both transports build them from one shared
   implementation.
+- The C ABI carries the hypothesis tests the WebAssembly binding has —
+  t (one-sample, Welch, paired), Mann-Whitney, Wilcoxon, Jarque-Bera,
+  Shapiro-Wilk, Mann-Kendall, one-way ANOVA, Kruskal-Wallis, Levene, Bartlett,
+  χ² goodness of fit and independence, Fisher's exact, Bonferroni and
+  Benjamini-Hochberg — from the same implementation, with the same codes.
+  `UAnalytics` gains a method for each (`TwoSampleTTest`, `OneWayAnova`,
+  `BenjaminiHochberg`, …).
 - `UAnalytics`: `WeibullMrr`, `WeibullReliability`, `BoxCoxCapability`,
   `SigmaToPpm`, `PpmToSigma`; `AnalyticsException` gains `Parameter` and
   `Details` (the whole error body, with the values behind the reason).
