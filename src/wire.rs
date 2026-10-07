@@ -142,6 +142,18 @@ pub(crate) fn violation_name(v: crate::spc::ViolationType) -> &'static str {
     }
 }
 
+/// Every run-rule name `rules` accepts — the values `violations` reports.
+pub(crate) const RULE_NAMES: &[&str] = &[
+    "BeyondLimits",
+    "NineOneSide",
+    "SixTrend",
+    "FourteenAlternating",
+    "TwoOfThreeBeyond2Sigma",
+    "FourOfFiveBeyond1Sigma",
+    "FifteenWithin1Sigma",
+    "EightBeyond1Sigma",
+];
+
 /// Parse an optional `{ rules: [...] }` options object into a rule set.
 ///
 /// Absent, `undefined`, `null` or an object without `rules` all mean "the
@@ -149,7 +161,7 @@ pub(crate) fn violation_name(v: crate::spc::ViolationType) -> &'static str {
 /// had. Split out from the binding so it can be exercised without a `JsValue`.
 pub(crate) fn rules_from_json(
     options: Option<serde_json::Value>,
-) -> Result<crate::spc::RuleSet, String> {
+) -> Result<crate::spc::RuleSet, WireError> {
     use crate::spc::{RuleSet, ViolationType};
 
     let Some(value) = options else {
@@ -164,15 +176,25 @@ pub(crate) fn rules_from_json(
     if names.is_null() {
         return Ok(RuleSet::default());
     }
-    let names = names
-        .as_array()
-        .ok_or_else(|| "rules: expected an array of rule names".to_string())?;
+    let names = names.as_array().ok_or_else(|| {
+        WireError::new(
+            code::MALFORMED_INPUT,
+            None,
+            "rules: expected an array of rule names",
+        )
+        .about("rules")
+    })?;
 
     let mut set = RuleSet::none();
     for name in names {
-        let name = name
-            .as_str()
-            .ok_or_else(|| "rules: expected an array of rule names".to_string())?;
+        let name = name.as_str().ok_or_else(|| {
+            WireError::new(
+                code::MALFORMED_INPUT,
+                None,
+                "rules: expected an array of rule names",
+            )
+            .about("rules")
+        })?;
         let rule = match name {
             "BeyondLimits" => ViolationType::BeyondLimits,
             "NineOneSide" => ViolationType::NineOneSide,
@@ -182,11 +204,8 @@ pub(crate) fn rules_from_json(
             "FourOfFiveBeyond1Sigma" => ViolationType::FourOfFiveBeyond1Sigma,
             "FifteenWithin1Sigma" => ViolationType::FifteenWithin1Sigma,
             "EightBeyond1Sigma" => ViolationType::EightBeyond1Sigma,
-            other => {
-                return Err(format!(
-                    "rules: unknown rule {other:?} -- the names are the values `violations` reports"
-                ))
-            }
+            // The names are the values `violations` reports.
+            other => return Err(WireError::unknown_option("rules", other, RULE_NAMES)),
         };
         set = set.with(rule);
     }
@@ -219,10 +238,14 @@ pub(crate) fn point_dtos(points: &[crate::spc::ChartPoint]) -> Vec<ChartPointDto
 /// just learned to handle -- a disagreement no test in either crate could see,
 /// because each one was right about its own copy.
 pub(crate) fn subgroup_size(subgroups: &[Vec<f64>]) -> Result<usize, WireError> {
-    subgroups
-        .first()
-        .map(Vec::len)
-        .ok_or_else(|| WireError::insufficient_data("subgroups: at least one subgroup required"))
+    subgroups.first().map(Vec::len).ok_or_else(|| {
+        WireError::too_few(
+            "subgroups",
+            1,
+            0,
+            "subgroups: at least one subgroup required",
+        )
+    })
 }
 
 /// A refused input, in the one shape every transport reports.
@@ -249,6 +272,35 @@ pub(crate) struct WireError {
     pub(crate) parameter: Option<std::borrow::Cow<'static, str>>,
     /// Human-readable description.
     pub(crate) message: String,
+    /// The values behind the reason, by name: `min` / `max` (`null` on an
+    /// open side) and `got` for a value out of range, `got` and `expected`
+    /// for an unknown option name, `min` and `got` for too few values. Set
+    /// as properties next to `code` on the WebAssembly `Error`, and as keys
+    /// next to `code` in the C error body.
+    #[serde(skip)]
+    pub(crate) details: Vec<(&'static str, Detail)>,
+}
+
+/// A value carried in [`WireError::details`].
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Detail {
+    Num(f64),
+    Text(String),
+    List(Vec<&'static str>),
+    Null,
+}
+
+impl Detail {
+    /// The value as JSON — the C error body's rendering.
+    #[cfg(feature = "ffi")]
+    pub(crate) fn to_json(&self) -> serde_json::Value {
+        match self {
+            Detail::Num(n) => serde_json::json!(n),
+            Detail::Text(s) => serde_json::json!(s),
+            Detail::List(v) => serde_json::json!(v),
+            Detail::Null => serde_json::Value::Null,
+        }
+    }
 }
 
 /// Error codes. Kept as constants so the transports and their tests name the
@@ -285,6 +337,12 @@ pub(crate) mod code {
     pub(crate) const STANDARD_OUT_OF_RANGE: &str = "standard_out_of_range";
     /// An option outside its domain. `parameter` names which one.
     pub(crate) const PARAMETER_OUT_OF_RANGE: &str = "parameter_out_of_range";
+    /// An argument with nothing in it.
+    pub(crate) const EMPTY_INPUT: &str = "empty_input";
+    /// Arrays that must have the same length do not. (Its users -- the
+    /// hypothesis tests and multi-signal PELT -- are WebAssembly-only so far.)
+    #[cfg(feature = "wasm")]
+    pub(crate) const DIMENSION_MISMATCH: &str = "dimension_mismatch";
     /// An option given a name the function does not know. `parameter` names it.
     pub(crate) const UNKNOWN_OPTION: &str = "unknown_option";
     /// Event times that go backwards.
@@ -304,7 +362,73 @@ impl WireError {
             index,
             parameter: None,
             message: message.into(),
+            details: Vec::new(),
         }
+    }
+
+    /// Adds one of the values behind the reason.
+    pub(crate) fn with(mut self, key: &'static str, value: Detail) -> Self {
+        self.details.push((key, value));
+        self
+    }
+
+    /// An option given a name the function does not know: `parameter`, `got`
+    /// and the names it does know as `expected`.
+    pub(crate) fn unknown_option(
+        parameter: &'static str,
+        got: &str,
+        expected: &[&'static str],
+    ) -> Self {
+        Self::new(
+            code::UNKNOWN_OPTION,
+            None,
+            format!(
+                "{parameter}: unknown name {got:?}; expected one of {}",
+                expected.join(", ")
+            ),
+        )
+        .about(parameter)
+        .with("got", Detail::Text(got.to_string()))
+        .with("expected", Detail::List(expected.to_vec()))
+    }
+
+    /// A number outside `[min, max]`; `None` is an open side (sent as `null`).
+    pub(crate) fn out_of_range(
+        parameter: &'static str,
+        min: Option<f64>,
+        max: Option<f64>,
+        got: f64,
+        message: impl Into<String>,
+    ) -> Self {
+        let side = |b: Option<f64>| b.map_or(Detail::Null, Detail::Num);
+        Self::new(code::PARAMETER_OUT_OF_RANGE, None, message)
+            .about(parameter)
+            .with("min", side(min))
+            .with("max", side(max))
+            .with("got", Detail::Num(got))
+    }
+
+    /// Fewer values than needed: `parameter`, `min` and `got`.
+    pub(crate) fn too_few(
+        parameter: impl Into<std::borrow::Cow<'static, str>>,
+        min: usize,
+        got: usize,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::new(code::INSUFFICIENT_DATA, None, message)
+            .about(parameter)
+            .with("min", Detail::Num(min as f64))
+            .with("got", Detail::Num(got as f64))
+    }
+
+    /// An argument with nothing in it.
+    pub(crate) fn empty_input(parameter: &'static str) -> Self {
+        Self::new(
+            code::EMPTY_INPUT,
+            None,
+            format!("{parameter} must not be empty"),
+        )
+        .about(parameter)
     }
 
     /// Names the option a refusal is about, alongside its code.
@@ -348,8 +472,11 @@ impl WireError {
         use crate::spc::ChartInputError;
         match error {
             ChartInputError::Sample { index, error } => Self::chart(label, Some(*index), error),
-            ChartInputError::TooFewSamples { .. } => {
-                Self::insufficient_data(format!("{label}: {error}"))
+            ChartInputError::TooFewSamples { min, got } => {
+                Self::new(code::INSUFFICIENT_DATA, None, format!("{label}: {error}"))
+                    .about(label.to_string())
+                    .with("min", Detail::Num(*min as f64))
+                    .with("got", Detail::Num(*got as f64))
             }
             ChartInputError::Standard(error) => Self::chart(label, None, error),
         }
@@ -656,9 +783,9 @@ pub(crate) fn p_chart_dto(
         None => PChart::new(),
     };
     add_rows(samples, "samples", |&(d, n)| chart.add_sample(d, n))?;
-    let p_bar = chart
-        .p_bar()
-        .ok_or_else(|| WireError::insufficient_data("samples: at least 1 sample is needed"))?;
+    let p_bar = chart.p_bar().ok_or_else(|| {
+        WireError::too_few("samples", 1, 0, "samples: at least 1 sample is needed")
+    })?;
     Ok(PChartDto {
         p_bar,
         points: attribute_point_dtos(chart.points()),
@@ -766,11 +893,13 @@ pub(crate) fn at_least(
     if values.len() >= min {
         Ok(values)
     } else {
-        Err(WireError::insufficient_data(format!(
-            "{param}: at least {min} values are needed, got {}",
-            values.len()
+        let got = values.len();
+        Err(WireError::too_few(
+            param,
+            min,
+            got,
+            format!("{param}: at least {min} values are needed, got {got}"),
         ))
-        .about(param))
     }
 }
 
@@ -804,7 +933,7 @@ pub(crate) fn np_chart_dto(
     add_rows(defectives, "defectives", |&d| chart.add_sample(d))?;
     let (ucl, cl, lcl) = chart
         .control_limits()
-        .ok_or_else(|| WireError::insufficient_data("defectives must not be empty"))?;
+        .ok_or_else(|| WireError::too_few("defectives", 1, 0, "defectives must not be empty"))?;
     Ok(FixedLimitChartDto {
         cl,
         ucl,
@@ -823,7 +952,7 @@ pub(crate) fn c_chart_dto(defects: &[u64]) -> Result<FixedLimitChartDto, WireErr
     }
     let (ucl, cl, lcl) = chart
         .control_limits()
-        .ok_or_else(|| WireError::insufficient_data("defects must not be empty"))?;
+        .ok_or_else(|| WireError::too_few("defects", 1, 0, "defects must not be empty"))?;
     Ok(FixedLimitChartDto {
         cl,
         ucl,
@@ -853,7 +982,7 @@ pub(crate) fn u_chart_dto(
     add_rows(raw, "samples", |&(d, u)| chart.add_sample(d, u))?;
     let u_bar = chart
         .u_bar()
-        .ok_or_else(|| WireError::insufficient_data("samples must not be empty"))?;
+        .ok_or_else(|| WireError::too_few("samples", 1, 0, "samples must not be empty"))?;
     Ok(UChartDto {
         u_bar,
         points: attribute_point_dtos(chart.points()),
@@ -1011,7 +1140,7 @@ pub(crate) mod hypothesis {
             Ok(())
         } else {
             Err(WireError::new(
-                "dimension_mismatch",
+                code::DIMENSION_MISMATCH,
                 None,
                 format!(
                     "{yn} has {} values but {xn} has {}; the test pairs them",
@@ -1026,11 +1155,12 @@ pub(crate) mod hypothesis {
     /// At least two groups, each with at least `min` values.
     fn groups_of(groups: &[Vec<f64>], min: usize) -> Result<(), WireError> {
         if groups.len() < 2 {
-            return Err(WireError::insufficient_data(format!(
-                "groups: at least 2 groups are needed, got {}",
-                groups.len()
-            ))
-            .about("groups"));
+            return Err(WireError::too_few(
+                "groups",
+                2,
+                groups.len(),
+                format!("groups: at least 2 groups are needed, got {}", groups.len()),
+            ));
         }
         if let Some(i) = groups.iter().position(|g| g.len() < min) {
             return Err(WireError::new(
@@ -1200,22 +1330,28 @@ pub(crate) mod hypothesis {
         min_cols: usize,
     ) -> Result<usize, WireError> {
         if table.len() < min_rows {
-            return Err(WireError::insufficient_data(format!(
-                "table: at least {min_rows} rows are needed, got {}",
-                table.len()
-            ))
-            .about("table"));
+            return Err(WireError::too_few(
+                "table",
+                min_rows,
+                table.len(),
+                format!(
+                    "table: at least {min_rows} rows are needed, got {}",
+                    table.len()
+                ),
+            ));
         }
         let cols = table[0].len();
         if cols < min_cols {
-            return Err(WireError::insufficient_data(format!(
-                "table: at least {min_cols} columns are needed, got {cols}"
-            ))
-            .about("table"));
+            return Err(WireError::too_few(
+                "table",
+                min_cols,
+                cols,
+                format!("table: at least {min_cols} columns are needed, got {cols}"),
+            ));
         }
         if let Some(i) = table.iter().position(|r| r.len() != cols) {
             return Err(WireError::new(
-                "dimension_mismatch",
+                code::DIMENSION_MISMATCH,
                 Some(i),
                 format!(
                     "table[{i}] has {} cells but table[0] has {cols}; every row needs the same number",
@@ -1261,7 +1397,7 @@ pub(crate) mod hypothesis {
         let rows = as_array(table, "table", "a 2 x 2 array of counts")?;
         if rows.len() != 2 {
             return Err(WireError::new(
-                "dimension_mismatch",
+                code::DIMENSION_MISMATCH,
                 None,
                 format!(
                     "table: Fisher's exact test takes 2 rows, got {}",
@@ -1275,7 +1411,7 @@ pub(crate) mod hypothesis {
             let row = count_rows(row, &format!("table[{i}]"))?;
             if row.len() != 2 {
                 return Err(WireError::new(
-                    "dimension_mismatch",
+                    code::DIMENSION_MISMATCH,
                     Some(i),
                     format!(
                         "table[{i}]: Fisher's exact test takes 2 columns, got {}",
@@ -1674,22 +1810,54 @@ pub(crate) fn gage_rr_anova_dto(dto: GageRRInputDto) -> Result<GageRRAnovaResult
     })
 }
 
-pub(crate) fn pelt_dto(input: PeltInputDto) -> Result<PeltResultDto, String> {
-    if input.data.is_empty() {
-        return Err("data must not be empty".to_owned());
+/// A PELT detector from the wire options, naming the option a refusal is about.
+pub(crate) fn pelt_from(
+    cost: &str,
+    penalty: &PeltPenaltyDto,
+    min_segment_len: usize,
+) -> Result<crate::detection::Pelt, WireError> {
+    use crate::detection::{CostFunction, Penalty};
+    let cost = match cost {
+        "l2" => CostFunction::L2,
+        "normal" => CostFunction::Normal,
+        other => return Err(WireError::unknown_option("cost", other, &["l2", "normal"])),
+    };
+    let penalty = match *penalty {
+        PeltPenaltyDto::Named(ref s) if s == "bic" => Penalty::Bic,
+        PeltPenaltyDto::Named(ref s) => {
+            return Err(WireError::unknown_option("penalty", s, &["bic"]))
+        }
+        PeltPenaltyDto::Value(v) if !(v.is_finite() && v > 0.0) => {
+            return Err(WireError::out_of_range(
+                "penalty",
+                Some(0.0),
+                None,
+                v,
+                format!("penalty must be \"bic\" or a finite number > 0, got {v}"),
+            ))
+        }
+        PeltPenaltyDto::Value(v) => Penalty::Custom(v),
+    };
+    if min_segment_len < 2 {
+        return Err(WireError::out_of_range(
+            "min_segment_len",
+            Some(2.0),
+            None,
+            min_segment_len as f64,
+            format!("min_segment_len must be at least 2, got {min_segment_len}"),
+        ));
     }
-    let cost = match input.cost.as_str() {
-        "l2" => crate::detection::CostFunction::L2,
-        "normal" => crate::detection::CostFunction::Normal,
-        other => return Err(format!("unknown cost function: {other}")),
-    };
-    let penalty = match input.penalty {
-        PeltPenaltyDto::Named(ref s) if s == "bic" => crate::detection::Penalty::Bic,
-        PeltPenaltyDto::Named(ref s) => return Err(format!("unknown penalty: {s}")),
-        PeltPenaltyDto::Value(v) => crate::detection::Penalty::Custom(v),
-    };
-    let pelt = crate::detection::Pelt::with_min_segment_len(cost, penalty, input.min_segment_len)
-        .ok_or("invalid parameters (penalty must be positive, min_segment_len >= 2)")?;
+    Ok(
+        crate::detection::Pelt::with_min_segment_len(cost, penalty, min_segment_len)
+            .expect("cost, penalty and min_segment_len were checked above"),
+    )
+}
+
+pub(crate) fn pelt_dto(input: PeltInputDto) -> Result<PeltResultDto, WireError> {
+    if input.data.is_empty() {
+        return Err(WireError::empty_input("data"));
+    }
+    let pelt = pelt_from(&input.cost, &input.penalty, input.min_segment_len)?;
     let result = pelt.detect(&input.data);
     Ok(PeltResultDto {
         n_segments: result.changepoints.len() + 1,
@@ -2120,8 +2288,8 @@ pub(crate) mod point_process {
     fn refusal(e: PointProcessError) -> WireError {
         let message = format!("times: {e}");
         match e {
-            PointProcessError::TooFewEvents { .. } => {
-                WireError::new(code::INSUFFICIENT_DATA, None, message).about("times")
+            PointProcessError::TooFewEvents { min, got } => {
+                WireError::too_few("times", min, got, message)
             }
             PointProcessError::NotFinite { index: Some(i) } => {
                 WireError::new(code::VALUE_NOT_FINITE, Some(i), message).about("times")
@@ -2230,6 +2398,83 @@ pub(crate) mod point_process {
 
 #[cfg(test)]
 mod input_error_tests {
+    #[test]
+    fn pelt_options_are_refused_by_name_with_their_values() {
+        use super::{pelt_dto, Detail, PeltInputDto, PeltPenaltyDto};
+        let input = |cost: &str, penalty: PeltPenaltyDto, min_segment_len: usize| PeltInputDto {
+            data: vec![0.0, 0.0, 5.0, 5.0],
+            cost: cost.to_string(),
+            penalty,
+            min_segment_len,
+        };
+        let bic = || PeltPenaltyDto::Named("bic".into());
+
+        let e = pelt_dto(input("l1", bic(), 2)).err().unwrap();
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("unknown_option", Some("cost"))
+        );
+        assert_eq!(
+            e.details[1],
+            ("expected", Detail::List(vec!["l2", "normal"]))
+        );
+
+        let e = pelt_dto(input("l2", PeltPenaltyDto::Named("aic".into()), 2))
+            .err()
+            .unwrap();
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("unknown_option", Some("penalty"))
+        );
+        assert_eq!(e.details[0], ("got", Detail::Text("aic".into())));
+
+        let e = pelt_dto(input("l2", PeltPenaltyDto::Value(-1.0), 2))
+            .err()
+            .unwrap();
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("parameter_out_of_range", Some("penalty"))
+        );
+        assert_eq!(
+            e.details,
+            vec![
+                ("min", Detail::Num(0.0)),
+                ("max", Detail::Null),
+                ("got", Detail::Num(-1.0))
+            ]
+        );
+
+        let e = pelt_dto(input("l2", bic(), 1)).err().unwrap();
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("parameter_out_of_range", Some("min_segment_len"))
+        );
+
+        let mut empty = input("l2", bic(), 2);
+        empty.data.clear();
+        let e = pelt_dto(empty).err().unwrap();
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("empty_input", Some("data"))
+        );
+    }
+
+    #[test]
+    fn too_few_values_carry_min_and_got() {
+        let e = super::at_least(vec![1.0], 3, "data").unwrap_err();
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("insufficient_data", Some("data"))
+        );
+        assert_eq!(
+            e.details,
+            vec![
+                ("min", super::Detail::Num(3.0)),
+                ("got", super::Detail::Num(1.0))
+            ]
+        );
+    }
+
     use super::code;
     use super::*;
     use serde_json::json;

@@ -8,6 +8,20 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** refusals use the shared reason codes and carry the values
+  behind them. An unknown run-rule name, PELT `cost` or named `penalty` was
+  `invalid_input` and is now `unknown_option` with `parameter`, `got` and
+  `expected` (the names it knows). A PELT `penalty` that is not a finite
+  number > 0 or a `min_segment_len` below 2 was `invalid_input` and is now
+  `parameter_out_of_range` with `parameter`, `min`, `max` and `got`. Empty PELT
+  `data` / `signals` is `empty_input`; multi-signal PELT signals of different
+  lengths are `dimension_mismatch` at the first that differs, with `expected`
+  and `got`. Every `insufficient_data` now carries `min` and `got`. The values
+  are properties of the WebAssembly `Error` and keys of the C error body (so
+  `AnalyticsException.Details` has them).
+
 ### Added
 
 - `point_process`: the trend of one unit's event times against a constant

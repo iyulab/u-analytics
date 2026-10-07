@@ -281,12 +281,14 @@ interface AnalyticsError extends Error {
 | `units_not_positive` | units inspected that are not a positive number |
 | `subgroup_length_mismatch` | a subgroup of a different length than the first |
 | `subgroup_size_out_of_range` | a subgroup size the factor tables do not cover |
-| `insufficient_data` | fewer samples than the chart needs (`index: null`) |
+| `insufficient_data` | fewer values than the function needs — `parameter` names the argument, `min` and `got` the counts (`index: null`) |
+| `empty_input` | an argument with nothing in it (`parameter`) |
+| `dimension_mismatch` | arrays that must have the same length do not — `index` is the first that differs, `expected` and `got` the lengths |
 | `standard_out_of_range` | a Phase I `p_bar`/`u_bar`/`phi` outside its domain — `parameter` names which |
-| `parameter_out_of_range` | an option outside its domain — `parameter` names which, and `message` states what it has to satisfy |
+| `parameter_out_of_range` | an option outside its domain — `parameter` names which, `min` / `max` (`null` on an open side) and `got` carry the bound and the value where the domain is a range |
 | `value_not_finite` | a NaN or ±Infinity anywhere in an argument — `parameter` is the path to it (`input.data`), `index` its position in that array, or `null` |
 | `malformed_input` | not the shape the function takes — a row that is not a pair, an unknown field |
-| `unknown_option` | an option given a name the function does not know — `parameter` names it (`observation.truncation`) |
+| `unknown_option` | an option given a name the function does not know — `parameter` names it (`rules`, `cost`, `penalty`, `observation.truncation`), `got` the name and `expected` the names it knows |
 | `events_unordered` | an event time earlier than the one before it (`index`) |
 | `event_after_end` | an event time after the end of observation (`index`) |
 | `invalid_input` | any other refusal; the message says what |

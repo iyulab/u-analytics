@@ -24,7 +24,7 @@ use crate::wire::{
         jarque_bera_dto, mann_kendall_dto, mann_whitney_dto, one_sample_t_dto, one_way_anova_dto,
         p_adjust_dto, paired_t_dto, shapiro_wilk_dto, two_sample_t_dto, wilcoxon_dto,
     },
-    imr_dto, laney_p_dto, laney_u_dto, np_chart_dto, p_chart_dto, pelt_dto,
+    imr_dto, laney_p_dto, laney_u_dto, np_chart_dto, p_chart_dto, pelt_dto, pelt_from,
     percentile_capability_dto,
     point_process::{
         check_truncation, laplace_dto, mil_hdbk_189_dto, power_law_dto, ObservationDto,
@@ -75,6 +75,19 @@ fn js_err(error: impl Into<WireError>) -> JsValue {
         .as_deref()
         .map_or(JsValue::NULL, JsValue::from_str);
     let _ = js_sys::Reflect::set(&js, &JsValue::from_str("parameter"), &parameter);
+    for (key, value) in &error.details {
+        let value = match value {
+            crate::wire::Detail::Num(n) => JsValue::from_f64(*n),
+            crate::wire::Detail::Text(s) => JsValue::from_str(s),
+            crate::wire::Detail::List(v) => v
+                .iter()
+                .map(|s| JsValue::from_str(s))
+                .collect::<js_sys::Array>()
+                .into(),
+            crate::wire::Detail::Null => JsValue::NULL,
+        };
+        let _ = js_sys::Reflect::set(&js, &JsValue::from_str(key), &value);
+    }
     js.into()
 }
 
@@ -1126,23 +1139,23 @@ pub fn detect_changepoints_multi(
     let input: MultiPeltInputDto = from_js(input, "input")?;
 
     if input.signals.is_empty() {
-        return Err(js_err("signals must not be empty"));
+        return Err(js_err(WireError::empty_input("signals")));
     }
-
-    let cost = match input.cost.as_str() {
-        "l2" => crate::detection::CostFunction::L2,
-        "normal" => crate::detection::CostFunction::Normal,
-        other => return Err(js_err(format!("unknown cost function: {other}"))),
-    };
-
-    let penalty = match input.penalty {
-        PeltPenaltyDto::Named(ref s) if s == "bic" => crate::detection::Penalty::Bic,
-        PeltPenaltyDto::Named(ref s) => return Err(js_err(format!("unknown penalty: {s}"))),
-        PeltPenaltyDto::Value(v) => crate::detection::Penalty::Custom(v),
-    };
-
-    let pelt = crate::detection::Pelt::with_min_segment_len(cost, penalty, input.min_segment_len)
-        .ok_or_else(|| js_err("invalid parameters"))?;
+    let expected = input.signals[0].len();
+    if let Some(i) = input.signals.iter().position(|s| s.len() != expected) {
+        let got = input.signals[i].len();
+        return Err(js_err(
+            WireError::new(
+                crate::wire::code::DIMENSION_MISMATCH,
+                Some(i),
+                format!("signals[{i}] has {got} values; signals[0] has {expected}"),
+            )
+            .about("signals")
+            .with("expected", crate::wire::Detail::Num(expected as f64))
+            .with("got", crate::wire::Detail::Num(got as f64)),
+        ));
+    }
+    let pelt = pelt_from(&input.cost, &input.penalty, input.min_segment_len).map_err(js_err)?;
 
     let refs: Vec<&[f64]> = input.signals.iter().map(|s| s.as_slice()).collect();
     let result = pelt
@@ -1952,10 +1965,26 @@ mod binding_contract_tests {
     #[test]
     fn rules_option_rejects_a_name_that_is_not_a_rule() {
         let err = rules_from_json(Some(serde_json::json!({ "rules": ["Rule1"] }))).unwrap_err();
-        assert!(err.contains("Rule1"), "{err}");
+        assert_eq!(
+            (err.code, err.parameter.as_deref()),
+            ("unknown_option", Some("rules"))
+        );
+        assert!(err.message.contains("Rule1"), "{err}");
+        assert_eq!(
+            err.details[0],
+            ("got", crate::wire::Detail::Text("Rule1".into()))
+        );
+        assert_eq!(
+            err.details[1],
+            (
+                "expected",
+                crate::wire::Detail::List(crate::wire::RULE_NAMES.to_vec())
+            )
+        );
         let err =
             rules_from_json(Some(serde_json::json!({ "rules": "BeyondLimits" }))).unwrap_err();
-        assert!(err.contains("array"), "{err}");
+        assert_eq!(err.code, "malformed_input");
+        assert!(err.message.contains("array"), "{err}");
     }
 
     use super::{capability_dto, from_json, CapabilityInputDto};

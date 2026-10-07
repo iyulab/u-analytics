@@ -70,9 +70,12 @@ fn write_error(
     error: impl Into<crate::wire::WireError>,
 ) -> i32 {
     let e = error.into();
-    let err = serde_json::json!({
+    let mut err = serde_json::json!({
         "error": e.message, "code": e.code, "index": e.index, "parameter": e.parameter,
     });
+    for (key, value) in &e.details {
+        err[*key] = value.to_json();
+    }
     match write_json(result_ptr, &err) {
         0 => status,
         write_failure => write_failure,
@@ -194,7 +197,9 @@ struct RunRulesRequest {
 }
 
 #[cfg(feature = "ffi")]
-fn rules_of(rules: Option<serde_json::Value>) -> Result<crate::spc::RuleSet, String> {
+fn rules_of(
+    rules: Option<serde_json::Value>,
+) -> Result<crate::spc::RuleSet, crate::wire::WireError> {
     crate::wire::rules_from_json(rules.map(|r| serde_json::json!({ "rules": r })))
 }
 
@@ -1207,6 +1212,29 @@ mod tests {
         unsafe { uanalytics_free_string(out) };
         let value = serde_json::from_str(&body).expect("body is JSON");
         (code, value)
+    }
+
+    #[test]
+    fn refusal_details_reach_the_c_body() {
+        let (code, b) = call(
+            uanalytics_detect_changepoints,
+            r#"{"data": [0, 0, 5, 5], "penalty": -1}"#,
+        );
+        assert_eq!(
+            (code, b["code"].as_str(), b["parameter"].as_str()),
+            (-3, Some("parameter_out_of_range"), Some("penalty"))
+        );
+        assert_eq!(
+            (b["min"].as_f64(), b["max"].is_null(), b["got"].as_f64()),
+            (Some(0.0), true, Some(-1.0))
+        );
+        let (_, b) = call(
+            uanalytics_detect_changepoints,
+            r#"{"data": [0, 0, 5, 5], "cost": "l1"}"#,
+        );
+        assert_eq!(b["code"], "unknown_option");
+        assert_eq!(b["expected"], serde_json::json!(["l2", "normal"]));
+        assert_eq!(b["got"], "l1");
     }
 
     #[test]
