@@ -1508,7 +1508,7 @@ mod tests {
 
         assert!(
             (sigma_within - sigma_overall).abs() > 1e-6,
-            "short-term and long-term sigma must differ on drifting subgroups:              within={sigma_within}, overall={sigma_overall}"
+            "short-term and long-term sigma must differ on drifting subgroups: within={sigma_within}, overall={sigma_overall}"
         );
     }
 }
