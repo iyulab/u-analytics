@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.5.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking (`UAnalytics`):** every `AnalyticsClient` method returns a typed record
+  instead of a `JsonElement` — `XbarRChartResult`, `CapabilityResult`,
+  `TrendTestResult`, `TestResult`, … — with the engine's fields as properties
+  (`p_value` → `PValue`). Values a result may lack are nullable properties. Closed
+  vocabularies are enums: `RunRule` for the `rules` argument and for each point's
+  `Violations`, `TrendDirection`, `SigmaSource` and `GageStatus` in results, and
+  `AdfModel`, `PeltCost` and `CorrelationMethod` for the options that were strings.
+  `BonferroniCorrection` and `BenjaminiHochberg` return `IReadOnlyList<double>`.
+- `UAnalytics` no longer uses reflection: requests are built as JSON nodes and
+  results are read through source-generated serialization, so the client works in
+  trimmed and NativeAOT applications (it threw `InvalidOperationException` there).
+  The package is marked `IsAotCompatible`. A response missing a field, or carrying
+  a null where the record has none, now fails the call instead of reading as zero.
+
+### Fixed
+
+- The `UAnalytics` README listed arm64 Linux, which the package does not carry; it now
+  lists the runtimes it ships and the glibc floor. Its usage example read a field
+  (`ucl`) that the X̄-R chart does not return.
+
 ## [0.19.0] - 2026-10-07
 
 The .NET client is `UAnalytics` 0.13.0.

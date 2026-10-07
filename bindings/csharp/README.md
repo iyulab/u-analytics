@@ -43,26 +43,42 @@ using UAnalytics;
 
 using var analytics = new AnalyticsClient();
 
-var chart = analytics.XbarRChart(new[]
-{
-    new[] { 10.1, 10.3, 9.8 },
-    new[] { 10.0, 10.2, 10.1 },
-    new[] { 9.9,  10.4, 10.2 },
-});
+XbarRChartResult chart = analytics.XbarRChart(
+[
+    [10.1, 10.3, 9.8],
+    [10.0, 10.2, 10.1],
+    [9.9,  10.4, 10.2],
+]);
 
-Console.WriteLine(chart.GetProperty("ucl").GetDouble());
+Console.WriteLine($"UCL {chart.XbarUcl:F3}, sigma {chart.SigmaHat:F3}, in control: {chart.InControl}");
+
+TrendTestResult trend = analytics.MilHdbk189Test([10, 19, 27, 34, 40, 45, 49, 52, 54, 55], end: null);
+if (trend.Direction == TrendDirection.Increasing && trend.PValue < 0.05)
+    Console.WriteLine("Failures are coming more often.");
 ```
 
-Every method returns a `System.Text.Json.JsonElement`, so a result can be read
-field by field or deserialized into your own type.
+Every method returns a record (`XbarRChartResult`, `CapabilityResult`, `TrendTestResult`, …)
+whose properties are the engine's result fields. A value the inputs do not define — a
+short-term index without a within-subgroup sigma, a t ratio of an exact fit — is `null`
+on a nullable property. Closed vocabularies are enums: `RunRule` (the run tests a chart
+applies and reports), `TrendDirection`, `SigmaSource`, `GageStatus`, and the options
+`AdfModel`, `PeltCost` and `CorrelationMethod`.
 
-Input that cannot be analysed is refused rather than approximated, with a code
-naming what was wrong and the index of the row it was wrong in.
+Input that cannot be analysed is refused rather than approximated: `AnalyticsException`
+carries a stable `Reason` (`insufficient_data`, `parameter_out_of_range`,
+`value_not_finite`, …), the `Parameter` it is about, the `Index` of the offending
+element, and the whole error body in `Details`.
+
+## Trimming and NativeAOT
+
+The client uses no reflection: requests are built as JSON nodes and results are read
+through source-generated serialization, and the package is marked `IsAotCompatible`.
+It runs unchanged in trimmed and NativeAOT applications, and in .NET file-based apps.
 
 ## Platforms
 
-Windows, Linux and macOS (x64 and arm64). The native library ships inside the
-package; no separate install is needed.
+The package carries the native library for `win-x64`, `linux-x64` (glibc 2.39 or
+later), `osx-x64` and `osx-arm64`.
 
 ## License
 
