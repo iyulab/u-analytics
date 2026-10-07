@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.5.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Added
+
+- C ABI `uanalytics_cusum`, `uanalytics_ewma`, `uanalytics_detect_changepoints_multi`
+  and `uanalytics_anderson_darling_normality`, taking and returning the WebAssembly
+  functions' JSON; `UAnalytics` `Cusum`, `Ewma`, `DetectChangepointsMulti` and
+  `AndersonDarlingNormality`.
+
+### Changed
+
+- **Breaking:** `cusum` and `ewma` name the parameter they refuse. Empty `data` is
+  `empty_input`; a `sigma`, `k`, `h`, `lambda` or `l_factor` outside its domain is
+  `parameter_out_of_range` with `parameter`, `min`, `max` and `got` (all were
+  `invalid_input` with the four parameters restated in one message).
+- **Breaking:** `detect_changepoints_multi` refuses signals with no values as
+  `empty_input`, as `detect_changepoints` already did for empty `data` (it returned
+  one segment).
+
 ## [0.18.0] - 2026-10-07
 
 Depends on u-numflow 0.9. The .NET client is `UAnalytics` 0.12.0.

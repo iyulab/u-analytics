@@ -814,6 +814,10 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_gage_rr_xbar_r` | `gage_rr_xbar_r(input)` | `input` as is |
 | `uanalytics_gage_rr_anova` | `gage_rr_anova(input)` | `input` as is |
 | `uanalytics_detect_changepoints` | `detect_changepoints(input)` | `input` as is |
+| `uanalytics_detect_changepoints_multi` | `detect_changepoints_multi(input)` | `input` as is |
+| `uanalytics_cusum` | `cusum(input)` | `input` as is |
+| `uanalytics_ewma` | `ewma(input)` | `input` as is |
+| `uanalytics_anderson_darling_normality` | `anderson_darling_normality(data)` | `{ data: [...] }` |
 | `uanalytics_estimate_period` | `estimate_period(input)` | `input` as is |
 | `uanalytics_spectral_residual` | `spectral_residual(input)` | `input` as is |
 

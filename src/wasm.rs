@@ -11,20 +11,21 @@
 //! u-analytics = { version = "...", features = ["wasm"] }
 //! ```
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 // The shapes below are the wire contract, shared with the C FFI so the two
 // transports cannot drift apart again. See `crate::wire`.
 use crate::wire::{
-    at_least, c_chart_dto, capability_dto, count_pairs, count_rows, default_cost, default_min_seg,
-    default_penalty, g_chart_dto, gage_rr_anova_dto, gage_rr_xbar_r_dto,
+    c_chart_dto, capability_dto, count_pairs, count_rows, cusum_dto, ewma_dto, g_chart_dto,
+    gage_rr_anova_dto, gage_rr_xbar_r_dto,
     hypothesis::{
-        chi_squared_gof_dto, chi_squared_independence_dto, fisher_exact_dto, groups_test_dto,
-        jarque_bera_dto, mann_kendall_dto, mann_whitney_dto, one_sample_t_dto, one_way_anova_dto,
-        p_adjust_dto, paired_t_dto, shapiro_wilk_dto, two_sample_t_dto, wilcoxon_dto,
+        anderson_darling_normality_dto, chi_squared_gof_dto, chi_squared_independence_dto,
+        fisher_exact_dto, groups_test_dto, jarque_bera_dto, mann_kendall_dto, mann_whitney_dto,
+        one_sample_t_dto, one_way_anova_dto, p_adjust_dto, paired_t_dto, shapiro_wilk_dto,
+        two_sample_t_dto, wilcoxon_dto,
     },
-    imr_dto, laney_p_dto, laney_u_dto, np_chart_dto, p_chart_dto, pelt_dto, pelt_from,
+    imr_dto, laney_p_dto, laney_u_dto, multi_pelt_dto, np_chart_dto, p_chart_dto, pelt_dto,
     percentile_capability_dto,
     point_process::{
         check_truncation, laplace_dto, mil_hdbk_189_dto, power_law_dto, ObservationDto,
@@ -36,22 +37,14 @@ use crate::wire::{
         WeibullReliabilityInputDto,
     },
     rules_from_json, run_rules_dto, sample_size_value, t_chart_dto, u_chart_dto, xbar_r_dto,
-    xbar_s_dto, AttributeStandardDto, CapabilityInputDto, GageRRInputDto, LimitsInputDto,
-    PeltInputDto, PeltPenaltyDto, PeltResultDto, PercentileCapabilityInputDto, SeasonalityInputDto,
-    SpectralResidualInputDto, WireError,
+    xbar_s_dto, AttributeStandardDto, CapabilityInputDto, CusumInputDto, EwmaInputDto,
+    GageRRInputDto, LimitsInputDto, MultiPeltInputDto, PeltInputDto, PercentileCapabilityInputDto,
+    SeasonalityInputDto, SpectralResidualInputDto, WireError,
 };
 
 // ---------------------------------------------------------------------------
 // Serializable DTO types
 // ---------------------------------------------------------------------------
-
-#[derive(Serialize, tsify::Tsify)]
-#[tsify(missing_as_null)]
-struct AdNormalityDto {
-    statistic: f64,
-    statistic_modified: f64,
-    p_value: f64,
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -619,22 +612,8 @@ pub fn process_capability(
 pub fn anderson_darling_normality(
     #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] data: JsValue,
 ) -> Result<JsValue, JsValue> {
-    let data = at_least(read_numbers(&data, "data").map_err(js_err)?, 3, "data").map_err(js_err)?;
-    let result = crate::testing::anderson_darling_normality(&data).ok_or_else(|| {
-        js_err(
-            WireError::invalid_input(
-                "data: every value is the same, so normality cannot be tested",
-            )
-            .about("data"),
-        )
-    })?;
-
-    let dto = AdNormalityDto {
-        statistic: result.statistic,
-        statistic_modified: result.statistic_modified,
-        p_value: result.p_value,
-    };
-    to_js(&dto)
+    let data = read_numbers(&data, "data").map_err(js_err)?;
+    to_js(&anderson_darling_normality_dto(&data).map_err(js_err)?)
 }
 
 /// Compute the Laney P' chart from (defectives, sample_size) pairs.
@@ -1099,24 +1078,6 @@ pub fn detect_changepoints(
 // Multi-signal PELT
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize, tsify::Tsify)]
-#[tsify(missing_as_null)]
-#[serde(deny_unknown_fields)]
-struct MultiPeltInputDto {
-    signals: Vec<Vec<f64>>,
-    #[serde(default = "default_cost")]
-    #[tsify(optional)]
-    #[tsify(type = "\"l2\" | \"normal\"")]
-    cost: String,
-    #[serde(default = "default_penalty")]
-    #[tsify(optional)]
-    #[tsify(type = "\"bic\" | number")]
-    penalty: PeltPenaltyDto,
-    #[serde(default = "default_min_seg")]
-    #[tsify(optional)]
-    min_segment_len: usize,
-}
-
 /// Detect changepoints in multi-signal data using PELT.
 ///
 /// # Input JSON
@@ -1143,36 +1104,7 @@ pub fn detect_changepoints_multi(
     #[wasm_bindgen(unchecked_param_type = "MultiPeltInputDto")] input: JsValue,
 ) -> Result<JsValue, JsValue> {
     let input: MultiPeltInputDto = from_js(input, "input")?;
-
-    if input.signals.is_empty() {
-        return Err(js_err(WireError::empty_input("signals")));
-    }
-    let expected = input.signals[0].len();
-    if let Some(i) = input.signals.iter().position(|s| s.len() != expected) {
-        let got = input.signals[i].len();
-        return Err(js_err(
-            WireError::new(
-                crate::wire::code::DIMENSION_MISMATCH,
-                Some(i),
-                format!("signals[{i}] has {got} values; signals[0] has {expected}"),
-            )
-            .about("signals")
-            .with("expected", crate::wire::Detail::Num(expected as f64))
-            .with("got", crate::wire::Detail::Num(got as f64)),
-        ));
-    }
-    let pelt = pelt_from(&input.cost, &input.penalty, input.min_segment_len).map_err(js_err)?;
-
-    let refs: Vec<&[f64]> = input.signals.iter().map(|s| s.as_slice()).collect();
-    let result = pelt
-        .detect_multi(&refs)
-        .ok_or_else(|| js_err("all signals must have the same length"))?;
-
-    let dto = PeltResultDto {
-        n_segments: result.changepoints.len() + 1,
-        changepoints: result.changepoints,
-    };
-    to_js(&dto)
+    to_js(&multi_pelt_dto(input).map_err(js_err)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -1253,91 +1185,6 @@ pub fn percentile_capability(
 // CUSUM / EWMA -- online (sequential) shift detection
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize, tsify::Tsify)]
-#[tsify(missing_as_null)]
-#[serde(deny_unknown_fields)]
-struct CusumInputDto {
-    data: Vec<f64>,
-    target: f64,
-    sigma: f64,
-    #[serde(default = "default_cusum_k")]
-    #[tsify(optional)]
-    k: f64,
-    #[serde(default = "default_cusum_h")]
-    #[tsify(optional)]
-    h: f64,
-}
-
-fn default_cusum_k() -> f64 {
-    0.5
-}
-
-fn default_cusum_h() -> f64 {
-    5.0
-}
-
-#[derive(Serialize, Debug, tsify::Tsify)]
-#[tsify(missing_as_null)]
-struct CusumPointDto {
-    index: usize,
-    s_upper: f64,
-    s_lower: f64,
-    signal: bool,
-}
-
-#[derive(Serialize, Debug, tsify::Tsify)]
-#[tsify(missing_as_null)]
-struct CusumDto {
-    /// Decision interval actually used, echoed so a caller can draw the
-    /// boundary without restating its own input. Unlike EWMA's widening
-    /// limits this one is constant, so it belongs to the chart, not the point.
-    h: f64,
-    points: Vec<CusumPointDto>,
-    signal_indices: Vec<usize>,
-    in_control: bool,
-}
-
-#[derive(Deserialize, tsify::Tsify)]
-#[tsify(missing_as_null)]
-#[serde(deny_unknown_fields)]
-struct EwmaInputDto {
-    data: Vec<f64>,
-    target: f64,
-    sigma: f64,
-    #[serde(default = "default_ewma_lambda")]
-    #[tsify(optional)]
-    lambda: f64,
-    #[serde(default = "default_ewma_l_factor")]
-    #[tsify(optional)]
-    l_factor: f64,
-}
-
-fn default_ewma_lambda() -> f64 {
-    0.2
-}
-
-fn default_ewma_l_factor() -> f64 {
-    3.0
-}
-
-#[derive(Serialize, Debug, tsify::Tsify)]
-#[tsify(missing_as_null)]
-struct EwmaPointDto {
-    index: usize,
-    ewma: f64,
-    ucl: f64,
-    lcl: f64,
-    signal: bool,
-}
-
-#[derive(Serialize, Debug, tsify::Tsify)]
-#[tsify(missing_as_null)]
-struct EwmaDto {
-    points: Vec<EwmaPointDto>,
-    signal_indices: Vec<usize>,
-    in_control: bool,
-}
-
 /// CUSUM chart (Page, 1954) -- detects small persistent shifts in the mean.
 ///
 /// # Input JSON
@@ -1371,47 +1218,7 @@ pub fn cusum(
     #[wasm_bindgen(unchecked_param_type = "CusumInputDto")] input: JsValue,
 ) -> Result<JsValue, JsValue> {
     let input: CusumInputDto = from_js(input, "input")?;
-    let dto = cusum_dto(input).map_err(js_err)?;
-    to_js(&dto)
-}
-
-/// The half of [`cusum`] below the `JsValue` boundary, so the contract is
-/// testable off `wasm32`.
-fn cusum_dto(input: CusumInputDto) -> Result<CusumDto, String> {
-    if input.data.is_empty() {
-        return Err("data must not be empty".to_owned());
-    }
-
-    let chart = crate::detection::Cusum::with_params(input.target, input.sigma, input.k, input.h)
-        .ok_or_else(|| {
-        format!(
-            "invalid parameters (target must be finite, sigma > 0, k >= 0, h > 0); \
-                 got target={}, sigma={}, k={}, h={}",
-            input.target, input.sigma, input.k, input.h
-        )
-    })?;
-
-    let results = chart.analyze(&input.data);
-    let signal_indices: Vec<usize> = results
-        .iter()
-        .filter(|r| r.signal)
-        .map(|r| r.index)
-        .collect();
-
-    Ok(CusumDto {
-        h: input.h,
-        in_control: signal_indices.is_empty(),
-        signal_indices,
-        points: results
-            .into_iter()
-            .map(|r| CusumPointDto {
-                index: r.index,
-                s_upper: r.s_upper,
-                s_lower: r.s_lower,
-                signal: r.signal,
-            })
-            .collect(),
-    })
+    to_js(&cusum_dto(input).map_err(js_err)?)
 }
 
 /// EWMA chart (Roberts, 1959) -- exponentially weighted moving average of the mean.
@@ -1445,52 +1252,7 @@ pub fn ewma(
     #[wasm_bindgen(unchecked_param_type = "EwmaInputDto")] input: JsValue,
 ) -> Result<JsValue, JsValue> {
     let input: EwmaInputDto = from_js(input, "input")?;
-    let dto = ewma_dto(input).map_err(js_err)?;
-    to_js(&dto)
-}
-
-/// The half of [`ewma`] below the `JsValue` boundary, so the contract is
-/// testable off `wasm32`.
-fn ewma_dto(input: EwmaInputDto) -> Result<EwmaDto, String> {
-    if input.data.is_empty() {
-        return Err("data must not be empty".to_owned());
-    }
-
-    let chart = crate::detection::Ewma::with_params(
-        input.target,
-        input.sigma,
-        input.lambda,
-        input.l_factor,
-    )
-    .ok_or_else(|| {
-        format!(
-            "invalid parameters (target must be finite, sigma > 0, 0 < lambda <= 1, \
-             l_factor > 0); got target={}, sigma={}, lambda={}, l_factor={}",
-            input.target, input.sigma, input.lambda, input.l_factor
-        )
-    })?;
-
-    let results = chart.analyze(&input.data);
-    let signal_indices: Vec<usize> = results
-        .iter()
-        .filter(|r| r.signal)
-        .map(|r| r.index)
-        .collect();
-
-    Ok(EwmaDto {
-        in_control: signal_indices.is_empty(),
-        signal_indices,
-        points: results
-            .into_iter()
-            .map(|r| EwmaPointDto {
-                index: r.index,
-                ewma: r.ewma,
-                ucl: r.ucl,
-                lcl: r.lcl,
-                signal: r.signal,
-            })
-            .collect(),
-    })
+    to_js(&ewma_dto(input).map_err(js_err)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -1871,7 +1633,7 @@ mod binding_contract_tests {
 
     #[test]
     fn rare_event_charts_need_three_values_and_say_so() {
-        let e = at_least(vec![1.0, 2.0], 3, "times").unwrap_err();
+        let e = crate::wire::at_least(vec![1.0, 2.0], 3, "times").unwrap_err();
         assert_eq!(e.code, crate::wire::code::INSUFFICIENT_DATA);
         assert!(e.message.contains("at least 3"), "{}", e.message);
         // The binding's minimum is the chart's: two values make no chart.
@@ -2576,9 +2338,11 @@ mod binding_contract_tests {
         let empty: super::CusumInputDto =
             super::from_json(json!({ "data": [], "target": 1.0, "sigma": 1.0 }), "input")
                 .expect("parses");
-        assert!(super::cusum_dto(empty)
-            .expect_err("empty")
-            .contains("empty"));
+        let e = super::cusum_dto(empty).expect_err("empty");
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("empty_input", Some("data"))
+        );
 
         let bad: super::CusumInputDto = super::from_json(
             json!({ "data": [1.0], "target": 1.0, "sigma": 0.0 }),
@@ -2586,7 +2350,11 @@ mod binding_contract_tests {
         )
         .expect("parses");
         let e = super::cusum_dto(bad).expect_err("sigma must be > 0");
-        assert!(e.contains("sigma"), "{e}");
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("parameter_out_of_range", Some("sigma")),
+            "{e}"
+        );
     }
 
     #[test]
@@ -2620,7 +2388,11 @@ mod binding_contract_tests {
         let empty: super::EwmaInputDto =
             super::from_json(json!({ "data": [], "target": 1.0, "sigma": 1.0 }), "input")
                 .expect("parses");
-        assert!(super::ewma_dto(empty).expect_err("empty").contains("empty"));
+        let e = super::ewma_dto(empty).expect_err("empty");
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("empty_input", Some("data"))
+        );
 
         for lambda in [0.0, 1.5] {
             let bad: super::EwmaInputDto = super::from_json(
@@ -2629,7 +2401,11 @@ mod binding_contract_tests {
             )
             .expect("parses");
             let e = super::ewma_dto(bad).expect_err("lambda out of range");
-            assert!(e.contains("lambda"), "{e}");
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some("lambda")),
+                "{e}"
+            );
         }
     }
 

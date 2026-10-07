@@ -1267,6 +1267,29 @@ pub(crate) mod hypothesis {
             .ok_or_else(|| no_variation("shapiro_wilk_test", "data"))
     }
 
+    /// Anderson-Darling normality (Stephens 1974): A², the small-sample A²* and its p-value.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct AdNormalityDto {
+        pub(crate) statistic: f64,
+        pub(crate) statistic_modified: f64,
+        pub(crate) p_value: f64,
+    }
+
+    pub(crate) fn anderson_darling_normality_dto(
+        data: &[f64],
+    ) -> Result<AdNormalityDto, WireError> {
+        let data = at_least(data.to_vec(), 3, "data")?;
+        crate::testing::anderson_darling_normality(&data)
+            .map(|r| AdNormalityDto {
+                statistic: r.statistic,
+                statistic_modified: r.statistic_modified,
+                p_value: r.p_value,
+            })
+            .ok_or_else(|| no_variation("anderson_darling_normality", "data"))
+    }
+
     pub(crate) fn mann_kendall_dto(data: &[f64]) -> Result<MannKendallDto, WireError> {
         let data = at_least(data.to_vec(), 4, "data")?;
         crate::testing::mann_kendall_test(&data)
@@ -1864,6 +1887,259 @@ pub(crate) fn pelt_dto(input: PeltInputDto) -> Result<PeltResultDto, WireError> 
     Ok(PeltResultDto {
         n_segments: result.changepoints.len() + 1,
         changepoints: result.changepoints,
+    })
+}
+
+/// PELT over several aligned signals: one set of changepoints for all.
+#[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MultiPeltInputDto {
+    pub(crate) signals: Vec<Vec<f64>>,
+    #[serde(default = "default_cost")]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "\"l2\" | \"normal\""))]
+    pub(crate) cost: String,
+    #[serde(default = "default_penalty")]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "\"bic\" | number"))]
+    pub(crate) penalty: PeltPenaltyDto,
+    #[serde(default = "default_min_seg")]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    pub(crate) min_segment_len: usize,
+}
+
+pub(crate) fn multi_pelt_dto(input: MultiPeltInputDto) -> Result<PeltResultDto, WireError> {
+    let Some(first) = input.signals.first() else {
+        return Err(WireError::empty_input("signals"));
+    };
+    let expected = first.len();
+    if let Some(i) = input.signals.iter().position(|s| s.len() != expected) {
+        let got = input.signals[i].len();
+        return Err(WireError::new(
+            code::DIMENSION_MISMATCH,
+            Some(i),
+            format!("signals[{i}] has {got} values; signals[0] has {expected}"),
+        )
+        .about("signals")
+        .with("expected", Detail::Num(expected as f64))
+        .with("got", Detail::Num(got as f64)));
+    }
+    if expected == 0 {
+        return Err(WireError::empty_input("signals"));
+    }
+    let pelt = pelt_from(&input.cost, &input.penalty, input.min_segment_len)?;
+    let refs: Vec<&[f64]> = input.signals.iter().map(Vec::as_slice).collect();
+    let result = pelt
+        .detect_multi(&refs)
+        .expect("signals were checked non-empty and of one length above");
+    Ok(PeltResultDto {
+        n_segments: result.changepoints.len() + 1,
+        changepoints: result.changepoints,
+    })
+}
+
+// ── CUSUM / EWMA: online (sequential) shift detection ──────────────────────
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CusumInputDto {
+    pub(crate) data: Vec<f64>,
+    pub(crate) target: f64,
+    pub(crate) sigma: f64,
+    #[serde(default = "default_cusum_k")]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    pub(crate) k: f64,
+    #[serde(default = "default_cusum_h")]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    pub(crate) h: f64,
+}
+
+fn default_cusum_k() -> f64 {
+    0.5
+}
+
+fn default_cusum_h() -> f64 {
+    5.0
+}
+
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct CusumPointDto {
+    pub(crate) index: usize,
+    pub(crate) s_upper: f64,
+    pub(crate) s_lower: f64,
+    pub(crate) signal: bool,
+}
+
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct CusumDto {
+    /// Decision interval actually used, echoed so a caller can draw the
+    /// boundary without restating its own input. Unlike EWMA's widening
+    /// limits this one is constant, so it belongs to the chart, not the point.
+    pub(crate) h: f64,
+    pub(crate) points: Vec<CusumPointDto>,
+    pub(crate) signal_indices: Vec<usize>,
+    pub(crate) in_control: bool,
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct EwmaInputDto {
+    pub(crate) data: Vec<f64>,
+    pub(crate) target: f64,
+    pub(crate) sigma: f64,
+    #[serde(default = "default_ewma_lambda")]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    pub(crate) lambda: f64,
+    #[serde(default = "default_ewma_l_factor")]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    pub(crate) l_factor: f64,
+}
+
+fn default_ewma_lambda() -> f64 {
+    0.2
+}
+
+fn default_ewma_l_factor() -> f64 {
+    3.0
+}
+
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct EwmaPointDto {
+    pub(crate) index: usize,
+    pub(crate) ewma: f64,
+    pub(crate) ucl: f64,
+    pub(crate) lcl: f64,
+    pub(crate) signal: bool,
+}
+
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct EwmaDto {
+    pub(crate) points: Vec<EwmaPointDto>,
+    pub(crate) signal_indices: Vec<usize>,
+    pub(crate) in_control: bool,
+}
+
+/// `value` must be a finite number within the bounds `ok` states; the refusal
+/// names it, with `min`/`max` (an exclusive bound is reported as the bound
+/// itself -- the message says which side is open).
+fn chart_parameter(
+    name: &'static str,
+    value: f64,
+    ok: bool,
+    min: Option<f64>,
+    max: Option<f64>,
+    domain: &str,
+) -> Result<(), WireError> {
+    if value.is_finite() && ok {
+        return Ok(());
+    }
+    Err(WireError::out_of_range(
+        name,
+        min,
+        max,
+        value,
+        format!("{name} must be {domain}, got {value}"),
+    ))
+}
+
+pub(crate) fn cusum_dto(input: CusumInputDto) -> Result<CusumDto, WireError> {
+    if input.data.is_empty() {
+        return Err(WireError::empty_input("data"));
+    }
+    let CusumInputDto {
+        target,
+        sigma,
+        k,
+        h,
+        ..
+    } = input;
+    chart_parameter("target", target, true, None, None, "a finite number")?;
+    chart_parameter("sigma", sigma, sigma > 0.0, Some(0.0), None, "> 0")?;
+    chart_parameter("k", k, k >= 0.0, Some(0.0), None, ">= 0")?;
+    chart_parameter("h", h, h > 0.0, Some(0.0), None, "> 0")?;
+    let chart = crate::detection::Cusum::with_params(target, sigma, k, h)
+        .expect("every parameter was checked against the chart's own conditions above");
+
+    let results = chart.analyze(&input.data);
+    let signal_indices: Vec<usize> = results
+        .iter()
+        .filter(|r| r.signal)
+        .map(|r| r.index)
+        .collect();
+    Ok(CusumDto {
+        h,
+        in_control: signal_indices.is_empty(),
+        signal_indices,
+        points: results
+            .into_iter()
+            .map(|r| CusumPointDto {
+                index: r.index,
+                s_upper: r.s_upper,
+                s_lower: r.s_lower,
+                signal: r.signal,
+            })
+            .collect(),
+    })
+}
+
+pub(crate) fn ewma_dto(input: EwmaInputDto) -> Result<EwmaDto, WireError> {
+    if input.data.is_empty() {
+        return Err(WireError::empty_input("data"));
+    }
+    let EwmaInputDto {
+        target,
+        sigma,
+        lambda,
+        l_factor,
+        ..
+    } = input;
+    chart_parameter("target", target, true, None, None, "a finite number")?;
+    chart_parameter("sigma", sigma, sigma > 0.0, Some(0.0), None, "> 0")?;
+    chart_parameter(
+        "lambda",
+        lambda,
+        lambda > 0.0 && lambda <= 1.0,
+        Some(0.0),
+        Some(1.0),
+        "in (0, 1]",
+    )?;
+    chart_parameter("l_factor", l_factor, l_factor > 0.0, Some(0.0), None, "> 0")?;
+    let chart = crate::detection::Ewma::with_params(target, sigma, lambda, l_factor)
+        .expect("every parameter was checked against the chart's own conditions above");
+
+    let results = chart.analyze(&input.data);
+    let signal_indices: Vec<usize> = results
+        .iter()
+        .filter(|r| r.signal)
+        .map(|r| r.index)
+        .collect();
+    Ok(EwmaDto {
+        in_control: signal_indices.is_empty(),
+        signal_indices,
+        points: results
+            .into_iter()
+            .map(|r| EwmaPointDto {
+                index: r.index,
+                ewma: r.ewma,
+                ucl: r.ucl,
+                lcl: r.lcl,
+                signal: r.signal,
+            })
+            .collect(),
     })
 }
 

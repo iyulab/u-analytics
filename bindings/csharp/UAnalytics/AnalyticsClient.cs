@@ -263,6 +263,14 @@ public sealed class AnalyticsClient : IDisposable
     public JsonElement ShapiroWilkTest(double[] data)
         => CallNative(NativeInterop.uanalytics_shapiro_wilk_test, new { data });
 
+    /// <summary>
+    /// Anderson-Darling normality test (Stephens 1974): <c>statistic</c> (A²),
+    /// <c>statistic_modified</c> (A²*, the small-sample correction the p-value uses), <c>p_value</c>.
+    /// At least 3 values, not all equal.
+    /// </summary>
+    public JsonElement AndersonDarlingNormality(double[] data)
+        => CallNative(NativeInterop.uanalytics_anderson_darling_normality, new { data });
+
     /// <summary>Mann-Kendall trend test with Kendall's tau and Sen's slope.</summary>
     public JsonElement MannKendallTest(double[] data)
         => CallNative(NativeInterop.uanalytics_mann_kendall_test, new { data });
@@ -353,6 +361,42 @@ public sealed class AnalyticsClient : IDisposable
             penalty is null
                 ? new { data, cost, min_segment_len = minSegmentLen }
                 : (object)new { data, cost, penalty, min_segment_len = minSegmentLen });
+
+    /// <summary>
+    /// PELT over several aligned <paramref name="signals"/> (each the same length): one set
+    /// of <c>changepoints</c> for all of them, and <c>n_segments</c>. Options as for
+    /// <see cref="DetectChangepoints"/>. A signal whose length differs from the first is
+    /// refused as <c>dimension_mismatch</c> at its <see cref="AnalyticsException.Index"/>.
+    /// </summary>
+    public JsonElement DetectChangepointsMulti(double[][] signals, double? penalty = null,
+        int? minSegmentLen = null, string cost = "l2")
+        => CallNative(NativeInterop.uanalytics_detect_changepoints_multi,
+            penalty is null
+                ? new { signals, cost, min_segment_len = minSegmentLen }
+                : (object)new { signals, cost, penalty, min_segment_len = minSegmentLen });
+
+    /// <summary>
+    /// CUSUM chart (Page 1954) for small sustained shifts of the mean away from
+    /// <paramref name="target"/>, with known process <paramref name="sigma"/> (&gt; 0).
+    /// <paramref name="k"/> is the allowance (≥ 0, default 0.5) and <paramref name="h"/> the
+    /// decision interval (&gt; 0, default 5), both in sigmas. Returns <c>h</c>, per-point
+    /// <c>points</c> (<c>index</c>, <c>s_upper</c>, <c>s_lower</c>, <c>signal</c>) on the
+    /// standardized scale, <c>signal_indices</c> and <c>in_control</c>.
+    /// </summary>
+    public JsonElement Cusum(double[] data, double target, double sigma, double? k = null, double? h = null)
+        => CallNative(NativeInterop.uanalytics_cusum, new { data, target, sigma, k, h });
+
+    /// <summary>
+    /// EWMA chart (Roberts 1959) about <paramref name="target"/> with known process
+    /// <paramref name="sigma"/> (&gt; 0). <paramref name="lambda"/> is the smoothing constant
+    /// in (0, 1] (default 0.2) and <paramref name="lFactor"/> the limit width in sigmas
+    /// (&gt; 0, default 3). Returns per-point <c>points</c> (<c>index</c>, <c>ewma</c>,
+    /// <c>ucl</c>, <c>lcl</c>, <c>signal</c>) -- the limits are exact, so they widen with the
+    /// index -- plus <c>signal_indices</c> and <c>in_control</c>.
+    /// </summary>
+    public JsonElement Ewma(double[] data, double target, double sigma, double? lambda = null,
+        double? lFactor = null)
+        => CallNative(NativeInterop.uanalytics_ewma, new { data, target, sigma, lambda, l_factor = lFactor });
 
     // ── Seasonality ──
 

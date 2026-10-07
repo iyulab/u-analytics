@@ -20,10 +20,12 @@
   power-law process (Crow-AMSAA) fit `PowerLawProcessFit`. Pass the end of observation,
   or `null` when it stopped at the last event
 - **Hypothesis tests**: t (one-sample, Welch, paired), Mann-Whitney, Wilcoxon,
-  Jarque-Bera, Shapiro-Wilk, Mann-Kendall, ANOVA, Kruskal-Wallis, Levene, Bartlett,
+  Jarque-Bera, Shapiro-Wilk, Anderson-Darling, Mann-Kendall, ANOVA, Kruskal-Wallis, Levene, Bartlett,
   χ² goodness of fit and independence, Fisher's exact; Bonferroni and
   Benjamini-Hochberg adjustment
-- **Change detection**: changepoints, period estimation, spectral residual scoring
+- **Change detection**: changepoints in one series or several aligned ones
+  (`DetectChangepointsMulti`), `Cusum` and `Ewma` charts for small sustained shifts,
+  period estimation, spectral residual scoring
 - **Correlation and regression**: correlation matrices, simple linear regression
 - **Distribution fitting**: best-fit selection across candidate distributions
 

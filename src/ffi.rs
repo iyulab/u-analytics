@@ -973,6 +973,14 @@ wire_export!(
 );
 
 wire_export!(
+    /// Anderson-Darling normality test (Stephens 1974): → `{statistic, statistic_modified,
+    /// p_value}`, the WebAssembly binding's result.
+    uanalytics_anderson_darling_normality,
+    DataReq,
+    |r| crate::wire::hypothesis::anderson_darling_normality_dto(&r.data)
+);
+
+wire_export!(
     /// Mann-Kendall trend test with Sen's slope: → `{s_statistic, variance, z_statistic, p_value, kendall_tau, sen_slope}`, the WebAssembly binding's result.
     uanalytics_mann_kendall_test,
     DataReq,
@@ -1171,6 +1179,35 @@ pub unsafe extern "C" fn uanalytics_detect_changepoints(
         }
     })
 }
+
+wire_export!(
+    /// PELT over several aligned signals, one set of changepoints for all:
+    /// `{signals, cost?, penalty?, min_segment_len?}` → `{changepoints, n_segments}`,
+    /// the WebAssembly binding's result. Signals of different lengths are refused
+    /// as `dimension_mismatch` at the first one that differs.
+    uanalytics_detect_changepoints_multi,
+    crate::wire::MultiPeltInputDto,
+    |r| crate::wire::multi_pelt_dto(r)
+);
+
+// ── CUSUM / EWMA (online shift detection) ─────────────────────
+
+wire_export!(
+    /// CUSUM chart (Page 1954) on the standardized scale: `{data, target, sigma, k?, h?}`
+    /// → `{h, points[{index, s_upper, s_lower, signal}], signal_indices, in_control}`.
+    uanalytics_cusum,
+    crate::wire::CusumInputDto,
+    |r| crate::wire::cusum_dto(r)
+);
+
+wire_export!(
+    /// EWMA chart (Roberts 1959) with exact, widening limits: `{data, target, sigma,
+    /// lambda?, l_factor?}` → `{points[{index, ewma, ucl, lcl, signal}], signal_indices,
+    /// in_control}`.
+    uanalytics_ewma,
+    crate::wire::EwmaInputDto,
+    |r| crate::wire::ewma_dto(r)
+);
 
 // ── Seasonality ─────────────────────────────────────────────
 
@@ -1537,6 +1574,89 @@ mod tests {
                 b["got"].as_f64()
             ),
             (-3, Some("insufficient_data"), Some(2.0), Some(1.0))
+        );
+    }
+
+    #[test]
+    fn shift_detection_and_ad_normality_round_trip_with_the_wasm_codes() {
+        let mut data = vec![10.0; 10];
+        data.extend(vec![12.0; 10]);
+        let req = serde_json::json!({ "data": data, "target": 10.0, "sigma": 1.0 });
+        let (code, b) = call(uanalytics_cusum, &req.to_string());
+        assert_eq!(code, 0, "{b}");
+        let wire = crate::wire::cusum_dto(serde_json::from_value(req.clone()).unwrap()).unwrap();
+        assert_eq!(b, serde_json::to_value(&wire).unwrap());
+        assert_eq!(
+            (b["h"].as_f64(), b["in_control"].as_bool()),
+            (Some(5.0), Some(false))
+        );
+
+        let (code, b) = call(uanalytics_ewma, &req.to_string());
+        assert_eq!(code, 0, "{b}");
+        let wire = crate::wire::ewma_dto(serde_json::from_value(req).unwrap()).unwrap();
+        assert_eq!(b, serde_json::to_value(&wire).unwrap());
+
+        let (code, b) = call(
+            uanalytics_ewma,
+            r#"{"data": [1, 2], "target": 1, "sigma": 1, "lambda": 1.5}"#,
+        );
+        assert_eq!(
+            (
+                code,
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["max"].as_f64()
+            ),
+            (
+                -3,
+                Some("parameter_out_of_range"),
+                Some("lambda"),
+                Some(1.0)
+            ),
+            "{b}"
+        );
+        let (code, b) = call(uanalytics_cusum, r#"{"data": [], "target": 1, "sigma": 1}"#);
+        assert_eq!(
+            (code, b["code"].as_str(), b["parameter"].as_str()),
+            (-3, Some("empty_input"), Some("data"))
+        );
+
+        let multi = serde_json::json!({
+            "signals": [[0, 0, 0, 0, 5, 5, 5, 5], [1, 1, 1, 1, 4, 4, 4, 4]]
+        });
+        let (code, b) = call(uanalytics_detect_changepoints_multi, &multi.to_string());
+        assert_eq!(
+            (code, b["changepoints"].clone()),
+            (0, serde_json::json!([4])),
+            "{b}"
+        );
+        let (code, b) = call(
+            uanalytics_detect_changepoints_multi,
+            r#"{"signals": [[0, 0, 5, 5], [0, 5]]}"#,
+        );
+        assert_eq!(
+            (
+                code,
+                b["code"].as_str(),
+                b["index"].as_u64(),
+                b["got"].as_f64()
+            ),
+            (-3, Some("dimension_mismatch"), Some(1), Some(2.0))
+        );
+
+        let (code, b) = call(
+            uanalytics_anderson_darling_normality,
+            r#"{"data": [2.1, 1.9, 2.0, 2.2, 1.8, 2.05, 1.95, 2.15]}"#,
+        );
+        assert_eq!(code, 0, "{b}");
+        assert!(b["p_value"].as_f64().unwrap() > 0.05, "{b}");
+        let (code, b) = call(
+            uanalytics_anderson_darling_normality,
+            r#"{"data": [3, 3, 3]}"#,
+        );
+        assert_eq!(
+            (code, b["code"].as_str(), b["parameter"].as_str()),
+            (-3, Some("invalid_input"), Some("data"))
         );
     }
 
