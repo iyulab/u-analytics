@@ -23,6 +23,7 @@
   Jarque-Bera, Shapiro-Wilk, Anderson-Darling, Mann-Kendall, ANOVA, Kruskal-Wallis, Levene, Bartlett,
   χ² goodness of fit and independence, Fisher's exact; Bonferroni and
   Benjamini-Hochberg adjustment
+- **Stationarity**: `AdfTest` (augmented Dickey-Fuller)
 - **Change detection**: changepoints in one series or several aligned ones
   (`DetectChangepointsMulti`), `Cusum` and `Ewma` charts for small sustained shifts,
   period estimation, spectral residual scoring

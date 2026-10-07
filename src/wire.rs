@@ -1267,27 +1267,135 @@ pub(crate) mod hypothesis {
             .ok_or_else(|| no_variation("shapiro_wilk_test", "data"))
     }
 
-    /// Anderson-Darling normality (Stephens 1974): A², the small-sample A²* and its p-value.
+    /// Anderson-Darling normality: A², the sample-size-corrected A²* and its p-value.
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
-    pub(crate) struct AdNormalityDto {
+    pub(crate) struct AndersonDarlingDto {
         pub(crate) statistic: f64,
         pub(crate) statistic_modified: f64,
         pub(crate) p_value: f64,
     }
 
-    pub(crate) fn anderson_darling_normality_dto(
-        data: &[f64],
-    ) -> Result<AdNormalityDto, WireError> {
-        let data = at_least(data.to_vec(), 3, "data")?;
-        crate::testing::anderson_darling_normality(&data)
-            .map(|r| AdNormalityDto {
+    pub(crate) fn anderson_darling_dto(data: &[f64]) -> Result<AndersonDarlingDto, WireError> {
+        let data = at_least(data.to_vec(), 8, "data")?;
+        crate::testing::anderson_darling_test(&data)
+            .map(|r| AndersonDarlingDto {
                 statistic: r.statistic,
-                statistic_modified: r.statistic_modified,
+                statistic_modified: r.statistic_star,
                 p_value: r.p_value,
             })
-            .ok_or_else(|| no_variation("anderson_darling_normality", "data"))
+            .ok_or_else(|| no_variation("anderson_darling_test", "data"))
+    }
+
+    /// Augmented Dickey-Fuller unit-root test input.
+    #[derive(Deserialize)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    #[serde(deny_unknown_fields)]
+    pub(crate) struct AdfInputDto {
+        pub(crate) data: Vec<f64>,
+        /// Deterministic terms in the test regression.
+        #[serde(default = "default_adf_model")]
+        #[cfg_attr(feature = "wasm", tsify(optional))]
+        #[cfg_attr(
+            feature = "wasm",
+            tsify(type = "\"none\" | \"constant\" | \"constant_trend\"")
+        )]
+        pub(crate) model: String,
+        /// Lagged differences to include; absent or `null` selects them by AIC.
+        #[serde(default)]
+        #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+        pub(crate) max_lags: Option<usize>,
+    }
+
+    fn default_adf_model() -> String {
+        "constant".to_owned()
+    }
+
+    /// One significance level of the ADF test.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct AdfLevelDto {
+        pub(crate) level: f64,
+        pub(crate) critical_value: f64,
+        /// `statistic <= critical_value`: the unit root is rejected at this level.
+        pub(crate) rejected: bool,
+    }
+
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct AdfDto {
+        pub(crate) statistic: f64,
+        pub(crate) n_lags: usize,
+        pub(crate) n_obs: usize,
+        /// 1 %, 5 % and 10 %, in that order (MacKinnon 2010 response surfaces).
+        pub(crate) levels: Vec<AdfLevelDto>,
+    }
+
+    /// The fewest rows the test regression is run on.
+    const ADF_MIN_REGRESSION_ROWS: usize = 5;
+
+    pub(crate) fn adf_dto(input: AdfInputDto) -> Result<AdfDto, WireError> {
+        use crate::testing::AdfModel;
+        // Columns besides the lags: the lagged level, plus the deterministic terms.
+        let (model, fixed_columns) = match input.model.as_str() {
+            "none" => (AdfModel::None, 1),
+            "constant" => (AdfModel::Constant, 2),
+            "constant_trend" => (AdfModel::ConstantTrend, 3),
+            other => {
+                return Err(WireError::unknown_option(
+                    "model",
+                    other,
+                    &["none", "constant", "constant_trend"],
+                ))
+            }
+        };
+        let data = at_least(input.data, 10, "data")?;
+        // With p lags the regression keeps n - 2 - p rows (one value is lost to
+        // differencing, p + 1 to the lags and the lagged level) and has
+        // fixed_columns + p columns. It needs ADF_MIN_REGRESSION_ROWS rows and a
+        // residual degree of freedom.
+        let n = data.len();
+        let max = (n - 2 - ADF_MIN_REGRESSION_ROWS).min((n - 3 - fixed_columns) / 2);
+        if let Some(p) = input.max_lags {
+            if p > max {
+                return Err(WireError::out_of_range(
+                    "max_lags",
+                    Some(0.0),
+                    Some(max as f64),
+                    p as f64,
+                    format!(
+                        "max_lags: {} values leave room for at most {max} lags, got {p}",
+                        data.len()
+                    ),
+                ));
+            }
+        }
+        let r = crate::testing::adf_test(&data, model, input.max_lags).ok_or_else(|| {
+            WireError::invalid_input(
+                "adf_test: the test regression is degenerate -- singular, or an exact \
+                 fit of the differences (a deterministic series), so the t-ratio is \
+                 undefined",
+            )
+            .about("data")
+        })?;
+        Ok(AdfDto {
+            statistic: r.statistic,
+            n_lags: r.n_lags,
+            n_obs: r.n_obs,
+            levels: [0.01, 0.05, 0.10]
+                .iter()
+                .zip(r.critical_values.iter().zip(r.rejected.iter()))
+                .map(|(&level, (&critical_value, &rejected))| AdfLevelDto {
+                    level,
+                    critical_value,
+                    rejected,
+                })
+                .collect(),
+        })
     }
 
     pub(crate) fn mann_kendall_dto(data: &[f64]) -> Result<MannKendallDto, WireError> {

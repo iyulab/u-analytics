@@ -973,11 +973,19 @@ wire_export!(
 );
 
 wire_export!(
-    /// Anderson-Darling normality test (Stephens 1974): → `{statistic, statistic_modified,
-    /// p_value}`, the WebAssembly binding's result.
-    uanalytics_anderson_darling_normality,
+    /// Anderson-Darling normality test (at least 8 values): → `{statistic,
+    /// statistic_modified, p_value}`, the WebAssembly binding's result.
+    uanalytics_anderson_darling_test,
     DataReq,
-    |r| crate::wire::hypothesis::anderson_darling_normality_dto(&r.data)
+    |r| crate::wire::hypothesis::anderson_darling_dto(&r.data)
+);
+
+wire_export!(
+    /// Augmented Dickey-Fuller unit-root test: `{data, model?, max_lags?}` →
+    /// `{statistic, n_lags, n_obs, levels[{level, critical_value, rejected}]}`.
+    uanalytics_adf_test,
+    crate::wire::hypothesis::AdfInputDto,
+    |r| crate::wire::hypothesis::adf_dto(r)
 );
 
 wire_export!(
@@ -1645,18 +1653,115 @@ mod tests {
         );
 
         let (code, b) = call(
-            uanalytics_anderson_darling_normality,
+            uanalytics_anderson_darling_test,
             r#"{"data": [2.1, 1.9, 2.0, 2.2, 1.8, 2.05, 1.95, 2.15]}"#,
         );
         assert_eq!(code, 0, "{b}");
         assert!(b["p_value"].as_f64().unwrap() > 0.05, "{b}");
         let (code, b) = call(
-            uanalytics_anderson_darling_normality,
-            r#"{"data": [3, 3, 3]}"#,
+            uanalytics_anderson_darling_test,
+            r#"{"data": [3, 3, 3, 3, 3, 3, 3, 3]}"#,
         );
         assert_eq!(
             (code, b["code"].as_str(), b["parameter"].as_str()),
             (-3, Some("invalid_input"), Some("data"))
+        );
+        // Below 8 values the correction is not tabulated: refused, not extrapolated.
+        let (code, b) = call(uanalytics_anderson_darling_test, r#"{"data": [1, 2, 3]}"#);
+        assert_eq!(
+            (
+                code,
+                b["code"].as_str(),
+                b["min"].as_f64(),
+                b["got"].as_f64()
+            ),
+            (-3, Some("insufficient_data"), Some(8.0), Some(3.0))
+        );
+    }
+
+    #[test]
+    fn adf_round_trips_and_names_what_it_refuses() {
+        // Pseudo-random shocks, so neither series is one a few lags fit exactly.
+        let mut state: u64 = 0x2545_f491_4f6c_dd1d;
+        let mut shock = move || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+        };
+        // Strong mean reversion: the unit root is rejected at 5 %.
+        let mut data = vec![0.0_f64; 60];
+        for i in 1..data.len() {
+            data[i] = 0.3 * data[i - 1] + shock();
+        }
+        let req = serde_json::json!({ "data": data });
+        let (code, b) = call(uanalytics_adf_test, &req.to_string());
+        assert_eq!(code, 0, "{b}");
+        let wire = crate::wire::hypothesis::adf_dto(serde_json::from_value(req).unwrap()).unwrap();
+        assert_eq!(b, serde_json::to_value(&wire).unwrap());
+        let levels: Vec<f64> = b["levels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l["level"].as_f64().unwrap())
+            .collect();
+        assert_eq!(levels, vec![0.01, 0.05, 0.10]);
+        assert_eq!(b["levels"][1]["rejected"], true, "{b}");
+
+        // A random walk is not rejected.
+        let mut walk = vec![0.0_f64; 60];
+        for i in 1..walk.len() {
+            walk[i] = walk[i - 1] + shock();
+        }
+        let (_, b) = call(
+            uanalytics_adf_test,
+            &serde_json::json!({ "data": walk, "model": "constant_trend" }).to_string(),
+        );
+        assert_eq!(b["levels"][1]["rejected"], false, "{b}");
+
+        // Ten values leave room for two lags beside a constant (eight rows less
+        // the lags, against four columns), three with no deterministic term.
+        let ten = r#"[1, 3, 2, 5, 4, 6, 5, 8, 7, 9]"#;
+        let (code, b) = call(
+            uanalytics_adf_test,
+            &format!(r#"{{"data": {ten}, "max_lags": 2}}"#),
+        );
+        assert_eq!((code, b["n_lags"].as_u64()), (0, Some(2)), "{b}");
+        let (code, b) = call(
+            uanalytics_adf_test,
+            &format!(r#"{{"data": {ten}, "model": "none", "max_lags": 3}}"#),
+        );
+        assert_eq!((code, b["n_lags"].as_u64()), (0, Some(3)), "{b}");
+        let (code, b) = call(
+            uanalytics_adf_test,
+            &format!(r#"{{"data": {ten}, "max_lags": 3}}"#),
+        );
+        assert_eq!(
+            (
+                code,
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["max"].as_f64()
+            ),
+            (
+                -3,
+                Some("parameter_out_of_range"),
+                Some("max_lags"),
+                Some(2.0)
+            )
+        );
+        let (_, b) = call(
+            uanalytics_adf_test,
+            &format!(r#"{{"data": {ten}, "model": "trend"}}"#),
+        );
+        assert_eq!(
+            (b["code"].as_str(), b["got"].as_str()),
+            (Some("unknown_option"), Some("trend"))
+        );
+        let (_, b) = call(uanalytics_adf_test, r#"{"data": [1, 2, 3]}"#);
+        assert_eq!(
+            (b["code"].as_str(), b["min"].as_f64()),
+            (Some("insufficient_data"), Some(10.0))
         );
     }
 

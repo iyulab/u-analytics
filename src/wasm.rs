@@ -20,10 +20,10 @@ use crate::wire::{
     c_chart_dto, capability_dto, count_pairs, count_rows, cusum_dto, ewma_dto, g_chart_dto,
     gage_rr_anova_dto, gage_rr_xbar_r_dto,
     hypothesis::{
-        anderson_darling_normality_dto, chi_squared_gof_dto, chi_squared_independence_dto,
+        adf_dto, anderson_darling_dto, chi_squared_gof_dto, chi_squared_independence_dto,
         fisher_exact_dto, groups_test_dto, jarque_bera_dto, mann_kendall_dto, mann_whitney_dto,
         one_sample_t_dto, one_way_anova_dto, p_adjust_dto, paired_t_dto, shapiro_wilk_dto,
-        two_sample_t_dto, wilcoxon_dto,
+        two_sample_t_dto, wilcoxon_dto, AdfInputDto,
     },
     imr_dto, laney_p_dto, laney_u_dto, multi_pelt_dto, np_chart_dto, p_chart_dto, pelt_dto,
     percentile_capability_dto,
@@ -597,23 +597,44 @@ pub fn process_capability(
     to_js(&capability_dto(input).map_err(js_err)?)
 }
 
-/// Anderson-Darling normality test (Stephens 1974).
-///
-/// H₀: data is normally distributed.
+/// Anderson-Darling normality test. H₀: data is normally distributed.
 ///
 /// # Parameters
 ///
-/// - `data`: `number[]` or `Float64Array` of observations (need >= 3, not all equal)
+/// - `data`: `number[]` or `Float64Array` of observations (at least 8, not all
+///   equal -- below 8 the sample-size correction is not tabulated)
 ///
 /// # Output JSON
 ///
-/// Object with fields: `statistic` (A²), `statistic_modified` (A²*), `p_value`.
-#[wasm_bindgen(unchecked_return_type = "AdNormalityDto")]
-pub fn anderson_darling_normality(
+/// Object with fields: `statistic` (A²), `statistic_modified` (A²* = A²·(1 +
+/// 0.75/n + 2.25/n²)), `p_value`.
+#[wasm_bindgen(unchecked_return_type = "AndersonDarlingDto")]
+pub fn anderson_darling_test(
     #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] data: JsValue,
 ) -> Result<JsValue, JsValue> {
     let data = read_numbers(&data, "data").map_err(js_err)?;
-    to_js(&anderson_darling_normality_dto(&data).map_err(js_err)?)
+    to_js(&anderson_darling_dto(&data).map_err(js_err)?)
+}
+
+/// Augmented Dickey-Fuller unit-root test. H₀: the series has a unit root
+/// (is not stationary).
+///
+/// # Input JSON
+///
+/// `{ data: number[], model?: "none" | "constant" | "constant_trend", max_lags?: number | null }`
+/// -- at least 10 values; `model` defaults to `"constant"`; `max_lags` absent or
+/// `null` selects the lag count by AIC up to Schwert's rule.
+///
+/// # Output JSON
+///
+/// `{ statistic, n_lags, n_obs, levels: [{ level, critical_value, rejected }] }` for
+/// the 1 %, 5 % and 10 % levels.
+#[wasm_bindgen(unchecked_return_type = "AdfDto")]
+pub fn adf_test(
+    #[wasm_bindgen(unchecked_param_type = "AdfInputDto")] input: JsValue,
+) -> Result<JsValue, JsValue> {
+    let input: AdfInputDto = from_js(input, "input")?;
+    to_js(&adf_dto(input).map_err(js_err)?)
 }
 
 /// Compute the Laney P' chart from (defectives, sample_size) pairs.

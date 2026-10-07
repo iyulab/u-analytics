@@ -264,12 +264,23 @@ public sealed class AnalyticsClient : IDisposable
         => CallNative(NativeInterop.uanalytics_shapiro_wilk_test, new { data });
 
     /// <summary>
-    /// Anderson-Darling normality test (Stephens 1974): <c>statistic</c> (A²),
-    /// <c>statistic_modified</c> (A²*, the small-sample correction the p-value uses), <c>p_value</c>.
-    /// At least 3 values, not all equal.
+    /// Anderson-Darling normality test: <c>statistic</c> (A²), <c>statistic_modified</c>
+    /// (A²* = A²·(1 + 0.75/n + 2.25/n²), which the p-value uses) and <c>p_value</c>.
+    /// At least 8 values, not all equal.
     /// </summary>
-    public JsonElement AndersonDarlingNormality(double[] data)
-        => CallNative(NativeInterop.uanalytics_anderson_darling_normality, new { data });
+    public JsonElement AndersonDarlingTest(double[] data)
+        => CallNative(NativeInterop.uanalytics_anderson_darling_test, new { data });
+
+    /// <summary>
+    /// Augmented Dickey-Fuller unit-root test (H₀: the series has a unit root). At least
+    /// 10 values. <paramref name="model"/> is <c>"constant"</c> (default), <c>"none"</c> or
+    /// <c>"constant_trend"</c>; <paramref name="maxLags"/> fixes the number of lagged
+    /// differences, <c>null</c> selects it by AIC. Returns <c>statistic</c>, <c>n_lags</c>,
+    /// <c>n_obs</c> and <c>levels</c> — <c>level</c>, <c>critical_value</c>, <c>rejected</c>
+    /// for 1 %, 5 % and 10 %.
+    /// </summary>
+    public JsonElement AdfTest(double[] data, string model = "constant", int? maxLags = null)
+        => CallNative(NativeInterop.uanalytics_adf_test, new { data, model, max_lags = maxLags });
 
     /// <summary>Mann-Kendall trend test with Kendall's tau and Sen's slope.</summary>
     public JsonElement MannKendallTest(double[] data)

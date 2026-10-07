@@ -11,12 +11,24 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 ### Added
 
 - C ABI `uanalytics_cusum`, `uanalytics_ewma`, `uanalytics_detect_changepoints_multi`
-  and `uanalytics_anderson_darling_normality`, taking and returning the WebAssembly
+  and `uanalytics_anderson_darling_test`, taking and returning the WebAssembly
   functions' JSON; `UAnalytics` `Cusum`, `Ewma`, `DetectChangepointsMulti` and
-  `AndersonDarlingNormality`.
+  `AndersonDarlingTest`.
+- `adf_test` (augmented Dickey-Fuller) over WebAssembly and the C ABI
+  (`uanalytics_adf_test`, `UAnalytics.AdfTest`): `model` names the deterministic
+  terms, `max_lags` is refused above what the series leaves room for
+  (`parameter_out_of_range` with `max`), and the result lists `level`,
+  `critical_value` and `rejected` for 1 %, 5 % and 10 %.
 
 ### Changed
 
+- **Breaking:** the two Anderson-Darling normality tests were one computation
+  (the same A², A²* and p-value approximation) under two names with different
+  minimum sizes. `testing::anderson_darling_normality` and `AdNormalityResult` are
+  removed; use `testing::anderson_darling_test`. The WebAssembly export
+  `anderson_darling_normality` is now `anderson_darling_test` (same result fields)
+  and needs 8 values instead of 3: below 8 the sample-size correction is not
+  tabulated, and the p-values it returned there were extrapolated.
 - **Breaking:** `cusum` and `ewma` name the parameter they refuse. Empty `data` is
   `empty_input`; a `sigma`, `k`, `h`, `lambda` or `l_factor` outside its domain is
   `parameter_out_of_range` with `parameter`, `min`, `max` and `got` (all were
@@ -24,6 +36,15 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 - **Breaking:** `detect_changepoints_multi` refuses signals with no values as
   `empty_input`, as `detect_changepoints` already did for empty `data` (it returned
   one segment).
+
+### Fixed
+
+- `adf_test` reported an exact fit as a decisive rejection. When the lagged
+  differences explain the differences exactly (a deterministic series -- a
+  sinusoid with a trend, or differences that repeat with a period the lags
+  span) the residual variance is rounding noise and the t-ratio came out in
+  the millions; the lag search also preferred such fits, since their AIC
+  goes to minus infinity. Such a fit is now `None` and is not chosen.
 
 ## [0.18.0] - 2026-10-07
 

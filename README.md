@@ -250,10 +250,10 @@ re-bundling services fail on the same import. Use a bundler or Node.
 
 ```js
 // Both work in Node — no bundler, no experimental flags:
-const { anderson_darling_normality } = require("@iyulab/u-analytics");
-// or: import { anderson_darling_normality } from "@iyulab/u-analytics";
+const { anderson_darling_test } = require("@iyulab/u-analytics");
+// or: import { anderson_darling_test } from "@iyulab/u-analytics";
 
-anderson_darling_normality(new Float64Array([4.9, 5.1, 5.0, 5.2, 4.8, 5.05]));
+anderson_darling_test(new Float64Array([4.9, 5.1, 5.0, 5.2, 4.8, 5.05, 4.95, 5.15]));
 // → { statistic, statistic_modified, p_value }
 ```
 
@@ -628,9 +628,18 @@ the sections above have not already spelled out.
 g_chart(gaps: number[] | Float64Array):  { g_bar: number, points: AttrPoint[] }    // events between occurrences
 t_chart(times: number[] | Float64Array): { t_bar: number, points: AttrPoint[] }    // time between occurrences
 
-// Normality — at least 3 values, not all equal
-anderson_darling_normality(data: number[] | Float64Array):
+// Normality — at least 8 values, not all equal (below 8 the sample-size
+// correction A²* = A²·(1 + 0.75/n + 2.25/n²) is not tabulated)
+anderson_darling_test(data: number[] | Float64Array):
   { statistic: number, statistic_modified: number, p_value: number }
+
+// Stationarity — augmented Dickey-Fuller, H₀: unit root. At least 10 values;
+// max_lags absent or null selects the lag count by AIC. A deterministic series
+// whose differences the lags fit exactly is refused (invalid_input), not tested.
+adf_test(input: { data: number[], model?: "none" | "constant" | "constant_trend",
+                  max_lags?: number | null }):
+  { statistic: number, n_lags: number, n_obs: number,
+    levels: { level: number, critical_value: number, rejected: boolean }[] }  // 1 %, 5 %, 10 %
 // A number array is read as sent: `null` or a string at data[i] throws
 // malformed_input with index i (it is not averaged as 0).
 
@@ -817,7 +826,8 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_detect_changepoints_multi` | `detect_changepoints_multi(input)` | `input` as is |
 | `uanalytics_cusum` | `cusum(input)` | `input` as is |
 | `uanalytics_ewma` | `ewma(input)` | `input` as is |
-| `uanalytics_anderson_darling_normality` | `anderson_darling_normality(data)` | `{ data: [...] }` |
+| `uanalytics_anderson_darling_test` | `anderson_darling_test(data)` | `{ data: [...] }` |
+| `uanalytics_adf_test` | `adf_test(input)` | `input` as is |
 | `uanalytics_estimate_period` | `estimate_period(input)` | `input` as is |
 | `uanalytics_spectral_residual` | `spectral_residual(input)` | `input` as is |
 
