@@ -29,10 +29,16 @@ use crate::wire::{
     point_process::{
         check_truncation, laplace_dto, mil_hdbk_189_dto, power_law_dto, ObservationDto,
     },
-    rate_pairs, rules_from_json, run_rules_dto, sample_size_value, t_chart_dto, u_chart_dto,
-    xbar_r_dto, xbar_s_dto, AttributeStandardDto, CapabilityInputDto, GageRRInputDto,
-    LimitsInputDto, PeltInputDto, PeltPenaltyDto, PeltResultDto, PercentileCapabilityInputDto,
-    SeasonalityInputDto, SpectralResidualInputDto, WireError,
+    rate_pairs,
+    reliability::{
+        boxcox_capability_dto, ppm_to_sigma_value, sigma_to_ppm_value, weibull_mle_dto,
+        weibull_mrr_dto, weibull_reliability_dto, BoxcoxCapabilityInputDto,
+        WeibullReliabilityInputDto,
+    },
+    rules_from_json, run_rules_dto, sample_size_value, t_chart_dto, u_chart_dto, xbar_r_dto,
+    xbar_s_dto, AttributeStandardDto, CapabilityInputDto, GageRRInputDto, LimitsInputDto,
+    PeltInputDto, PeltPenaltyDto, PeltResultDto, PercentileCapabilityInputDto, SeasonalityInputDto,
+    SpectralResidualInputDto, WireError,
 };
 
 // ---------------------------------------------------------------------------
@@ -1491,49 +1497,6 @@ fn ewma_dto(input: EwmaInputDto) -> Result<EwmaDto, String> {
 // Non-normal capability (Box-Cox) and sigma level <-> PPM
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize, tsify::Tsify)]
-#[tsify(missing_as_null)]
-#[serde(deny_unknown_fields)]
-struct BoxcoxCapabilityInputDto {
-    data: Vec<f64>,
-    #[serde(default)]
-    #[tsify(optional)]
-    #[tsify(type = "number | null")]
-    usl: Option<f64>,
-    #[serde(default)]
-    #[tsify(optional)]
-    #[tsify(type = "number | null")]
-    lsl: Option<f64>,
-    /// `[min, max]` lambda search range; defaults to `[-5, 5]`.
-    #[serde(default)]
-    #[tsify(optional)]
-    #[tsify(type = "[number, number] | null")]
-    lambda_range: Option<[f64; 2]>,
-}
-
-#[derive(Serialize, Debug, tsify::Tsify)]
-#[tsify(missing_as_null)]
-struct BoxcoxCapabilityDto {
-    /// Estimated optimal Box-Cox parameter. `0` is a log transform, `1` the
-    /// identity, `0.5` approximately a square root.
-    lambda: f64,
-    /// `true` when the likelihood maximum is on an end of `lambda_range`, so
-    /// `lambda` is that limit rather than an interior estimate.
-    lambda_at_bound: bool,
-    /// Every index below is on the **transformed** scale, which is where the
-    /// normal-theory formulas are valid -- they are not comparable to indices
-    /// computed on the raw non-normal data.
-    cp: Option<f64>,
-    cpk: Option<f64>,
-    cpu: Option<f64>,
-    cpl: Option<f64>,
-    pp: Option<f64>,
-    ppk: Option<f64>,
-    ppu: Option<f64>,
-    ppl: Option<f64>,
-    cpm: Option<f64>,
-}
-
 /// Process capability for non-normal data, via a Box-Cox transformation.
 ///
 /// # Input JSON
@@ -1571,30 +1534,6 @@ pub fn boxcox_capability(
     let input: BoxcoxCapabilityInputDto = from_js(input, "input")?;
     let dto = boxcox_capability_dto(input).map_err(js_err)?;
     to_js(&dto)
-}
-
-/// The half of [`boxcox_capability`] below the `JsValue` boundary, so the
-/// contract is testable off `wasm32`.
-fn boxcox_capability_dto(input: BoxcoxCapabilityInputDto) -> Result<BoxcoxCapabilityDto, String> {
-    let range = input
-        .lambda_range
-        .map_or(crate::capability::DEFAULT_LAMBDA_RANGE, |[lo, hi]| (lo, hi));
-    let result = crate::capability::boxcox_capability(&input.data, input.usl, input.lsl, range)
-        .map_err(|e| e.to_string())?;
-    let i = result.indices.as_ref();
-    Ok(BoxcoxCapabilityDto {
-        lambda: result.lambda,
-        lambda_at_bound: result.lambda_at_bound,
-        cp: i.and_then(|i| i.cp),
-        cpk: i.and_then(|i| i.cpk),
-        cpu: i.and_then(|i| i.cpu),
-        cpl: i.and_then(|i| i.cpl),
-        pp: i.and_then(|i| i.pp),
-        ppk: i.and_then(|i| i.ppk),
-        ppu: i.and_then(|i| i.ppu),
-        ppl: i.and_then(|i| i.ppl),
-        cpm: i.and_then(|i| i.cpm),
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1701,10 +1640,7 @@ pub fn spectral_residual(
 /// Rejects a non-finite `sigma` instead of returning `NaN`.
 #[wasm_bindgen]
 pub fn sigma_to_ppm(sigma: f64) -> Result<f64, JsValue> {
-    if !sigma.is_finite() {
-        return Err(js_err(format!("sigma must be finite, got {sigma}")));
-    }
-    Ok(crate::capability::sigma_to_ppm(sigma))
+    sigma_to_ppm_value(sigma).map_err(js_err)
 }
 
 /// Converts a defect rate in parts per million to a sigma quality level.
@@ -1721,11 +1657,43 @@ pub fn sigma_to_ppm(sigma: f64) -> Result<f64, JsValue> {
 /// infinity.
 #[wasm_bindgen]
 pub fn ppm_to_sigma(ppm: f64) -> Result<f64, JsValue> {
-    crate::capability::ppm_to_sigma(ppm).ok_or_else(|| {
-        js_err(format!(
-            "ppm must be finite and strictly inside (0, 1000000), got {ppm}"
-        ))
-    })
+    ppm_to_sigma_value(ppm).map_err(js_err)
+}
+
+// ---------------------------------------------------------------------------
+// Weibull
+// ---------------------------------------------------------------------------
+
+/// Weibull maximum-likelihood fit of failure times (each finite and `> 0`,
+/// at least 2): `{ shape, scale, log_likelihood, iterations }`.
+#[wasm_bindgen(unchecked_return_type = "WeibullMleDto")]
+pub fn weibull_mle(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] failure_times: JsValue,
+) -> Result<JsValue, JsValue> {
+    let times = read_numbers(&failure_times, "failure_times").map_err(js_err)?;
+    to_js(&weibull_mle_dto(&times).map_err(js_err)?)
+}
+
+/// Weibull median-rank-regression fit (Bernard's ranks): `{ shape, scale,
+/// r_squared }`. Same input as [`weibull_mle`].
+#[wasm_bindgen(unchecked_return_type = "WeibullMrrDto")]
+pub fn weibull_mrr(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] failure_times: JsValue,
+) -> Result<JsValue, JsValue> {
+    let times = read_numbers(&failure_times, "failure_times").map_err(js_err)?;
+    to_js(&weibull_mrr_dto(&times).map_err(js_err)?)
+}
+
+/// Reliability metrics of a Weibull: `{ shape, scale, times?, fractions_failed? }`
+/// → `{ mtbf, reliability, hazard_rate, b_life }`, the arrays aligned with
+/// `times` (R(t), h(t)) and `fractions_failed` (B-life; `0.1` is B10, and the
+/// time to reliability `p` is the B-life at `1 − p`).
+#[wasm_bindgen(unchecked_return_type = "WeibullReliabilityDto")]
+pub fn weibull_reliability(
+    #[wasm_bindgen(unchecked_param_type = "WeibullReliabilityInputDto")] input: JsValue,
+) -> Result<JsValue, JsValue> {
+    let input: WeibullReliabilityInputDto = from_js(input, "input")?;
+    to_js(&weibull_reliability_dto(input).map_err(js_err)?)
 }
 
 // ── Wire-schema strictness tests ─────────────────────────────────────

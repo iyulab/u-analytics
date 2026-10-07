@@ -11,7 +11,10 @@
   non-normal data
 - **Measurement systems analysis**: Gage R&R by the Average & Range method and by
   ANOVA, each returning the charts the method plots
-- **Reliability**: Weibull fitting by maximum likelihood
+- **Reliability**: Weibull fitting by maximum likelihood (`WeibullMle`) and median-rank
+  regression (`WeibullMrr`); `WeibullReliability` — MTBF, R(t), h(t) and B-lives
+- **Non-normal capability**: `BoxCoxCapability`, and `SigmaToPpm` / `PpmToSigma` on the
+  1.5σ-shift convention
 - **Event-time trend**: whether one unit's events (failures of a repairable system,
   incidents) arrive at a changing rate — `LaplaceTrendTest`, `MilHdbk189Test`, and the
   power-law process (Crow-AMSAA) fit `PowerLawProcessFit`. Pass the end of observation,

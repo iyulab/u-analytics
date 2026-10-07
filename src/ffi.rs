@@ -757,50 +757,103 @@ pub unsafe extern "C" fn uanalytics_gage_rr_anova(
 
 // ── Weibull MLE ─────────────────────────────────────────────
 
+/// One FFI entry point whose request deserializes into `$req` and whose
+/// response is `$body(request)` -- the shared wire function.
+macro_rules! wire_export {
+    ($(#[$doc:meta])* $name:ident, $req:ty, |$r:ident| $body:expr) => {
+        $(#[$doc])*
+        ///
+        /// # Safety
+        ///
+        /// `request_json` must be null or point to a NUL-terminated string, and
+        /// `result_ptr` must be null or valid for writing one pointer. A string written
+        /// there is owned by the caller and must be released with
+        /// [`uanalytics_free_string`].
+        #[cfg(feature = "ffi")]
+        #[no_mangle]
+        pub unsafe extern "C" fn $name(
+            request_json: *const libc::c_char,
+            result_ptr: *mut *mut libc::c_char,
+        ) -> i32 {
+            ffi_catch(result_ptr, || {
+                let json = match unsafe { read_json(request_json) } {
+                    Ok(j) => j,
+                    Err(e) => return e,
+                };
+                let $r: $req = match parse_request(&json, result_ptr) {
+                    Ok(r) => r,
+                    Err(status) => return status,
+                };
+                match $body {
+                    Ok(dto) => write_json(result_ptr, &dto),
+                    Err(e) => write_error(result_ptr, ERR_COMPUTE, e),
+                }
+            })
+        }
+    };
+}
+
 #[cfg(feature = "ffi")]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct WeibullRequest {
-    failure_times: Vec<f64>,
+struct SigmaRequest {
+    sigma: f64,
 }
 
-/// Weibull MLE parameter estimation
-///
-/// # Safety
-///
-/// `request_json` must be null or point to a NUL-terminated string, and
-/// `result_ptr` must be null or valid for writing one pointer. A string written
-/// there is owned by the caller and must be released with
-/// [`uanalytics_free_string`].
 #[cfg(feature = "ffi")]
-#[no_mangle]
-pub unsafe extern "C" fn uanalytics_weibull_mle(
-    request_json: *const libc::c_char,
-    result_ptr: *mut *mut libc::c_char,
-) -> i32 {
-    ffi_catch(result_ptr, || {
-        let json = match unsafe { read_json(request_json) } {
-            Ok(j) => j,
-            Err(e) => return e,
-        };
-
-        let req: WeibullRequest = match parse_request(&json, result_ptr) {
-            Ok(r) => r,
-            Err(status) => return status,
-        };
-
-        match crate::weibull::weibull_mle(&req.failure_times) {
-            Some(result) => {
-                let resp = serde_json::json!({
-                    "shape": result.shape,
-                    "scale": result.scale,
-                });
-                write_json(result_ptr, &resp)
-            }
-            None => write_error(result_ptr, ERR_COMPUTE, "Weibull MLE estimation failed"),
-        }
-    })
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PpmRequest {
+    ppm: f64,
 }
+
+wire_export!(
+    /// Weibull maximum-likelihood fit: `{failure_times}` → `{shape, scale,
+    /// log_likelihood, iterations}`.
+    uanalytics_weibull_mle,
+    crate::wire::reliability::FailureTimesDto,
+    |r| crate::wire::reliability::weibull_mle_dto(&r.failure_times)
+);
+
+wire_export!(
+    /// Weibull median-rank-regression fit: `{failure_times}` → `{shape, scale,
+    /// r_squared}`.
+    uanalytics_weibull_mrr,
+    crate::wire::reliability::FailureTimesDto,
+    |r| crate::wire::reliability::weibull_mrr_dto(&r.failure_times)
+);
+
+wire_export!(
+    /// Reliability metrics of a Weibull: `{shape, scale, times?, fractions_failed?}`
+    /// → `{mtbf, reliability[], hazard_rate[], b_life[]}` aligned with the inputs.
+    uanalytics_weibull_reliability,
+    crate::wire::reliability::WeibullReliabilityInputDto,
+    |r| crate::wire::reliability::weibull_reliability_dto(r)
+);
+
+wire_export!(
+    /// Box-Cox (non-normal) process capability: `{data, usl?, lsl?, lambda_range?}`
+    /// → `{lambda, lambda_at_bound, cp, cpk, ..., cpm}` on the transformed scale.
+    uanalytics_boxcox_capability,
+    crate::wire::reliability::BoxcoxCapabilityInputDto,
+    |r| crate::wire::reliability::boxcox_capability_dto(r)
+);
+
+wire_export!(
+    /// Defect rate in PPM at a sigma level (1.5σ shift): `{sigma}` → `{value}`.
+    uanalytics_sigma_to_ppm,
+    SigmaRequest,
+    |r| crate::wire::reliability::sigma_to_ppm_value(r.sigma)
+        .map(|v| serde_json::json!({ "value": v }))
+);
+
+wire_export!(
+    /// Sigma level at a PPM strictly inside (0, 1 000 000): `{ppm}` → `{value}`.
+    uanalytics_ppm_to_sigma,
+    PpmRequest,
+    |r| crate::wire::reliability::ppm_to_sigma_value(r.ppm)
+        .map(|v| serde_json::json!({ "value": v }))
+);
 
 // ── Point processes (event-time trend) ─────────────────────
 
@@ -1212,6 +1265,47 @@ mod tests {
         unsafe { uanalytics_free_string(out) };
         let value = serde_json::from_str(&body).expect("body is JSON");
         (code, value)
+    }
+
+    #[test]
+    fn reliability_surface_round_trips() {
+        let (code, b) = call(
+            uanalytics_weibull_mrr,
+            r#"{"failure_times": [150, 200, 250, 300, 350, 400]}"#,
+        );
+        assert_eq!(code, 0, "{b}");
+        assert!(b["r_squared"].as_f64().unwrap() > 0.9);
+        let (code, b) = call(
+            uanalytics_weibull_reliability,
+            r#"{"shape": 2, "scale": 100, "times": [100], "fractions_failed": [0.1]}"#,
+        );
+        assert_eq!(code, 0, "{b}");
+        assert!((b["reliability"][0].as_f64().unwrap() - (-1.0f64).exp()).abs() < 1e-12);
+        let (_, b) = call(uanalytics_ppm_to_sigma, r#"{"ppm": 3.4}"#);
+        assert!((b["value"].as_f64().unwrap() - 6.0).abs() < 1e-2);
+        let (code, b) = call(uanalytics_ppm_to_sigma, r#"{"ppm": 0}"#);
+        assert_eq!(
+            (code, b["code"].as_str(), b["max"].as_f64()),
+            (-3, Some("parameter_out_of_range"), Some(1e6))
+        );
+        let (code, b) = call(
+            uanalytics_boxcox_capability,
+            r#"{"data": [1, 2, 0, 3], "usl": 9}"#,
+        );
+        assert_eq!(
+            (code, b["code"].as_str(), b["index"].as_u64()),
+            (-3, Some("non_positive_data"), Some(2))
+        );
+        let (code, b) = call(uanalytics_weibull_mle, r#"{"failure_times": [10]}"#);
+        assert_eq!(
+            (
+                code,
+                b["code"].as_str(),
+                b["min"].as_f64(),
+                b["got"].as_f64()
+            ),
+            (-3, Some("insufficient_data"), Some(2.0), Some(1.0))
+        );
     }
 
     #[test]

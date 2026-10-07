@@ -19,11 +19,30 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   `data` / `signals` is `empty_input`; multi-signal PELT signals of different
   lengths are `dimension_mismatch` at the first that differs, with `expected`
   and `got`. Every `insufficient_data` now carries `min` and `got`. The values
-  are properties of the WebAssembly `Error` and keys of the C error body (so
-  `AnalyticsException.Details` has them).
+  are properties of the WebAssembly `Error` and keys of the C error body.
+- **Breaking:** `sigma_to_ppm` with a non-finite sigma is `value_not_finite`
+  and `ppm_to_sigma` outside (0, 1 000 000) is `parameter_out_of_range` with
+  `min`, `max`, `got` (both were `invalid_input`). `boxcox_capability` names
+  its refusal: `non_positive_data` / `value_not_finite` at the data `index`,
+  `insufficient_data` with `min` 4 and `got`, a non-positive `usl`/`lsl`
+  `parameter_out_of_range`, a `lambda_range` with `min >= max`
+  `invalid_option`.
+- C ABI `uanalytics_weibull_mle` also returns `log_likelihood` and
+  `iterations`, and refuses with the place (`non_positive_data` /
+  `value_not_finite` at `index`, `insufficient_data` with `min` and `got`)
+  instead of "Weibull MLE estimation failed".
 
 ### Added
 
+- WebAssembly `weibull_mle`, `weibull_mrr` and `weibull_reliability` (MTBF,
+  R(t) and h(t) at given times, B-lives at given fractions failed, in one call);
+  the C ABI gains `uanalytics_weibull_mrr`, `uanalytics_weibull_reliability`,
+  `uanalytics_boxcox_capability`, `uanalytics_sigma_to_ppm` and
+  `uanalytics_ppm_to_sigma` — both transports build them from one shared
+  implementation.
+- `UAnalytics`: `WeibullMrr`, `WeibullReliability`, `BoxCoxCapability`,
+  `SigmaToPpm`, `PpmToSigma`; `AnalyticsException` gains `Parameter` and
+  `Details` (the whole error body, with the values behind the reason).
 - `point_process`: the trend of one unit's event times against a constant
   rate — `laplace_trend_test`, `mil_hdbk_189_test`, and the power-law process
   (Crow-AMSAA) fit `power_law_process_fit` (MLE `β̂`, `λ̂`, the unbiased `β̄`,

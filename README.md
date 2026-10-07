@@ -276,6 +276,8 @@ interface AnalyticsError extends Error {
 | `code` | Meaning |
 |---|---|
 | `count_not_whole` | a defect or defective count is not a whole number ≥ 0 |
+| `non_positive_data` | a value that must be `> 0` is not — Box-Cox `data`, Weibull `failure_times` (`index`, `got`) |
+| `invalid_option` | a setting refused for a reason a range cannot state — a `lambda_range` with `min >= max` (`parameter`) |
 | `sample_size_not_whole` | a sample size is not a whole number ≥ 1 — zero, negative, fractional and not-a-number alike |
 | `defectives_exceed_sample` | more defectives than the sample has items |
 | `units_not_positive` | units inspected that are not a positive number |
@@ -577,6 +579,26 @@ sigma_to_ppm(sigma: number): number   // 6 → ~3.4,  3 → ~66807
 ppm_to_sigma(ppm: number): number     // inverse; ppm must be inside (0, 1e6)
 ```
 
+Weibull — fits of failure times (each finite and `> 0`, at least 2) and the
+reliability metrics of a fitted or known Weibull:
+
+```ts
+weibull_mle(failure_times): { shape, scale, log_likelihood, iterations }
+weibull_mrr(failure_times): { shape, scale, r_squared }        // median-rank regression (Bernard)
+weibull_reliability({ shape, scale, times?: number[], fractions_failed?: number[] }):
+  { mtbf, reliability: number[], hazard_rate: number[], b_life: number[] }
+  // arrays aligned with times (R(t), h(t)) and fractions_failed (0.1 → B10);
+  // the time to reliability p is the B-life at 1 − p
+```
+
+```js
+const { weibull_mrr, weibull_reliability } = require("@iyulab/u-analytics");
+const fit = weibull_mrr([150, 200, 250, 300, 350, 400]);
+const r = weibull_reliability({ shape: fit.shape, scale: fit.scale, times: [200], fractions_failed: [0.1] });
+console.log(r.reliability[0] > 0.5, r.b_life[0] < 200); // true true
+if (!(r.reliability[0] > 0.5) || !(r.b_life[0] < 200)) throw new Error("unexpected");
+```
+
 **Only the long-term indices are reported.** `data` is a flat vector, so there
 is no rational subgrouping and no within-subgroup sigma to estimate. Computing
 `cp`/`cpk` from the overall sigma instead would make `cp` equal `pp` for every
@@ -805,10 +827,15 @@ The event-time trend functions take `{ "times": [...], "observation": { "truncat
 `uanalytics_laplace_trend_test`, `uanalytics_mil_hdbk_189_test`,
 `uanalytics_power_law_process_fit`.
 
-Four entry points exist only on the FFI:
+The reliability and non-normal capability functions take the WASM argument as the
+request (`uanalytics_boxcox_capability`, `uanalytics_weibull_reliability`), wrap a
+scalar as `{ "sigma": s }` / `{ "ppm": p }` → `{ "value": … }` (`uanalytics_sigma_to_ppm`,
+`uanalytics_ppm_to_sigma`), and take `{ "failure_times": [...] }` for the fits
+(`uanalytics_weibull_mle`, `uanalytics_weibull_mrr`); the responses are the WASM ones.
+
+Three entry points exist only on the FFI:
 
 ```ts
-uanalytics_weibull_mle        { failure_times: number[] }  → { shape: number, scale: number }
 uanalytics_correlation_matrix { variables: number[][] }    → { rows: number, cols: number, data: number[] } // row-major
 uanalytics_simple_regression  { x: number[], y: number[] } → { slope, intercept, r_squared, adjusted_r_squared,
                                                                 slope_se, intercept_se: number }

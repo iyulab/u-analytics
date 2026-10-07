@@ -339,6 +339,11 @@ pub(crate) mod code {
     pub(crate) const PARAMETER_OUT_OF_RANGE: &str = "parameter_out_of_range";
     /// An argument with nothing in it.
     pub(crate) const EMPTY_INPUT: &str = "empty_input";
+    /// A value that must be `> 0` is not (Box-Cox data, failure times).
+    pub(crate) const NON_POSITIVE_DATA: &str = "non_positive_data";
+    /// A setting refused for a reason a range cannot state (`[lo, hi]` with
+    /// `lo >= hi`).
+    pub(crate) const INVALID_OPTION: &str = "invalid_option";
     /// Arrays that must have the same length do not. (Its users -- the
     /// hypothesis tests and multi-signal PELT -- are WebAssembly-only so far.)
     #[cfg(feature = "wasm")]
@@ -2193,6 +2198,436 @@ pub(crate) fn spectral_residual_dto(
             .collect(),
         anomalies,
     })
+}
+
+/// Weibull fits and reliability metrics, Box-Cox capability, and the sigma
+/// level ↔ PPM conversion — the reliability and non-normal capability surface
+/// both transports carry.
+pub(crate) mod reliability {
+    use super::*;
+
+    /// The first problem with values that must be finite and `> 0`, placed.
+    fn positive_values(param: &'static str, values: &[f64], min: usize) -> Result<(), WireError> {
+        for (i, &v) in values.iter().enumerate() {
+            if !v.is_finite() {
+                return Err(WireError::new(
+                    code::VALUE_NOT_FINITE,
+                    Some(i),
+                    format!("{param}[{i}]: expected a finite number, got {v}"),
+                )
+                .about(param));
+            }
+            if v <= 0.0 {
+                return Err(WireError::new(
+                    code::NON_POSITIVE_DATA,
+                    Some(i),
+                    format!("{param}[{i}]: must be > 0, got {v}"),
+                )
+                .about(param)
+                .with("got", Detail::Num(v)));
+            }
+        }
+        if values.len() < min {
+            return Err(WireError::too_few(
+                param,
+                min,
+                values.len(),
+                format!(
+                    "{param}: at least {min} values are needed, got {}",
+                    values.len()
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// A finite number `> 0`, or `parameter_out_of_range`.
+    fn positive(param: &'static str, x: f64) -> Result<f64, WireError> {
+        if x.is_finite() && x > 0.0 {
+            Ok(x)
+        } else {
+            Err(WireError::out_of_range(
+                param,
+                Some(0.0),
+                None,
+                x,
+                format!("{param} must be a finite number > 0, got {x}"),
+            ))
+        }
+    }
+
+    // ── Weibull fits ──────────────────────────────────────────────────────
+
+    /// `{ failure_times }` — the C ABI request (WebAssembly takes the array).
+    #[cfg(feature = "ffi")]
+    #[derive(Deserialize, Debug)]
+    #[serde(deny_unknown_fields)]
+    pub(crate) struct FailureTimesDto {
+        pub(crate) failure_times: Vec<f64>,
+    }
+
+    /// Weibull maximum-likelihood fit.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct WeibullMleDto {
+        pub(crate) shape: f64,
+        pub(crate) scale: f64,
+        pub(crate) log_likelihood: f64,
+        pub(crate) iterations: usize,
+    }
+
+    /// Weibull median-rank-regression fit.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct WeibullMrrDto {
+        pub(crate) shape: f64,
+        pub(crate) scale: f64,
+        pub(crate) r_squared: f64,
+    }
+
+    fn degenerate(method: &str) -> WireError {
+        WireError::invalid_input(format!(
+            "{method}: failure_times has no spread (every value is the same), so the shape is undefined"
+        ))
+        .about("failure_times")
+    }
+
+    pub(crate) fn weibull_mle_dto(times: &[f64]) -> Result<WeibullMleDto, WireError> {
+        positive_values("failure_times", times, 2)?;
+        let r = crate::weibull::weibull_mle(times).ok_or_else(|| degenerate("weibull_mle"))?;
+        Ok(WeibullMleDto {
+            shape: r.shape,
+            scale: r.scale,
+            log_likelihood: r.log_likelihood,
+            iterations: r.iterations,
+        })
+    }
+
+    pub(crate) fn weibull_mrr_dto(times: &[f64]) -> Result<WeibullMrrDto, WireError> {
+        positive_values("failure_times", times, 2)?;
+        let r = crate::weibull::weibull_mrr(times).ok_or_else(|| degenerate("weibull_mrr"))?;
+        Ok(WeibullMrrDto {
+            shape: r.shape,
+            scale: r.scale,
+            r_squared: r.r_squared,
+        })
+    }
+
+    // ── Weibull reliability ───────────────────────────────────────────────
+
+    /// `{ shape, scale, times?, fractions_failed? }` — a fitted (or known)
+    /// Weibull and the points to evaluate it at.
+    #[derive(Deserialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[serde(deny_unknown_fields)]
+    pub(crate) struct WeibullReliabilityInputDto {
+        pub(crate) shape: f64,
+        pub(crate) scale: f64,
+        /// Times at which to evaluate `R(t)` and `h(t)`.
+        #[serde(default)]
+        #[cfg_attr(feature = "wasm", tsify(optional))]
+        pub(crate) times: Vec<f64>,
+        /// Fractions failed (each in `(0, 1)`) whose B-life to report;
+        /// `0.1` is B10. (The time to reliability `p` is the B-life at `1 − p`.)
+        #[serde(default)]
+        #[cfg_attr(feature = "wasm", tsify(optional))]
+        pub(crate) fractions_failed: Vec<f64>,
+    }
+
+    /// Reliability metrics of a Weibull, aligned with the input arrays.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct WeibullReliabilityDto {
+        /// Mean time between (to) failure, `η·Γ(1 + 1/β)`.
+        pub(crate) mtbf: f64,
+        /// `R(t)` for each of `times`.
+        pub(crate) reliability: Vec<f64>,
+        /// `h(t)` for each of `times`.
+        pub(crate) hazard_rate: Vec<f64>,
+        /// The B-life for each of `fractions_failed`.
+        pub(crate) b_life: Vec<f64>,
+    }
+
+    pub(crate) fn weibull_reliability_dto(
+        input: WeibullReliabilityInputDto,
+    ) -> Result<WeibullReliabilityDto, WireError> {
+        let shape = positive("shape", input.shape)?;
+        let scale = positive("scale", input.scale)?;
+        for (i, &t) in input.times.iter().enumerate() {
+            if !t.is_finite() {
+                return Err(WireError::new(
+                    code::VALUE_NOT_FINITE,
+                    Some(i),
+                    format!("times[{i}]: expected a finite number, got {t}"),
+                )
+                .about("times"));
+            }
+        }
+        for (i, &f) in input.fractions_failed.iter().enumerate() {
+            if !(f > 0.0 && f < 1.0) {
+                return Err(WireError::new(
+                    code::PARAMETER_OUT_OF_RANGE,
+                    Some(i),
+                    format!("fractions_failed[{i}]: must be strictly inside (0, 1), got {f}"),
+                )
+                .about("fractions_failed")
+                .with("min", Detail::Num(0.0))
+                .with("max", Detail::Num(1.0))
+                .with("got", Detail::Num(f)));
+            }
+        }
+        let ra = crate::weibull::ReliabilityAnalysis::new(shape, scale)
+            .expect("shape and scale were checked finite and > 0");
+        Ok(WeibullReliabilityDto {
+            mtbf: ra.mtbf(),
+            reliability: input.times.iter().map(|&t| ra.reliability(t)).collect(),
+            hazard_rate: input.times.iter().map(|&t| ra.hazard_rate(t)).collect(),
+            b_life: input
+                .fractions_failed
+                .iter()
+                .map(|&f| ra.b_life(f).expect("fraction checked inside (0, 1)"))
+                .collect(),
+        })
+    }
+
+    // ── Sigma level ↔ PPM ─────────────────────────────────────────────────
+
+    /// PPM at a sigma level (1.5σ shift convention).
+    pub(crate) fn sigma_to_ppm_value(sigma: f64) -> Result<f64, WireError> {
+        if !sigma.is_finite() {
+            return Err(WireError::new(
+                code::VALUE_NOT_FINITE,
+                None,
+                format!("sigma must be a finite number, got {sigma}"),
+            )
+            .about("sigma"));
+        }
+        Ok(crate::capability::sigma_to_ppm(sigma))
+    }
+
+    /// Sigma level at a PPM, for `ppm` strictly inside `(0, 1_000_000)`.
+    pub(crate) fn ppm_to_sigma_value(ppm: f64) -> Result<f64, WireError> {
+        crate::capability::ppm_to_sigma(ppm).ok_or_else(|| {
+            WireError::out_of_range(
+                "ppm",
+                Some(0.0),
+                Some(1_000_000.0),
+                ppm,
+                format!("ppm must be finite and strictly inside (0, 1000000), got {ppm}"),
+            )
+        })
+    }
+
+    // ── Box-Cox capability ────────────────────────────────────────────────
+
+    #[derive(Deserialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    #[serde(deny_unknown_fields)]
+    pub(crate) struct BoxcoxCapabilityInputDto {
+        pub(crate) data: Vec<f64>,
+        #[serde(default)]
+        #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+        pub(crate) usl: Option<f64>,
+        #[serde(default)]
+        #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+        pub(crate) lsl: Option<f64>,
+        /// `[min, max]` lambda search range; defaults to `[-5, 5]`.
+        #[serde(default)]
+        #[cfg_attr(feature = "wasm", tsify(optional, type = "[number, number] | null"))]
+        pub(crate) lambda_range: Option<[f64; 2]>,
+    }
+
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct BoxcoxCapabilityDto {
+        /// Estimated optimal Box-Cox parameter. `0` is a log transform, `1` the
+        /// identity, `0.5` approximately a square root.
+        pub(crate) lambda: f64,
+        /// `true` when the likelihood maximum is on an end of `lambda_range`, so
+        /// `lambda` is that limit rather than an interior estimate.
+        pub(crate) lambda_at_bound: bool,
+        /// Every index below is on the **transformed** scale, which is where the
+        /// normal-theory formulas are valid -- they are not comparable to indices
+        /// computed on the raw non-normal data.
+        pub(crate) cp: Option<f64>,
+        pub(crate) cpk: Option<f64>,
+        pub(crate) cpu: Option<f64>,
+        pub(crate) cpl: Option<f64>,
+        pub(crate) pp: Option<f64>,
+        pub(crate) ppk: Option<f64>,
+        pub(crate) ppu: Option<f64>,
+        pub(crate) ppl: Option<f64>,
+        pub(crate) cpm: Option<f64>,
+    }
+
+    pub(crate) fn boxcox_capability_dto(
+        input: BoxcoxCapabilityInputDto,
+    ) -> Result<BoxcoxCapabilityDto, WireError> {
+        use crate::capability::NonNormalCapabilityError as E;
+        positive_values("data", &input.data, 4)?;
+        for (name, limit) in [("usl", input.usl), ("lsl", input.lsl)] {
+            if let Some(v) = limit {
+                positive(name, v)?;
+            }
+        }
+        let range = input
+            .lambda_range
+            .map_or(crate::capability::DEFAULT_LAMBDA_RANGE, |[lo, hi]| (lo, hi));
+        let result = crate::capability::boxcox_capability(&input.data, input.usl, input.lsl, range)
+            .map_err(|e| {
+                let message = format!("boxcox_capability: {e}");
+                match e {
+                    E::InvalidLambdaRange => {
+                        WireError::new(code::INVALID_OPTION, None, message).about("lambda_range")
+                    }
+                    E::CapabilityError => WireError::invalid_input(message).about("data"),
+                    // Checked above with their place; kept for completeness.
+                    E::NonPositiveData => {
+                        WireError::new(code::NON_POSITIVE_DATA, None, message).about("data")
+                    }
+                    E::NonFiniteData => {
+                        WireError::new(code::VALUE_NOT_FINITE, None, message).about("data")
+                    }
+                    E::InsufficientData => {
+                        WireError::new(code::INSUFFICIENT_DATA, None, message).about("data")
+                    }
+                    E::SpecTransformError => WireError::invalid_input(message),
+                }
+            })?;
+        let i = result.indices.as_ref();
+        Ok(BoxcoxCapabilityDto {
+            lambda: result.lambda,
+            lambda_at_bound: result.lambda_at_bound,
+            cp: i.and_then(|i| i.cp),
+            cpk: i.and_then(|i| i.cpk),
+            cpu: i.and_then(|i| i.cpu),
+            cpl: i.and_then(|i| i.cpl),
+            pp: i.and_then(|i| i.pp),
+            ppk: i.and_then(|i| i.ppk),
+            ppu: i.and_then(|i| i.ppu),
+            ppl: i.and_then(|i| i.ppl),
+            cpm: i.and_then(|i| i.cpm),
+        })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn weibull_fits_refuse_with_the_place() {
+            let e = weibull_mle_dto(&[10.0, -1.0]).unwrap_err();
+            assert_eq!(
+                (e.code, e.index, e.parameter.as_deref()),
+                ("non_positive_data", Some(1), Some("failure_times"))
+            );
+            let e = weibull_mrr_dto(&[10.0, f64::NAN]).unwrap_err();
+            assert_eq!((e.code, e.index), ("value_not_finite", Some(1)));
+            let e = weibull_mrr_dto(&[10.0]).unwrap_err();
+            assert_eq!(
+                e.details,
+                vec![("min", Detail::Num(2.0)), ("got", Detail::Num(1.0))]
+            );
+            let e = weibull_mle_dto(&[5.0, 5.0, 5.0]).unwrap_err();
+            assert_eq!(e.code, "invalid_input");
+            let ok = weibull_mrr_dto(&[150.0, 200.0, 250.0, 300.0, 350.0, 400.0]).unwrap();
+            assert!(ok.shape > 0.0 && ok.r_squared > 0.9);
+        }
+
+        #[test]
+        fn reliability_is_aligned_with_its_inputs() {
+            let r = weibull_reliability_dto(WeibullReliabilityInputDto {
+                shape: 2.0,
+                scale: 100.0,
+                times: vec![0.0, 100.0],
+                fractions_failed: vec![0.1, 0.5],
+            })
+            .unwrap();
+            assert!((r.reliability[1] - (-1.0f64).exp()).abs() < 1e-12);
+            assert_eq!(r.reliability[0], 1.0);
+            assert_eq!((r.hazard_rate.len(), r.b_life.len()), (2, 2));
+            // B10 = η·(−ln 0.9)^(1/β)
+            assert!((r.b_life[0] - 100.0 * (-(0.9f64).ln()).sqrt()).abs() < 1e-9);
+            assert!((r.mtbf - 100.0 * 0.886_226_925_452_758).abs() < 1e-9);
+
+            let e = weibull_reliability_dto(WeibullReliabilityInputDto {
+                shape: 0.0,
+                scale: 1.0,
+                times: vec![],
+                fractions_failed: vec![],
+            })
+            .unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some("shape"))
+            );
+            let e = weibull_reliability_dto(WeibullReliabilityInputDto {
+                shape: 1.0,
+                scale: 1.0,
+                times: vec![],
+                fractions_failed: vec![0.5, 1.0],
+            })
+            .unwrap_err();
+            assert_eq!(
+                (e.code, e.index, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some(1), Some("fractions_failed"))
+            );
+        }
+
+        #[test]
+        fn sigma_and_ppm_refuse_by_code() {
+            assert!((ppm_to_sigma_value(3.4).unwrap() - 6.0).abs() < 1e-2);
+            let e = ppm_to_sigma_value(0.0).unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some("ppm"))
+            );
+            assert_eq!(e.details[1], ("max", Detail::Num(1_000_000.0)));
+            let e = sigma_to_ppm_value(f64::NAN).unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("value_not_finite", Some("sigma"))
+            );
+        }
+
+        #[test]
+        fn boxcox_refusals_name_their_input() {
+            let input = |data: Vec<f64>, usl: Option<f64>, range: Option<[f64; 2]>| {
+                BoxcoxCapabilityInputDto {
+                    data,
+                    usl,
+                    lsl: None,
+                    lambda_range: range,
+                }
+            };
+            let e = boxcox_capability_dto(input(vec![1.0, 2.0, 0.0, 3.0], Some(9.0), None))
+                .unwrap_err();
+            assert_eq!((e.code, e.index), ("non_positive_data", Some(2)));
+            let e = boxcox_capability_dto(input(vec![1.0, 2.0, 3.0], Some(9.0), None)).unwrap_err();
+            assert_eq!(
+                e.details,
+                vec![("min", Detail::Num(4.0)), ("got", Detail::Num(3.0))]
+            );
+            let e = boxcox_capability_dto(input(vec![1.0, 2.0, 3.0, 4.0], Some(-1.0), None))
+                .unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some("usl"))
+            );
+            let e =
+                boxcox_capability_dto(input(vec![1.0, 2.0, 3.0, 4.0], Some(9.0), Some([2.0, 1.0])))
+                    .unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("invalid_option", Some("lambda_range"))
+            );
+        }
+    }
 }
 
 /// Trend tests and the power-law fit on event times (`crate::point_process`).

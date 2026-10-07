@@ -179,9 +179,59 @@ public sealed class AnalyticsClient : IDisposable
 
     // ── Weibull ──
 
+    /// <summary>
+    /// Weibull maximum-likelihood fit of <paramref name="failureTimes"/> (each finite and &gt; 0,
+    /// at least 2). Returns <c>shape</c>, <c>scale</c>, <c>log_likelihood</c>, <c>iterations</c>.
+    /// </summary>
     public JsonElement WeibullMle(double[] failureTimes)
         => CallNative(NativeInterop.uanalytics_weibull_mle,
             new { failure_times = failureTimes });
+
+    /// <summary>
+    /// Weibull median-rank-regression fit (Bernard's ranks). Returns <c>shape</c>,
+    /// <c>scale</c>, <c>r_squared</c>.
+    /// </summary>
+    public JsonElement WeibullMrr(double[] failureTimes)
+        => CallNative(NativeInterop.uanalytics_weibull_mrr,
+            new { failure_times = failureTimes });
+
+    /// <summary>
+    /// Reliability metrics of a Weibull: <c>mtbf</c>, and arrays aligned with the inputs —
+    /// <c>reliability</c> and <c>hazard_rate</c> at each of <paramref name="times"/>,
+    /// <c>b_life</c> at each of <paramref name="fractionsFailed"/> (0.1 is B10; the time to
+    /// reliability p is the B-life at 1 − p).
+    /// </summary>
+    public JsonElement WeibullReliability(double shape, double scale, double[]? times = null,
+        double[]? fractionsFailed = null)
+        => CallNative(NativeInterop.uanalytics_weibull_reliability,
+            new { shape, scale, times = times ?? [], fractions_failed = fractionsFailed ?? [] });
+
+    // ── Non-normal capability and sigma level ──
+
+    /// <summary>
+    /// Process capability for non-normal data via a Box-Cox transformation of
+    /// <paramref name="data"/> (each &gt; 0, at least 4). <paramref name="lambdaRange"/> bounds
+    /// the λ search (default [-5, 5]). Returns <c>lambda</c>, <c>lambda_at_bound</c> and the
+    /// indices on the transformed scale (<c>null</c> where the limits do not define them).
+    /// </summary>
+    public JsonElement BoxCoxCapability(double[] data, double? usl = null, double? lsl = null,
+        (double Min, double Max)? lambdaRange = null)
+        => CallNative(NativeInterop.uanalytics_boxcox_capability,
+            new
+            {
+                data,
+                usl,
+                lsl,
+                lambda_range = lambdaRange is { } r ? new[] { r.Min, r.Max } : null,
+            });
+
+    /// <summary>Defect rate in PPM at a sigma level, with the conventional 1.5σ shift (6σ → 3.4 PPM).</summary>
+    public double SigmaToPpm(double sigma)
+        => CallNative(NativeInterop.uanalytics_sigma_to_ppm, new { sigma }).GetProperty("value").GetDouble();
+
+    /// <summary>Sigma level at a defect rate in PPM strictly inside (0, 1 000 000) — the inverse of <see cref="SigmaToPpm"/>.</summary>
+    public double PpmToSigma(double ppm)
+        => CallNative(NativeInterop.uanalytics_ppm_to_sigma, new { ppm }).GetProperty("value").GetDouble();
 
     // ── Event-time trend (one unit's events: failures of a repairable system, incidents, ...) ──
 
@@ -322,7 +372,8 @@ public sealed class AnalyticsClient : IDisposable
 
 /// <summary>
 /// A call the engine refused. <see cref="Exception.Message"/> is human-readable;
-/// <see cref="Reason"/> and <see cref="Index"/> are for programs.
+/// <see cref="Reason"/>, <see cref="Parameter"/>, <see cref="Index"/> and <see cref="Details"/>
+/// are for programs.
 /// </summary>
 public class AnalyticsException : Exception
 {
@@ -332,13 +383,25 @@ public class AnalyticsException : Exception
     /// <summary>
     /// Stable, machine-readable reason, e.g. <c>count_not_whole</c>,
     /// <c>sample_size_not_whole</c>, <c>defectives_exceed_sample</c>,
-    /// <c>units_not_positive</c>, <c>insufficient_data</c>, <c>malformed_input</c>,
-    /// <c>invalid_input</c>. <c>null</c> when the engine returned no body.
+    /// <c>units_not_positive</c>, <c>insufficient_data</c>, <c>empty_input</c>,
+    /// <c>parameter_out_of_range</c>, <c>unknown_option</c>, <c>value_not_finite</c>,
+    /// <c>malformed_input</c>, <c>invalid_input</c>. <c>null</c> when the engine returned no body.
     /// </summary>
     public string? Reason { get; }
 
     /// <summary>Zero-based position of the offending element in its input array, when there is one.</summary>
     public int? Index { get; }
+
+    /// <summary>The argument or option the refusal is about (<c>penalty</c>, <c>times</c>, …), when there is one.</summary>
+    public string? Parameter { get; }
+
+    /// <summary>
+    /// The whole error body: <c>error</c>, <c>code</c>, <c>index</c>, <c>parameter</c> and the
+    /// values behind the reason — <c>min</c> / <c>max</c> / <c>got</c> for a value out of range,
+    /// <c>got</c> / <c>expected</c> for an unknown option name, <c>min</c> / <c>got</c> for too
+    /// few values. <c>null</c> when there is no body.
+    /// </summary>
+    public JsonElement? Details { get; }
 
     public AnalyticsException(int code, string message) : base(message)
     {
@@ -352,7 +415,14 @@ public class AnalyticsException : Exception
         Index = index;
     }
 
-    /// <summary>Reads the engine's <c>{"error", "code", "index"}</c> error body.</summary>
+    public AnalyticsException(int code, string message, string? reason, int? index, string? parameter,
+        JsonElement? details) : this(code, message, reason, index)
+    {
+        Parameter = parameter;
+        Details = details;
+    }
+
+    /// <summary>Reads the engine's <c>{"error", "code", "index", "parameter", ...}</c> error body.</summary>
     internal static AnalyticsException FromErrorBody(int code, string body)
     {
         try
@@ -368,7 +438,10 @@ public class AnalyticsException : Exception
             int? index = root.TryGetProperty("index", out var i) && i.ValueKind == JsonValueKind.Number
                 ? i.GetInt32()
                 : null;
-            return new AnalyticsException(code, message, reason, index);
+            string? parameter = root.TryGetProperty("parameter", out var p) && p.ValueKind == JsonValueKind.String
+                ? p.GetString()
+                : null;
+            return new AnalyticsException(code, message, reason, index, parameter, root.Clone());
         }
         catch (JsonException)
         {
