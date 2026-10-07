@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.5.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Added
+
+- `point_process`: the trend of one unit's event times against a constant
+  rate — `laplace_trend_test`, `mil_hdbk_189_test`, and the power-law process
+  (Crow-AMSAA) fit `power_law_process_fit` (MLE `β̂`, `λ̂`, the unbiased `β̄`,
+  the intensity at the end of observation). Observation ends at a chosen time
+  (`Truncation::Time`) or at the last event (`Truncation::Failure`, which drops
+  that event from the statistics). Times that are not finite, not `> 0`, out of
+  order or after the end are refused as `PointProcessError` with their
+  position; so are fewer events than each method needs. Checked against
+  Minitab's published example (χ² 9.59 on 12 df, p 0.697; Laplace 0.12,
+  p 0.906; shape 1.25093).
+- The same three over WebAssembly (`observation` is
+  `{ truncation: "time", end }` or `{ truncation: "failure" }`), the C ABI
+  (`uanalytics_laplace_trend_test`, `uanalytics_mil_hdbk_189_test`,
+  `uanalytics_power_law_process_fit`) and `UAnalytics` (`LaplaceTrendTest`,
+  `MilHdbk189Test`, `PowerLawProcessFit`). An unknown `truncation` is
+  `unknown_option`; an unordered or late event is `events_unordered` /
+  `event_after_end` at its `index`.
+
 ## [0.17.0] - 2026-10-04
 
 Depends on u-numflow 0.8. The .NET client is `UAnalytics` 0.11.0.

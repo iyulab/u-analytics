@@ -25,10 +25,14 @@ use crate::wire::{
         p_adjust_dto, paired_t_dto, shapiro_wilk_dto, two_sample_t_dto, wilcoxon_dto,
     },
     imr_dto, laney_p_dto, laney_u_dto, np_chart_dto, p_chart_dto, pelt_dto,
-    percentile_capability_dto, rate_pairs, rules_from_json, run_rules_dto, sample_size_value,
-    t_chart_dto, u_chart_dto, xbar_r_dto, xbar_s_dto, AttributeStandardDto, CapabilityInputDto,
-    GageRRInputDto, LimitsInputDto, PeltInputDto, PeltPenaltyDto, PeltResultDto,
-    PercentileCapabilityInputDto, SeasonalityInputDto, SpectralResidualInputDto, WireError,
+    percentile_capability_dto,
+    point_process::{
+        check_truncation, laplace_dto, mil_hdbk_189_dto, power_law_dto, ObservationDto,
+    },
+    rate_pairs, rules_from_json, run_rules_dto, sample_size_value, t_chart_dto, u_chart_dto,
+    xbar_r_dto, xbar_s_dto, AttributeStandardDto, CapabilityInputDto, GageRRInputDto,
+    LimitsInputDto, PeltInputDto, PeltPenaltyDto, PeltResultDto, PercentileCapabilityInputDto,
+    SeasonalityInputDto, SpectralResidualInputDto, WireError,
 };
 
 // ---------------------------------------------------------------------------
@@ -910,6 +914,59 @@ pub fn mann_kendall_test(
 ) -> Result<JsValue, JsValue> {
     let data = read_numbers(&data, "data").map_err(js_err)?;
     to_js(&mann_kendall_dto(&data).map_err(js_err)?)
+}
+
+/// `observation` as sent: `truncation` checked by name (`unknown_option`),
+/// then the rest read without changing a number.
+fn read_observation(value: JsValue) -> Result<ObservationDto, JsValue> {
+    let name = js_sys::Reflect::get(&value, &JsValue::from_str("truncation"))
+        .ok()
+        .and_then(|v| v.as_string())
+        .unwrap_or_default();
+    check_truncation(&name).map_err(js_err)?;
+    from_js(value, "observation")
+}
+
+/// Laplace trend test of event times against a constant rate.
+///
+/// `observation` is `{ truncation: "time", end }` (watched until `end`) or
+/// `{ truncation: "failure" }` (stopped at the last event, which is then not
+/// used). Returns `{ statistic, p_value, direction, events_used, df: null }`;
+/// `p_value` is two-sided.
+#[wasm_bindgen(unchecked_return_type = "TrendTestDto")]
+pub fn laplace_trend_test(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] times: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "ObservationDto")] observation: JsValue,
+) -> Result<JsValue, JsValue> {
+    let times = read_numbers(&times, "times").map_err(js_err)?;
+    let o = read_observation(observation)?;
+    to_js(&laplace_dto(&times, o).map_err(js_err)?)
+}
+
+/// MIL-HDBK-189 trend test of event times against a constant rate:
+/// `χ² = 2·Σ ln(T/tᵢ)` with `df = 2m`. `observation` as for
+/// [`laplace_trend_test`].
+#[wasm_bindgen(unchecked_return_type = "TrendTestDto")]
+pub fn mil_hdbk_189_test(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] times: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "ObservationDto")] observation: JsValue,
+) -> Result<JsValue, JsValue> {
+    let times = read_numbers(&times, "times").map_err(js_err)?;
+    let o = read_observation(observation)?;
+    to_js(&mil_hdbk_189_dto(&times, o).map_err(js_err)?)
+}
+
+/// Power-law process (Crow-AMSAA) fit of event times:
+/// `{ beta, beta_unbiased, lambda, intensity_at_end, end, events }`.
+/// `observation` as for [`laplace_trend_test`].
+#[wasm_bindgen(unchecked_return_type = "PowerLawFitDto")]
+pub fn power_law_process_fit(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] times: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "ObservationDto")] observation: JsValue,
+) -> Result<JsValue, JsValue> {
+    let times = read_numbers(&times, "times").map_err(js_err)?;
+    let o = read_observation(observation)?;
+    to_js(&power_law_dto(&times, o).map_err(js_err)?)
 }
 
 /// One-way ANOVA across `groups` (>= 2 groups of >= 2 values).

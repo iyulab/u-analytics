@@ -285,6 +285,12 @@ pub(crate) mod code {
     pub(crate) const STANDARD_OUT_OF_RANGE: &str = "standard_out_of_range";
     /// An option outside its domain. `parameter` names which one.
     pub(crate) const PARAMETER_OUT_OF_RANGE: &str = "parameter_out_of_range";
+    /// An option given a name the function does not know. `parameter` names it.
+    pub(crate) const UNKNOWN_OPTION: &str = "unknown_option";
+    /// Event times that go backwards.
+    pub(crate) const EVENTS_UNORDERED: &str = "events_unordered";
+    /// An event time after the end of observation.
+    pub(crate) const EVENT_AFTER_END: &str = "event_after_end";
 }
 
 impl WireError {
@@ -2019,6 +2025,207 @@ pub(crate) fn spectral_residual_dto(
             .collect(),
         anomalies,
     })
+}
+
+/// Trend tests and the power-law fit on event times (`crate::point_process`).
+pub(crate) mod point_process {
+    use super::*;
+    use crate::point_process::{PointProcessError, TrendDirection, TrendTestResult, Truncation};
+
+    /// How observation ended: `{ truncation: "time", end }` — watched until
+    /// `end` — or `{ truncation: "failure" }` — stopped at the last event.
+    #[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[serde(tag = "truncation", rename_all = "snake_case", deny_unknown_fields)]
+    pub(crate) enum ObservationDto {
+        Time { end: f64 },
+        Failure {},
+    }
+
+    /// The `truncation` names [`ObservationDto`] accepts.
+    pub(crate) const TRUNCATIONS: &[&str] = &["time", "failure"];
+
+    /// `truncation` is a name this function knows, or `unknown_option`.
+    pub(crate) fn check_truncation(name: &str) -> Result<(), WireError> {
+        if TRUNCATIONS.contains(&name) {
+            return Ok(());
+        }
+        Err(WireError::new(
+            code::UNKNOWN_OPTION,
+            None,
+            format!(
+                "observation.truncation: unknown truncation {name:?}; expected one of {}",
+                TRUNCATIONS.join(", ")
+            ),
+        )
+        .about("observation.truncation"))
+    }
+
+    impl From<ObservationDto> for Truncation {
+        fn from(o: ObservationDto) -> Self {
+            match o {
+                ObservationDto::Time { end } => Truncation::Time(end),
+                ObservationDto::Failure {} => Truncation::Failure,
+            }
+        }
+    }
+
+    /// A trend test against a constant event rate.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct TrendTestDto {
+        pub(crate) statistic: f64,
+        /// Two-sided; the one-sided p-value in `direction` is half of it.
+        pub(crate) p_value: f64,
+        #[cfg_attr(
+            feature = "wasm",
+            tsify(type = "\"increasing\" | \"decreasing\" | \"flat\"")
+        )]
+        pub(crate) direction: &'static str,
+        pub(crate) events_used: usize,
+        /// χ² degrees of freedom (MIL-HDBK-189); `null` for Laplace.
+        pub(crate) df: Option<f64>,
+    }
+
+    impl From<TrendTestResult> for TrendTestDto {
+        fn from(r: TrendTestResult) -> Self {
+            TrendTestDto {
+                statistic: r.statistic,
+                p_value: r.p_value,
+                direction: match r.direction {
+                    TrendDirection::Increasing => "increasing",
+                    TrendDirection::Decreasing => "decreasing",
+                    TrendDirection::Flat => "flat",
+                },
+                events_used: r.events_used,
+                df: r.degrees_of_freedom,
+            }
+        }
+    }
+
+    /// A power-law process (Crow-AMSAA) fit.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct PowerLawFitDto {
+        pub(crate) beta: f64,
+        pub(crate) beta_unbiased: f64,
+        pub(crate) lambda: f64,
+        pub(crate) intensity_at_end: f64,
+        pub(crate) end: f64,
+        pub(crate) events: usize,
+    }
+
+    fn refusal(e: PointProcessError) -> WireError {
+        let message = format!("times: {e}");
+        match e {
+            PointProcessError::TooFewEvents { .. } => {
+                WireError::new(code::INSUFFICIENT_DATA, None, message).about("times")
+            }
+            PointProcessError::NotFinite { index: Some(i) } => {
+                WireError::new(code::VALUE_NOT_FINITE, Some(i), message).about("times")
+            }
+            PointProcessError::NotFinite { index: None } => {
+                WireError::new(code::VALUE_NOT_FINITE, None, message).about("observation.end")
+            }
+            PointProcessError::NotPositive { index: Some(i), .. } => {
+                WireError::new(code::PARAMETER_OUT_OF_RANGE, Some(i), message).about("times")
+            }
+            PointProcessError::NotPositive { index: None, .. } => {
+                WireError::new(code::PARAMETER_OUT_OF_RANGE, None, message).about("observation.end")
+            }
+            PointProcessError::Unordered { index } => {
+                WireError::new(code::EVENTS_UNORDERED, Some(index), message).about("times")
+            }
+            PointProcessError::AfterEnd { index } => {
+                WireError::new(code::EVENT_AFTER_END, Some(index), message).about("times")
+            }
+        }
+    }
+
+    pub(crate) fn laplace_dto(times: &[f64], o: ObservationDto) -> Result<TrendTestDto, WireError> {
+        crate::point_process::laplace_trend_test(times, o.into())
+            .map(Into::into)
+            .map_err(refusal)
+    }
+
+    pub(crate) fn mil_hdbk_189_dto(
+        times: &[f64],
+        o: ObservationDto,
+    ) -> Result<TrendTestDto, WireError> {
+        crate::point_process::mil_hdbk_189_test(times, o.into())
+            .map(Into::into)
+            .map_err(refusal)
+    }
+
+    pub(crate) fn power_law_dto(
+        times: &[f64],
+        o: ObservationDto,
+    ) -> Result<PowerLawFitDto, WireError> {
+        crate::point_process::power_law_process_fit(times, o.into())
+            .map(|f| PowerLawFitDto {
+                beta: f.beta,
+                beta_unbiased: f.beta_unbiased,
+                lambda: f.lambda,
+                intensity_at_end: f.intensity_at_end,
+                end: f.end,
+                events: f.events,
+            })
+            .map_err(refusal)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use serde_json::json;
+
+        #[test]
+        fn observation_reads_both_shapes_and_refuses_unknown_keys() {
+            let t: ObservationDto =
+                serde_json::from_value(json!({ "truncation": "time", "end": 60 })).unwrap();
+            assert_eq!(t, ObservationDto::Time { end: 60.0 });
+            let f: ObservationDto =
+                serde_json::from_value(json!({ "truncation": "failure" })).unwrap();
+            assert_eq!(f, ObservationDto::Failure {});
+            assert!(serde_json::from_value::<ObservationDto>(
+                json!({ "truncation": "failure", "end": 3 })
+            )
+            .is_err());
+            let e = check_truncation("timed").unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("unknown_option", Some("observation.truncation"))
+            );
+        }
+
+        #[test]
+        fn refusals_place_the_event() {
+            let o = ObservationDto::Time { end: 10.0 };
+            let e = laplace_dto(&[2.0, 1.0], o).unwrap_err();
+            assert_eq!(
+                (e.code, e.index, e.parameter.as_deref()),
+                ("events_unordered", Some(1), Some("times"))
+            );
+            let e = laplace_dto(&[2.0, 11.0], o).unwrap_err();
+            assert_eq!((e.code, e.index), ("event_after_end", Some(1)));
+            let e = mil_hdbk_189_dto(&[2.0], ObservationDto::Time { end: 0.0 }).unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some("observation.end"))
+            );
+            let e = power_law_dto(&[1.0, 2.0], ObservationDto::Failure {}).unwrap_err();
+            assert_eq!(e.code, "insufficient_data");
+        }
+
+        #[test]
+        fn results_carry_the_direction_by_name() {
+            let o = ObservationDto::Time { end: 60.0 };
+            let r = mil_hdbk_189_dto(&[12.0, 15.0, 27.0, 34.0, 44.0, 53.0], o).unwrap();
+            assert_eq!((r.direction, r.df), ("increasing", Some(12.0)));
+            assert!(laplace_dto(&[12.0, 15.0], o).unwrap().df.is_none());
+        }
+    }
 }
 
 #[cfg(test)]

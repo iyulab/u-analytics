@@ -183,6 +183,39 @@ public sealed class AnalyticsClient : IDisposable
         => CallNative(NativeInterop.uanalytics_weibull_mle,
             new { failure_times = failureTimes });
 
+    // ── Event-time trend (one unit's events: failures of a repairable system, incidents, ...) ──
+
+    /// <summary>
+    /// Laplace trend test of <paramref name="times"/> (ascending, &gt; 0) against a constant
+    /// event rate. <paramref name="end"/> is when observation ended (at or after the last
+    /// event); <c>null</c> means it stopped at the last event, which is then not used.
+    /// Returns <c>statistic</c>, two-sided <c>p_value</c>, <c>direction</c>
+    /// (<c>increasing</c> / <c>decreasing</c> / <c>flat</c>), <c>events_used</c>, <c>df</c> (null).
+    /// </summary>
+    public JsonElement LaplaceTrendTest(double[] times, double? end)
+        => CallNative(NativeInterop.uanalytics_laplace_trend_test, PointProcessRequest(times, end));
+
+    /// <summary>
+    /// MIL-HDBK-189 trend test (χ² = 2·Σ ln(T/tᵢ), df = 2m) — <paramref name="end"/> as for
+    /// <see cref="LaplaceTrendTest"/>. A small statistic means the rate is increasing.
+    /// </summary>
+    public JsonElement MilHdbk189Test(double[] times, double? end)
+        => CallNative(NativeInterop.uanalytics_mil_hdbk_189_test, PointProcessRequest(times, end));
+
+    /// <summary>
+    /// Power-law process (Crow-AMSAA) fit — <paramref name="end"/> as for
+    /// <see cref="LaplaceTrendTest"/>. Returns <c>beta</c> (&lt; 1 rate decreasing, &gt; 1
+    /// increasing), <c>beta_unbiased</c>, <c>lambda</c> (expected events by t = λ·t^β),
+    /// <c>intensity_at_end</c>, <c>end</c>, <c>events</c>.
+    /// </summary>
+    public JsonElement PowerLawProcessFit(double[] times, double? end)
+        => CallNative(NativeInterop.uanalytics_power_law_process_fit, PointProcessRequest(times, end));
+
+    private static object PointProcessRequest(double[] times, double? end)
+        => end is { } t
+            ? new { times, observation = (object)new { truncation = "time", end = t } }
+            : new { times, observation = (object)new { truncation = "failure" } };
+
     // ── Detection ──
 
     /// <summary>

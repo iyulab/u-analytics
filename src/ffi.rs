@@ -797,6 +797,104 @@ pub unsafe extern "C" fn uanalytics_weibull_mle(
     })
 }
 
+// ── Point processes (event-time trend) ─────────────────────
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PointProcessRequest {
+    times: Vec<f64>,
+    observation: serde_json::Value,
+}
+
+/// Reads `{ times, observation }`, checking `observation.truncation` by name
+/// first so an unknown one is `unknown_option` rather than a parse error.
+#[cfg(feature = "ffi")]
+fn point_process_request(
+    json: &str,
+    result_ptr: *mut *mut libc::c_char,
+) -> Result<(Vec<f64>, crate::wire::point_process::ObservationDto), i32> {
+    use crate::wire::point_process::check_truncation;
+    let req: PointProcessRequest = parse_request(json, result_ptr)?;
+    let name = req
+        .observation
+        .get("truncation")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    if let Err(e) = check_truncation(&name) {
+        return Err(write_error(result_ptr, ERR_COMPUTE, e));
+    }
+    let observation = serde_json::from_value(req.observation).map_err(|e| {
+        write_error(
+            result_ptr,
+            ERR_PARSE,
+            crate::wire::WireError::new(
+                crate::wire::code::MALFORMED_INPUT,
+                None,
+                format!("observation: {e}"),
+            )
+            .about("observation"),
+        )
+    })?;
+    Ok((req.times, observation))
+}
+
+macro_rules! point_process_export {
+    ($(#[$doc:meta])* $name:ident => $dto:path) => {
+        $(#[$doc])*
+        ///
+        /// Request: `{"times": [t1, ...], "observation": {"truncation": "time", "end": T}}`
+        /// or `{"truncation": "failure"}` (observation stopped at the last event).
+        ///
+        /// # Safety
+        ///
+        /// `request_json` must be null or point to a NUL-terminated string, and
+        /// `result_ptr` must be null or valid for writing one pointer. A string written
+        /// there is owned by the caller and must be released with
+        /// [`uanalytics_free_string`].
+        #[cfg(feature = "ffi")]
+        #[no_mangle]
+        pub unsafe extern "C" fn $name(
+            request_json: *const libc::c_char,
+            result_ptr: *mut *mut libc::c_char,
+        ) -> i32 {
+            ffi_catch(result_ptr, || {
+                let json = match unsafe { read_json(request_json) } {
+                    Ok(j) => j,
+                    Err(e) => return e,
+                };
+                let (times, observation) = match point_process_request(&json, result_ptr) {
+                    Ok(r) => r,
+                    Err(status) => return status,
+                };
+                match $dto(&times, observation) {
+                    Ok(dto) => write_json(result_ptr, &dto),
+                    Err(e) => write_error(result_ptr, ERR_COMPUTE, e),
+                }
+            })
+        }
+    };
+}
+
+point_process_export!(
+    /// Laplace trend test of event times against a constant rate:
+    /// `{statistic, p_value, direction, events_used, df: null}`.
+    uanalytics_laplace_trend_test => crate::wire::point_process::laplace_dto
+);
+
+point_process_export!(
+    /// MIL-HDBK-189 trend test of event times against a constant rate:
+    /// `{statistic, p_value, direction, events_used, df}`.
+    uanalytics_mil_hdbk_189_test => crate::wire::point_process::mil_hdbk_189_dto
+);
+
+point_process_export!(
+    /// Power-law process (Crow-AMSAA) fit of event times:
+    /// `{beta, beta_unbiased, lambda, intensity_at_end, end, events}`.
+    uanalytics_power_law_process_fit => crate::wire::point_process::power_law_dto
+);
+
 // ── Change-Point Detection (PELT) ───────────────────────────
 
 /// PELT change-point detection
@@ -1109,6 +1207,48 @@ mod tests {
         unsafe { uanalytics_free_string(out) };
         let value = serde_json::from_str(&body).expect("body is JSON");
         (code, value)
+    }
+
+    #[test]
+    fn point_process_tests_round_trip_and_refuse_with_codes() {
+        let req = r#"{"times": [12, 15, 27, 34, 44, 53], "observation": {"truncation": "time", "end": 60}}"#;
+        let (code, b) = call(uanalytics_mil_hdbk_189_test, req);
+        assert_eq!(code, 0, "{b}");
+        assert!((b["statistic"].as_f64().unwrap() - 9.593).abs() < 1e-3);
+        assert_eq!(
+            (b["df"].as_f64(), b["direction"].as_str()),
+            (Some(12.0), Some("increasing"))
+        );
+        let (_, b) = call(uanalytics_laplace_trend_test, req);
+        assert!((b["p_value"].as_f64().unwrap() - 0.906).abs() < 5e-4);
+        assert!(b["df"].is_null());
+        let (_, b) = call(uanalytics_power_law_process_fit, req);
+        assert!((b["beta"].as_f64().unwrap() - 1.25093).abs() < 5e-6);
+
+        let (code, b) = call(
+            uanalytics_laplace_trend_test,
+            r#"{"times": [1, 2], "observation": {"truncation": "timed", "end": 3}}"#,
+        );
+        assert_eq!(
+            (code, b["code"].as_str(), b["parameter"].as_str()),
+            (-3, Some("unknown_option"), Some("observation.truncation"))
+        );
+        let (code, b) = call(
+            uanalytics_laplace_trend_test,
+            r#"{"times": [2, 1], "observation": {"truncation": "failure"}}"#,
+        );
+        assert_eq!(
+            (code, b["code"].as_str(), b["index"].as_u64()),
+            (-3, Some("events_unordered"), Some(1))
+        );
+        let (code, b) = call(
+            uanalytics_laplace_trend_test,
+            r#"{"times": [1], "observation": {"truncation": "time"}}"#,
+        );
+        assert_eq!(
+            (code, b["code"].as_str(), b["parameter"].as_str()),
+            (-2, Some("malformed_input"), Some("observation"))
+        );
     }
 
     fn subgroups(n: usize, count: usize) -> String {

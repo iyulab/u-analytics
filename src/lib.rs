@@ -32,6 +32,7 @@ pub mod correlation;
 pub mod detection;
 pub mod distribution;
 pub mod msa;
+pub mod point_process;
 pub mod regression;
 pub mod seasonality;
 pub mod smoothing;

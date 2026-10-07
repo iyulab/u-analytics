@@ -58,6 +58,15 @@ internal static partial class NativeInterop
     public static partial int uanalytics_weibull_mle(string requestJson, out IntPtr resultPtr);
 
     [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int uanalytics_laplace_trend_test(string requestJson, out IntPtr resultPtr);
+
+    [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int uanalytics_mil_hdbk_189_test(string requestJson, out IntPtr resultPtr);
+
+    [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int uanalytics_power_law_process_fit(string requestJson, out IntPtr resultPtr);
+
+    [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
     public static partial int uanalytics_detect_changepoints(string requestJson, out IntPtr resultPtr);
 
     [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]

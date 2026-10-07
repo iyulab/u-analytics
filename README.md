@@ -16,6 +16,7 @@ hypothesis testing for industrial quality engineering.
 | `spc` | Control charts (X̄-R, X̄-S, I-MR, P, NP, C, U, Laney P'/U', G, T) with selectable run tests (`RuleSet`; Nelson/WE presets), subgroups n=2..=25 |
 | `capability` | Process capability indices (Cp, Cpk, Pp, Ppk, Cpm), sigma level, and Box-Cox non-normal capability |
 | `weibull` | Weibull parameter estimation (MLE, MRR) and reliability analysis (R(t), MTBF, B-life) |
+| `point_process` | Event-time trend of one unit (a repairable system's failures, a service's incidents): Laplace and MIL-HDBK-189 tests against a constant rate, power-law process (Crow-AMSAA) fit |
 | `detection` | Change-point detection (CUSUM, EWMA, PELT) and one-shot anomaly scoring by spectral residual saliency (Ren et al. 2019) |
 | `smoothing` | Time series smoothing (SES, Holt linear trend, Holt-Winters seasonal) |
 | `seasonality` | Periodogram (zero-padded FFT) and dominant-period estimation — AutoPeriod: permutation-thresholded peaks refined on the ACF |
@@ -126,6 +127,33 @@ println!("R(200h) = {:.1}%", ra.reliability(200.0) * 100.0);
 println!("MTBF = {:.0}h", ra.mtbf());
 println!("B10 life = {:.0}h", ra.b_life(0.10).unwrap());
 ```
+
+### Event-Time Trend — is a unit failing more often?
+
+Weibull fitting assumes independent lifetimes of many units; for the event
+times of **one** unit (failures of a repaired machine, incidents of a service)
+the first question is whether the rate is constant at all. Observation ends
+either at a chosen time (`Truncation::Time(T)`) or at the last event
+(`Truncation::Failure`, which then drops that event from the statistics).
+
+- **Laplace test** — approximately normal; `U > 0` means events crowd late
+- **MIL-HDBK-189 test** — exactly χ²(2m) under a constant rate
+- **Power-law process (Crow-AMSAA)** — `β̂ > 1` rate increasing, `< 1` decreasing,
+  with the unbiased `β̄` and the intensity at the end of observation
+
+```rust
+use u_analytics::point_process::{mil_hdbk_189_test, power_law_process_fit, Truncation, TrendDirection};
+
+let failures = [12.0, 15.0, 27.0, 34.0, 44.0, 53.0]; // hours, watched until 60
+let test = mil_hdbk_189_test(&failures, Truncation::Time(60.0)).unwrap();
+assert_eq!(test.direction, TrendDirection::Increasing);
+assert!(test.p_value > 0.05); // not significant: 6 events are little evidence
+let fit = power_law_process_fit(&failures, Truncation::Time(60.0)).unwrap();
+assert!((fit.beta - 1.2509).abs() < 1e-4);
+```
+
+Times must be ascending and `> 0`; an unordered, non-positive or late event is
+refused with its position.
 
 ### Change-Point Detection
 
@@ -258,6 +286,9 @@ interface AnalyticsError extends Error {
 | `parameter_out_of_range` | an option outside its domain — `parameter` names which, and `message` states what it has to satisfy |
 | `value_not_finite` | a NaN or ±Infinity anywhere in an argument — `parameter` is the path to it (`input.data`), `index` its position in that array, or `null` |
 | `malformed_input` | not the shape the function takes — a row that is not a pair, an unknown field |
+| `unknown_option` | an option given a name the function does not know — `parameter` names it (`observation.truncation`) |
+| `events_unordered` | an event time earlier than the one before it (`index`) |
+| `event_after_end` | an event time after the end of observation (`index`) |
 | `invalid_input` | any other refusal; the message says what |
 
 `message` is written for people and may change between releases; `code` does not.
@@ -603,6 +634,26 @@ bonferroni_correction(p_values): Float64Array                // min(p * m, 1), i
 benjamini_hochberg(p_values): Float64Array                   // FDR (1995), input order; p in [0, 1]
 ```
 
+Event-time trend of one unit — `times` ascending and `> 0`; `observation` is
+`{ truncation: "time", end }` (watched until `end`) or `{ truncation: "failure" }`
+(stopped at the last event, which is then not used):
+
+```ts
+laplace_trend_test(times, observation): TrendTestDto
+mil_hdbk_189_test(times, observation): TrendTestDto
+  // { statistic, p_value /* two-sided */, direction: "increasing" | "decreasing" | "flat",
+  //   events_used, df /* null for Laplace */ }
+power_law_process_fit(times, observation):
+  { beta, beta_unbiased, lambda, intensity_at_end, end, events }  // Crow-AMSAA
+```
+
+```js
+const { mil_hdbk_189_test } = require("@iyulab/u-analytics");
+const r = mil_hdbk_189_test([12, 15, 27, 34, 44, 53], { truncation: "time", end: 60 });
+console.log(r.statistic.toFixed(2), r.df, r.direction); // 9.59 12 increasing
+if (r.df !== 12 || r.direction !== "increasing") throw new Error("unexpected");
+```
+
 ```js
 import { two_sample_t_test, one_way_anova } from "@iyulab/u-analytics";
 
@@ -746,6 +797,11 @@ The composition documented for JavaScript holds here too: `imr_chart` (or
 `xbar_s_chart`) returns `sigma_hat`, which is what `process_capability` needs as
 `sigma_within` to report the short-term indices — the FFI does not guess a
 within sigma from a flat vector any more than the WASM binding does.
+
+The event-time trend functions take `{ "times": [...], "observation": { "truncation": "time", "end": T } }`
+(or `{ "truncation": "failure" }`) and return the same objects as over WASM:
+`uanalytics_laplace_trend_test`, `uanalytics_mil_hdbk_189_test`,
+`uanalytics_power_law_process_fit`.
 
 Four entry points exist only on the FFI:
 

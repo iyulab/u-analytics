@@ -12,6 +12,10 @@
 - **Measurement systems analysis**: Gage R&R by the Average & Range method and by
   ANOVA, each returning the charts the method plots
 - **Reliability**: Weibull fitting by maximum likelihood
+- **Event-time trend**: whether one unit's events (failures of a repairable system,
+  incidents) arrive at a changing rate — `LaplaceTrendTest`, `MilHdbk189Test`, and the
+  power-law process (Crow-AMSAA) fit `PowerLawProcessFit`. Pass the end of observation,
+  or `null` when it stopped at the last event
 - **Change detection**: changepoints, period estimation, spectral residual scoring
 - **Correlation and regression**: correlation matrices, simple linear regression
 - **Distribution fitting**: best-fit selection across candidate distributions
