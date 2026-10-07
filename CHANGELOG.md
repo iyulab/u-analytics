@@ -32,6 +32,14 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   `value_not_finite` at `index`, `insufficient_data` with `min` and `got`)
   instead of "Weibull MLE estimation failed".
 
+### Fixed
+
+- `UAnalytics`: a NaN or infinity in a request raised `System.Text.Json`'s
+  `ArgumentException` (JSON has no such numbers). It is now refused before the
+  call as `AnalyticsException` with `Reason` `value_not_finite`, the argument's
+  path as `Parameter` and the element's `Index` — what the WebAssembly binding
+  reports for the same input.
+
 ### Added
 
 - WebAssembly `weibull_mle`, `weibull_mrr` and `weibull_reliability` (MTBF,

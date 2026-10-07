@@ -409,6 +409,7 @@ public sealed class AnalyticsClient : IDisposable
 
     private JsonElement CallNative(NativeFunc func, object request)
     {
+        NonFinite.Check(request, JsonOptions.PropertyNamingPolicy!);
         var requestJson = JsonSerializer.Serialize(request, JsonOptions);
         var code = func(requestJson, out var resultPtr);
 
