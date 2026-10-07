@@ -12,9 +12,9 @@
          client throws here exactly as it would there. -->
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
 
-    <!-- The native library built with cargo build with the ffi feature. A standalone clone
+    <!-- The native library from a `cargo build` with the ffi feature. A standalone clone
          builds into its own target/; inside a Cargo workspace it lands in the workspace's. -->
-    <UAnalyticsNativeDir Condition="'$(UAnalyticsNativeDir)' == '' and Exists('$(MSBuildThisFileDirectory)../../../target/debug')">$(MSBuildThisFileDirectory)../../../target/debug</UAnalyticsNativeDir>
+    <UAnalyticsNativeDir Condition="'$(UAnalyticsNativeDir)' == '' and (Exists('$(MSBuildThisFileDirectory)../../../target/debug/u_analytics.dll') or Exists('$(MSBuildThisFileDirectory)../../../target/debug/libu_analytics.so') or Exists('$(MSBuildThisFileDirectory)../../../target/debug/libu_analytics.dylib'))">$(MSBuildThisFileDirectory)../../../target/debug</UAnalyticsNativeDir>
     <UAnalyticsNativeDir Condition="'$(UAnalyticsNativeDir)' == ''">$(MSBuildThisFileDirectory)../../../../../target/debug</UAnalyticsNativeDir>
   </PropertyGroup>
 
