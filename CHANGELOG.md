@@ -751,7 +751,7 @@ Requires `u-numflow` 0.6. `UAnalytics` NuGet 0.6.0 → **0.7.0** (`AnalyticsExce
   - `sigma_to_ppm` rejects a non-finite input instead of returning `NaN`;
     `ppm_to_sigma` rejects both ends of `(0, 1_000_000)`, which the sigma scale
     does not reach.
-- **WASM bindings for `cusum` and `ewma`** (docket #220 group ②). The crate has
+- **WASM bindings for `cusum` and `ewma`**. The crate has
   had both charts since before the bindings existed; only the exposure was
   missing, so JS/TS consumers reimplemented sequential shift detection that the
   crate already performs. `#[wasm_bindgen]` exports go from 19 to 21.
