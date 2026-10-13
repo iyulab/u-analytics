@@ -35,7 +35,7 @@ pub(crate) struct XbarRChartDto {
     /// `process_capability` as `sigma_within` -- it is the quantity a
     /// capability study needs and the one a flat measurement vector cannot
     /// carry.
-    pub(crate) sigma_hat: Option<f64>,
+    pub(crate) sigma_hat: f64,
     pub(crate) xbar_points: Vec<ChartPointDto>,
     pub(crate) r_points: Vec<ChartPointDto>,
     pub(crate) in_control: bool,
@@ -498,8 +498,6 @@ pub(crate) mod code {
     pub(crate) const DEFECTIVES_EXCEED_SAMPLE: &str = "defectives_exceed_sample";
     /// Units inspected that are not a positive, finite number.
     pub(crate) const UNITS_NOT_POSITIVE: &str = "units_not_positive";
-    /// A subgroup whose length differs from the first subgroup's.
-    pub(crate) const SUBGROUP_LENGTH_MISMATCH: &str = "subgroup_length_mismatch";
     /// A NaN or an infinity where a measurement belongs.
     pub(crate) const VALUE_NOT_FINITE: &str = "value_not_finite";
     /// Fewer samples than the chart needs.
@@ -671,6 +669,13 @@ impl WireError {
                 *got as f64,
                 message,
             ),
+            // Same reason as every other pair of lengths that must agree.
+            E::SampleLengthMismatch { expected, got } => {
+                Self::new(code::DIMENSION_MISMATCH, index, message)
+                    .about(label.to_string())
+                    .with("expected", Detail::Num(*expected as f64))
+                    .with("got", Detail::Num(*got as f64))
+            }
             _ => Self::new(chart_error_code(error), index, message),
         };
         wire.index = index;
@@ -726,7 +731,7 @@ impl From<&str> for WireError {
 pub(crate) fn chart_error_code(error: &crate::spc::ControlChartError) -> &'static str {
     use crate::spc::ControlChartError as E;
     match error {
-        E::SampleLengthMismatch { .. } => code::SUBGROUP_LENGTH_MISMATCH,
+        E::SampleLengthMismatch { .. } => code::DIMENSION_MISMATCH,
         E::NonFiniteValue => code::VALUE_NOT_FINITE,
         E::DefectivesExceedSampleSize { .. } => code::DEFECTIVES_EXCEED_SAMPLE,
         E::NonPositiveUnits => code::UNITS_NOT_POSITIVE,
@@ -981,7 +986,8 @@ pub(crate) fn xbar_r_dto(
         r_cl: r.cl,
         r_ucl: r.ucl,
         r_lcl: r.lcl,
-        sigma_hat: chart.sigma_hat(),
+        // Present whenever the limits are: it is their centre line over d2 / c4.
+        sigma_hat: chart.sigma_hat().ok_or_else(too_few)?,
         xbar_points: point_dtos(chart.points()),
         r_points: point_dtos(chart.r_points()),
         in_control: chart.is_in_control(),
@@ -2884,6 +2890,12 @@ pub(crate) fn simple_regression_dto(input: RegressionInputDto) -> Result<Regress
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct DistributionFitDto {
     /// `"Normal"`, `"Exponential"`, `"Gamma"`, `"LogNormal"`, `"Weibull"` or `"Beta"`.
+    #[cfg_attr(
+        feature = "wasm",
+        tsify(
+            type = "\"Normal\" | \"LogNormal\" | \"Weibull\" | \"Gamma\" | \"Exponential\" | \"Beta\""
+        )
+    )]
     pub(crate) distribution: String,
     /// Estimated parameters by name (`mu`/`sigma`, `lambda`, `alpha`/`beta`,
     /// `shape`/`scale`).
@@ -2929,7 +2941,7 @@ pub(crate) struct XbarSChartDto {
     pub(crate) s_lcl: f64,
     /// Short-term sigma implied by this chart (`S-bar / c4`), for
     /// `process_capability`'s `sigma_within`.
-    pub(crate) sigma_hat: Option<f64>,
+    pub(crate) sigma_hat: f64,
     pub(crate) xbar_points: Vec<ChartPointDto>,
     pub(crate) s_points: Vec<ChartPointDto>,
     pub(crate) in_control: bool,
@@ -2946,7 +2958,7 @@ pub(crate) struct ImrChartDto {
     pub(crate) mr_ucl: f64,
     pub(crate) mr_lcl: f64,
     /// Short-term sigma implied by this chart (`MR-bar / d2(2)`).
-    pub(crate) sigma_hat: Option<f64>,
+    pub(crate) sigma_hat: f64,
     pub(crate) i_points: Vec<ChartPointDto>,
     /// Starts at index 1: the first value has no moving range.
     pub(crate) mr_points: Vec<ChartPointDto>,
@@ -2992,7 +3004,8 @@ pub(crate) fn xbar_s_dto(
         s_cl: s.cl,
         s_ucl: s.ucl,
         s_lcl: s.lcl,
-        sigma_hat: chart.sigma_hat(),
+        // Present whenever the limits are: it is their centre line over d2 / c4.
+        sigma_hat: chart.sigma_hat().ok_or_else(too_few)?,
         xbar_points: point_dtos(chart.points()),
         s_points: point_dtos(chart.s_points()),
         in_control: chart.is_in_control(),
@@ -3027,7 +3040,8 @@ pub(crate) fn imr_dto(
         mr_cl: mr.cl,
         mr_ucl: mr.ucl,
         mr_lcl: mr.lcl,
-        sigma_hat: chart.sigma_hat(),
+        // Present whenever the limits are: it is their centre line over d2 / c4.
+        sigma_hat: chart.sigma_hat().ok_or_else(too_few)?,
         i_points: point_dtos(chart.points()),
         mr_points: point_dtos(chart.mr_points()),
         in_control: chart.is_in_control(),

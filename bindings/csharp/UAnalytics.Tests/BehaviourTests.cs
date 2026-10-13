@@ -28,6 +28,26 @@ public class BehaviourTests
     }
 
     [Fact]
+    public void A_ragged_subgroup_is_a_dimension_mismatch_at_its_row()
+    {
+        var e = Assert.Throws<AnalyticsException>(() => _client.XbarRChart([[1, 2, 3], [4, 5], [6, 7, 8]]));
+        Assert.Equal("dimension_mismatch", e.ErrorCode);
+        Assert.Equal("subgroups", e.Parameter);
+        Assert.Equal(1, e.Index);
+        Assert.Equal(3.0, e.Details!.Value.GetProperty("expected").GetDouble());
+        Assert.Equal(2.0, e.Details!.Value.GetProperty("got").GetDouble());
+    }
+
+    [Fact]
+    public void A_fitted_family_goes_back_into_percentile_capability_as_is()
+    {
+        double[] data = [.. Enumerable.Range(1, 40).Select(i => 10 + Math.Log(i))];
+        var best = _client.FitBest(data)[0];
+        var capability = _client.PercentileCapability(data, usl: 20, lsl: 5, distribution: best.Distribution);
+        Assert.Equal(best.Distribution, capability.Distribution);
+    }
+
+    [Fact]
     public void The_engine_still_names_what_it_refuses()
     {
         var e = Assert.Throws<AnalyticsException>(() => _client.TChart([1.0, -2.0, 3.0]));

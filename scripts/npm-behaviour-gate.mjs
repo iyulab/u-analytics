@@ -86,6 +86,11 @@ for (const bad of [0, -3, 10.5]) {
 }
 e = refusal(() => m.p_chart([[3, 100], [1.5, 100]]))
 ok(e.code === 'count_not_whole' && e.index === 1, `code=${e.code} index=${e.index}`)
+// Lengths that must agree are one code everywhere: a ragged subgroup names the
+// array, its row, and both sizes.
+e = refusal(() => m.xbar_r_chart([[1, 2, 3], [4, 5], [6, 7, 8]]))
+ok(e.code === 'dimension_mismatch' && e.parameter === 'subgroups' && e.index === 1
+   && e.expected === 3 && e.got === 2, `ragged: ${e.code} ${e.parameter} ${e.index}`)
 e = refusal(() => m.np_chart([1, 2], 10.5))
 ok(e.code === 'sample_size_not_whole' && e.index === null, `code=${e.code} index=${e.index}`)
 

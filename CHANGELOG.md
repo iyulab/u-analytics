@@ -10,6 +10,19 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Changed
 
+- **Breaking:** a subgroup whose size differs from the first is refused as
+  `dimension_mismatch` — the same code as every other pair of lengths that must
+  agree — with `parameter` `"subgroups"`, its `index`, and the sizes as `expected`
+  and `got` (was `subgroup_length_mismatch`, with the sizes only in the message).
+  WebAssembly, C ABI and .NET alike.
+- **Breaking:** `sigma_hat` on the X̄-R, X̄-S and I-MR chart results is a number,
+  never `null` — a chart that returns limits always has it. The TypeScript
+  declaration is `number`; .NET `SigmaHat` is `double`.
+- **Breaking (.NET `UAnalytics`):** `CapabilityDistribution` is renamed
+  `DistributionFamily`, and `DistributionFit.Distribution` is that enum instead of a
+  string, so a family `FitBest` ranks first goes back into `PercentileCapability`
+  as is. The WebAssembly `fit_best` result declares `distribution` as the six
+  family names instead of `string`.
 - **Breaking (.NET `UAnalytics`):** `AnalyticsException` names its members the way the other
   .NET bindings' exceptions do — `Status` is the native status (was `Code`),
   `ErrorCode` the error body's `code` (was `Reason`), and `Parameter` / `Index`

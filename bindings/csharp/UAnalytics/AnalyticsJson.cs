@@ -52,5 +52,5 @@ namespace UAnalytics;
 [JsonSerializable(typeof(AdfModel))]
 [JsonSerializable(typeof(PeltCost))]
 [JsonSerializable(typeof(CorrelationMethod))]
-[JsonSerializable(typeof(CapabilityDistribution))]
+[JsonSerializable(typeof(DistributionFamily))]
 internal sealed partial class AnalyticsJson : JsonSerializerContext;

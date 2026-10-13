@@ -69,7 +69,10 @@ carries a stable `ErrorCode` — the error body's `code` (`insufficient_data`, `
 `value_not_finite`, …), the `Parameter` it is about, the `Index` of the offending
 element, the whole error body in `Details` and the native status in `Status`. For `parameter_out_of_range`, `Details`
 holds `got`, the inclusive bounds `min` / `max` (`null` on a side that is open or
-unbounded) and, only on an open side, `exclusive_min` / `exclusive_max`.
+unbounded) and, only on an open side, `exclusive_min` / `exclusive_max`. Every code and
+the fields it carries are listed in the
+[crate README](https://github.com/iyulab/u-analytics#javascript--wasm-npm) — the
+WebAssembly and .NET bindings refuse with the same codes.
 
 ## Trimming and NativeAOT
 

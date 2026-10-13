@@ -205,12 +205,12 @@ public sealed class AnalyticsClient : IDisposable
     /// and its parameters.
     /// </summary>
     public PercentileCapabilityResult PercentileCapability(double[] data, double? usl, double? lsl,
-        CapabilityDistribution? distribution = null)
+        DistributionFamily? distribution = null)
         => Call(NativeInterop.uanalytics_percentile_capability, AnalyticsJson.Default.PercentileCapabilityResult,
             ("data", Request.Nums("data", data)), ("usl", Request.Num("usl", usl)),
             ("lsl", Request.Num("lsl", lsl)),
             ("distribution", distribution is { } d
-                ? Request.Option(d, AnalyticsJson.Default.CapabilityDistribution) : null));
+                ? Request.Option(d, AnalyticsJson.Default.DistributionFamily) : null));
 
     // ── MSA ──
 

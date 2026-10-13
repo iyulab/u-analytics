@@ -2041,7 +2041,7 @@ mod binding_contract_tests {
         let s = chart.s_limits().expect("limits");
         assert_eq!((d.xbar_ucl, d.xbar_cl, d.xbar_lcl), (x.ucl, x.cl, x.lcl));
         assert_eq!((d.s_ucl, d.s_cl, d.s_lcl), (s.ucl, s.cl, s.lcl));
-        assert_eq!(d.sigma_hat, chart.sigma_hat());
+        assert_eq!(Some(d.sigma_hat), chart.sigma_hat());
         assert_eq!(d.xbar_points.len(), 20);
         assert_eq!(d.s_points.len(), 20);
         assert_eq!(d.in_control, chart.is_in_control());
@@ -2060,8 +2060,16 @@ mod binding_contract_tests {
             let e = result.expect_err("ragged subgroup");
             assert!(e.message.contains("subgroups[7]"), "{e}");
             assert_eq!(
-                (e.code, e.index),
-                (crate::wire::code::SUBGROUP_LENGTH_MISMATCH, Some(7))
+                (e.code, e.index, e.parameter.as_deref()),
+                (
+                    crate::wire::code::DIMENSION_MISMATCH,
+                    Some(7),
+                    Some("subgroups")
+                )
+            );
+            assert_eq!(
+                e.details,
+                vec![("expected", Detail::Num(5.0)), ("got", Detail::Num(4.0))]
             );
         }
     }
@@ -2080,7 +2088,7 @@ mod binding_contract_tests {
         let mr = chart.mr_limits().expect("limits");
         assert_eq!((d.i_ucl, d.i_cl, d.i_lcl), (i.ucl, i.cl, i.lcl));
         assert_eq!((d.mr_ucl, d.mr_cl, d.mr_lcl), (mr.ucl, mr.cl, mr.lcl));
-        assert_eq!(d.sigma_hat, chart.sigma_hat());
+        assert_eq!(Some(d.sigma_hat), chart.sigma_hat());
         assert_eq!(d.i_points.len(), values.len());
         // MR_0 is undefined: the moving-range series starts at the second value.
         assert_eq!(d.mr_points.len(), values.len() - 1);

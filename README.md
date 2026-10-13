@@ -288,11 +288,10 @@ interface AnalyticsError extends Error {
 | `sample_size_not_whole` | a sample size is not a whole number ≥ 1 — zero, negative, fractional and not-a-number alike |
 | `defectives_exceed_sample` | more defectives than the sample has items |
 | `units_not_positive` | units inspected that are not a positive number |
-| `subgroup_length_mismatch` | a subgroup of a different length than the first |
 | `insufficient_data` | fewer values than the function needs — `parameter` names the argument, `min` and `got` the counts (`index: null`) |
-| `no_specification` | `expected` (`["usl", "lsl"]`) | a capability index with neither specification limit — there is nothing to measure the spread against (`index` and `parameter` are `null`) |
+| `no_specification` | a capability index with neither specification limit — there is nothing to measure the spread against; `expected` is `["usl", "lsl"]` (`index` and `parameter` are `null`) |
 | `empty_input` | an argument with nothing in it (`parameter`) |
-| `dimension_mismatch` | arrays that must have the same length do not — `index` is the first that differs, `expected` and `got` the lengths |
+| `dimension_mismatch` | arrays that must have the same length do not — a subgroup of a different size than the first, a gage study part with another operator count, `x` and `y` of different lengths. `parameter` names the array, `index` is the first element that differs, `expected` and `got` the lengths |
 | `parameter_out_of_range` | a value outside its domain — an option, a Phase I `p_bar` (`(0, 1)`) / `u_bar` (`> 0`) / `phi` (`>= 0`), a subgroup size the factor tables do not cover (`parameter: "subgroups"`, `min: 2, max: 25`), an array element. `parameter` names which (`index` its position for an array element) and `got` the value. `min` / `max` are the inclusive bounds, `null` on a side that is open or unbounded; `exclusive_min` / `exclusive_max` are the exclusive bounds, present only on an open side. `> 0` is `{ min: null, exclusive_min: 0, max: null }`, `(0, 1]` is `{ min: null, exclusive_min: 0, max: 1 }`, `usl` not above `lsl` is `exclusive_min: lsl` |
 | `value_not_finite` | a NaN or ±Infinity anywhere in an argument — `parameter` is the path to it (`input.data`), `index` its position in that array, or `null` |
 | `malformed_input` | not the shape the function takes — a row that is not a pair, an unknown field, a count option with a fraction (`max_lags: 2.5`; a negative count is `parameter_out_of_range`) — `parameter` is the path to the value |

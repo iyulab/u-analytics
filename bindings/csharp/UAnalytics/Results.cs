@@ -43,7 +43,7 @@ public sealed record ChartPoint(int Index, double Value, IReadOnlyList<RunRule> 
 public sealed record XbarRChartResult(
     double XbarCl, double XbarUcl, double XbarLcl,
     double RCl, double RUcl, double RLcl,
-    double? SigmaHat,
+    double SigmaHat,
     IReadOnlyList<ChartPoint> XbarPoints,
     IReadOnlyList<ChartPoint> RPoints,
     bool InControl);
@@ -52,7 +52,7 @@ public sealed record XbarRChartResult(
 public sealed record XbarSChartResult(
     double XbarCl, double XbarUcl, double XbarLcl,
     double SCl, double SUcl, double SLcl,
-    double? SigmaHat,
+    double SigmaHat,
     IReadOnlyList<ChartPoint> XbarPoints,
     IReadOnlyList<ChartPoint> SPoints,
     bool InControl);
@@ -61,7 +61,7 @@ public sealed record XbarSChartResult(
 public sealed record ImrChartResult(
     double ICl, double IUcl, double ILcl,
     double MrCl, double MrUcl, double MrLcl,
-    double? SigmaHat,
+    double SigmaHat,
     IReadOnlyList<ChartPoint> IPoints,
     IReadOnlyList<ChartPoint> MrPoints,
     bool InControl);
@@ -132,14 +132,14 @@ public sealed record CapabilityResult(
 public sealed record PercentileCapabilityResult(
     double? CpStar, double? CpkStar, double? CpuStar, double? CplStar,
     double Median, double PercentileLower, double PercentileUpper,
-    CapabilityDistribution Distribution, IReadOnlyDictionary<string, double> Parameters);
+    DistributionFamily Distribution, IReadOnlyDictionary<string, double> Parameters);
 
 /// <summary>
-/// The distribution family a percentile capability's quantiles come from — the names
-/// <see cref="AnalyticsClient.FitBest"/> reports.
+/// A continuous distribution family, by the names the engine uses: the families
+/// <see cref="AnalyticsClient.FitBest"/> fits and a percentile capability's quantiles come from.
 /// </summary>
-[JsonConverter(typeof(JsonStringEnumConverter<CapabilityDistribution>))]
-public enum CapabilityDistribution
+[JsonConverter(typeof(JsonStringEnumConverter<DistributionFamily>))]
+public enum DistributionFamily
 {
     /// <summary>Normal (<c>mu</c>, <c>sigma</c>).</summary>
     [JsonStringEnumMemberName("Normal")] Normal,
@@ -369,11 +369,12 @@ public sealed record RegressionResult(
     IReadOnlyList<double> Fitted);
 
 /// <summary>
-/// One fitted continuous family: its name (<c>normal</c>, <c>weibull</c>, …), its parameters by
-/// name, and its log-likelihood, AIC and BIC.
+/// One fitted continuous family: which one, its parameters by name, and its log-likelihood,
+/// AIC and BIC. <see cref="Distribution"/> can be passed back to
+/// <see cref="AnalyticsClient.PercentileCapability"/> as is.
 /// </summary>
 public sealed record DistributionFit(
-    string Distribution, IReadOnlyDictionary<string, double> Parameters,
+    DistributionFamily Distribution, IReadOnlyDictionary<string, double> Parameters,
     double LogLikelihood, double Aic, double Bic);
 
 // ── Bodies that carry one value ──
