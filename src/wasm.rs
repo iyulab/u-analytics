@@ -1831,7 +1831,7 @@ mod binding_contract_tests {
     use super::{capability_dto, from_json, CapabilityInputDto};
     use serde_json::json;
 
-    /// The reporter's fixture (docket #219): six subgroups of five, with real
+    /// A reported fixture: six subgroups of five, with real
     /// between-subgroup drift, so the short-term and long-term families are
     /// genuinely different numbers.
     const SUBGROUPS: [[f64; 5]; 6] = [
