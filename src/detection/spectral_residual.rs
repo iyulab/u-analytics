@@ -74,16 +74,30 @@ const EXTENSION: usize = 5;
 /// setting to change, and a refusal that lists every rule leaves it
 /// re-validating the options the crate already checks -- which is how the
 /// same rules end up written twice, in two places that can drift.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum SpectralResidualError {
     /// An option is outside its domain.
+    ///
+    /// Each end of the domain is given once: `min` when the lower bound is
+    /// inclusive, `exclusive_min` when it is exclusive, neither when there is
+    /// none (likewise `max` / `exclusive_max`).
     OptionOutOfRange {
         /// The option's name, spelled as the builder and the wire formats
         /// spell it (`threshold`, `sensitivity`, ...).
         option: &'static str,
         /// What that option has to satisfy, for a message a consumer can show.
         requirement: &'static str,
+        /// The value given (a count option's value as a float).
+        got: f64,
+        /// Inclusive lower bound.
+        min: Option<f64>,
+        /// Exclusive lower bound.
+        exclusive_min: Option<f64>,
+        /// Inclusive upper bound.
+        max: Option<f64>,
+        /// Exclusive upper bound.
+        exclusive_max: Option<f64>,
     },
     /// Fewer observations than the transform is applied to at once.
     TooFewObservations {
@@ -105,6 +119,7 @@ impl core::fmt::Display for SpectralResidualError {
             SpectralResidualError::OptionOutOfRange {
                 option,
                 requirement,
+                ..
             } => write!(f, "{option} must be {requirement}"),
             SpectralResidualError::TooFewObservations { needed, got } => {
                 write!(f, "needs at least {needed} observations, got {got}")
@@ -117,6 +132,58 @@ impl core::fmt::Display for SpectralResidualError {
 }
 
 impl std::error::Error for SpectralResidualError {}
+
+impl SpectralResidualError {
+    /// `option` below its inclusive lower bound `min`.
+    fn below(option: &'static str, requirement: &'static str, got: f64, min: f64) -> Self {
+        Self::OptionOutOfRange {
+            option,
+            requirement,
+            got,
+            min: Some(min),
+            exclusive_min: None,
+            max: None,
+            exclusive_max: None,
+        }
+    }
+
+    /// `option` not above its exclusive lower bound.
+    fn not_above(
+        option: &'static str,
+        requirement: &'static str,
+        got: f64,
+        exclusive_min: f64,
+    ) -> Self {
+        Self::OptionOutOfRange {
+            option,
+            requirement,
+            got,
+            min: None,
+            exclusive_min: Some(exclusive_min),
+            max: None,
+            exclusive_max: None,
+        }
+    }
+
+    /// `option` not strictly between `exclusive_min` and `exclusive_max`.
+    fn not_between(
+        option: &'static str,
+        requirement: &'static str,
+        got: f64,
+        exclusive_min: f64,
+        exclusive_max: f64,
+    ) -> Self {
+        Self::OptionOutOfRange {
+            option,
+            requirement,
+            got,
+            min: None,
+            exclusive_min: Some(exclusive_min),
+            max: None,
+            exclusive_max: Some(exclusive_max),
+        }
+    }
+}
 
 /// Spectral residual anomaly scorer.
 ///
@@ -206,29 +273,55 @@ impl SpectralResidual {
 
     /// The first option that is outside its domain, in a fixed order.
     fn check_options(&self) -> Result<(), SpectralResidualError> {
-        let out_of_range = |option, requirement| {
-            Err(SpectralResidualError::OptionOutOfRange {
-                option,
-                requirement,
-            })
-        };
+        use SpectralResidualError as E;
         if self.averaging_window < 1 {
-            return out_of_range("averaging_window", ">= 1");
+            return Err(E::below(
+                "averaging_window",
+                ">= 1",
+                self.averaging_window as f64,
+                1.0,
+            ));
         }
         if self.judgement_window < 1 {
-            return out_of_range("judgement_window", ">= 1");
+            return Err(E::below(
+                "judgement_window",
+                ">= 1",
+                self.judgement_window as f64,
+                1.0,
+            ));
         }
         if !self.threshold.is_finite() || self.threshold <= 0.0 {
-            return out_of_range("threshold", "a finite number > 0");
+            return Err(E::not_above(
+                "threshold",
+                "a finite number > 0",
+                self.threshold,
+                0.0,
+            ));
         }
         if !self.min_zscore.is_finite() || self.min_zscore < 0.0 {
-            return out_of_range("min_zscore", "a finite number >= 0");
+            return Err(E::below(
+                "min_zscore",
+                "a finite number >= 0",
+                self.min_zscore,
+                0.0,
+            ));
         }
         if !self.sensitivity.is_finite() || self.sensitivity <= 0.0 || self.sensitivity >= 100.0 {
-            return out_of_range("sensitivity", "a finite number strictly between 0 and 100");
+            return Err(E::not_between(
+                "sensitivity",
+                "a finite number strictly between 0 and 100",
+                self.sensitivity,
+                0.0,
+                100.0,
+            ));
         }
-        if self.batch_size.is_some_and(|b| b < MIN_OBSERVATIONS) {
-            return out_of_range("batch_size", "unset, or at least 12");
+        if let Some(b) = self.batch_size.filter(|&b| b < MIN_OBSERVATIONS) {
+            return Err(E::below(
+                "batch_size",
+                "unset, or at least 12",
+                b as f64,
+                MIN_OBSERVATIONS as f64,
+            ));
         }
         Ok(())
     }
@@ -255,13 +348,18 @@ impl SpectralResidual {
     /// assert!(points[40].is_anomaly);
     /// assert!(points[40].score > points[20].score);
     ///
-    /// // A refusal names the option it is about.
+    /// // A refusal names the option it is about, the value and its domain.
     /// let refused = SpectralResidual::new().with_threshold(0.0).analyze(&series);
     /// assert_eq!(
     ///     refused,
     ///     Err(SpectralResidualError::OptionOutOfRange {
     ///         option: "threshold",
     ///         requirement: "a finite number > 0",
+    ///         got: 0.0,
+    ///         min: None,
+    ///         exclusive_min: Some(0.0),
+    ///         max: None,
+    ///         exclusive_max: None,
     ///     })
     /// );
     /// ```
@@ -675,12 +773,7 @@ mod tests {
     #[test]
     fn a_refusal_names_the_condition_that_failed() {
         let ok = vec![1.0; 20];
-        let out_of_range = |option, requirement| {
-            Err(SpectralResidualError::OptionOutOfRange {
-                option,
-                requirement,
-            })
-        };
+        use SpectralResidualError as E;
 
         assert_eq!(
             SpectralResidual::new().analyze(&[1.0; 11]),
@@ -697,49 +790,67 @@ mod tests {
             Err(SpectralResidualError::ValueNotFinite { index: 7 })
         );
 
-        // Every option, each naming itself — the four the consumer report
-        // reached through one indistinguishable message, and the two beside
-        // them.
+        // Every option, each naming itself, with the value given and the
+        // bounds of its domain -- inclusive as `min`, exclusive as
+        // `exclusive_min` / `exclusive_max`.
         assert_eq!(
             SpectralResidual::new().with_threshold(0.0).analyze(&ok),
-            out_of_range("threshold", "a finite number > 0")
+            Err(E::not_above("threshold", "a finite number > 0", 0.0, 0.0))
         );
+        let sensitivity = |got| {
+            Err(E::not_between(
+                "sensitivity",
+                "a finite number strictly between 0 and 100",
+                got,
+                0.0,
+                100.0,
+            ))
+        };
         assert_eq!(
             SpectralResidual::new().with_sensitivity(100.0).analyze(&ok),
-            out_of_range("sensitivity", "a finite number strictly between 0 and 100")
+            sensitivity(100.0)
         );
         assert_eq!(
             SpectralResidual::new().with_sensitivity(0.0).analyze(&ok),
-            out_of_range("sensitivity", "a finite number strictly between 0 and 100")
+            sensitivity(0.0)
         );
         assert_eq!(
             SpectralResidual::new()
                 .with_batch_size(Some(5))
                 .analyze(&ok),
-            out_of_range("batch_size", "unset, or at least 12")
+            Err(E::below("batch_size", "unset, or at least 12", 5.0, 12.0))
         );
         assert_eq!(
             SpectralResidual::new()
                 .with_averaging_window(0)
                 .analyze(&ok),
-            out_of_range("averaging_window", ">= 1")
+            Err(E::below("averaging_window", ">= 1", 0.0, 1.0))
         );
         assert_eq!(
             SpectralResidual::new()
                 .with_judgement_window(0)
                 .analyze(&ok),
-            out_of_range("judgement_window", ">= 1")
+            Err(E::below("judgement_window", ">= 1", 0.0, 1.0))
         );
         assert_eq!(
             SpectralResidual::new().with_min_zscore(-1.0).analyze(&ok),
-            out_of_range("min_zscore", "a finite number >= 0")
+            Err(E::below("min_zscore", "a finite number >= 0", -1.0, 0.0))
         );
-        assert_eq!(
+        // NaN is refused too; `got` is the NaN itself, so match the rest.
+        assert!(matches!(
             SpectralResidual::new()
                 .with_threshold(f64::NAN)
                 .analyze(&ok),
-            out_of_range("threshold", "a finite number > 0")
-        );
+            Err(E::OptionOutOfRange {
+                option: "threshold",
+                min: None,
+                exclusive_min,
+                max: None,
+                exclusive_max: None,
+                got,
+                ..
+            }) if got.is_nan() && exclusive_min == Some(0.0)
+        ));
 
         // The message a transport shows repeats the option, not the rulebook.
         let message = SpectralResidual::new()

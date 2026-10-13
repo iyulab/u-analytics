@@ -1429,9 +1429,15 @@ mod tests {
         assert!((b["value"].as_f64().unwrap() - 6.0).abs() < 1e-2);
         let (code, b) = call(uanalytics_ppm_to_sigma, r#"{"ppm": 0}"#);
         assert_eq!(
-            (code, b["code"].as_str(), b["max"].as_f64()),
-            (-3, Some("parameter_out_of_range"), Some(1e6))
+            (
+                code,
+                b["code"].as_str(),
+                b["exclusive_min"].as_f64(),
+                b["exclusive_max"].as_f64()
+            ),
+            (-3, Some("parameter_out_of_range"), Some(0.0), Some(1e6))
         );
+        assert!(b["min"].is_null() && b["max"].is_null(), "{b}");
         let (code, b) = call(
             uanalytics_boxcox_capability,
             r#"{"data": [1, 2, 0, 3], "usl": 9}"#,
@@ -1749,9 +1755,52 @@ mod tests {
             (code, b["code"].as_str(), b["parameter"].as_str()),
             (-3, Some("parameter_out_of_range"), Some("penalty"))
         );
+        // `penalty > 0`: the exact body, open end as `exclusive_min`.
         assert_eq!(
-            (b["min"].as_f64(), b["max"].is_null(), b["got"].as_f64()),
-            (Some(0.0), true, Some(-1.0))
+            b,
+            serde_json::json!({
+                "error": b["error"],
+                "code": "parameter_out_of_range",
+                "index": null,
+                "parameter": "penalty",
+                "min": null,
+                "exclusive_min": 0.0,
+                "max": null,
+                "got": -1.0,
+            })
+        );
+
+        // `lambda` in (0, 1]: open below, closed above.
+        let (code, b) = call(
+            uanalytics_ewma,
+            r#"{"data": [1, 2], "target": 1, "sigma": 1, "lambda": 0}"#,
+        );
+        assert_eq!((code, b["parameter"].as_str()), (-3, Some("lambda")), "{b}");
+        assert_eq!(
+            (
+                b["min"].is_null(),
+                b["exclusive_min"].as_f64(),
+                b["max"].as_f64(),
+                b.get("exclusive_max")
+            ),
+            (true, Some(0.0), Some(1.0), None),
+            "{b}"
+        );
+
+        // `usl > lsl`: `lsl` is the exclusive floor.
+        let (code, b) = call(
+            uanalytics_process_capability,
+            r#"{"data": [1, 2, 3], "usl": 1, "lsl": 2}"#,
+        );
+        assert_eq!((code, b["parameter"].as_str()), (-3, Some("usl")), "{b}");
+        assert_eq!(
+            (
+                b["min"].is_null(),
+                b["exclusive_min"].as_f64(),
+                b["got"].as_f64()
+            ),
+            (true, Some(2.0), Some(1.0)),
+            "{b}"
         );
         let (_, b) = call(
             uanalytics_detect_changepoints,
@@ -1793,6 +1842,29 @@ mod tests {
         assert_eq!(
             (code, b["code"].as_str(), b["index"].as_u64()),
             (-3, Some("events_unordered"), Some(1))
+        );
+        let (code, b) = call(
+            uanalytics_laplace_trend_test,
+            r#"{"times": [1, 0, 2], "observation": {"truncation": "failure"}}"#,
+        );
+        assert_eq!(
+            (
+                code,
+                b["code"].as_str(),
+                b["index"].as_u64(),
+                b["parameter"].as_str()
+            ),
+            (-3, Some("parameter_out_of_range"), Some(1), Some("times")),
+            "{b}"
+        );
+        assert_eq!(
+            (
+                b["min"].is_null(),
+                b["exclusive_min"].as_f64(),
+                b["got"].as_f64()
+            ),
+            (true, Some(0.0), Some(0.0)),
+            "{b}"
         );
         let (code, b) = call(
             uanalytics_laplace_trend_test,
@@ -1893,6 +1965,17 @@ mod tests {
         assert_eq!(code, -3, "{body}");
         assert_eq!(body["code"], "parameter_out_of_range", "{body}");
         assert_eq!(body["index"], 1, "{body}");
+        // Each time must be > 0: the bound and the value travel with it.
+        assert_eq!(
+            (
+                body["min"].is_null(),
+                body["exclusive_min"].as_f64(),
+                body["max"].is_null(),
+                body["got"].as_f64()
+            ),
+            (true, Some(0.0), true, Some(0.0)),
+            "{body}"
+        );
     }
 
     #[test]
@@ -2192,6 +2275,29 @@ mod tests {
         let bad = serde_json::json!({ "data": vec![1.0; 40], "threshold": 0.0 });
         let (code, body) = call(uanalytics_spectral_residual, &bad.to_string());
         assert_eq!(code, ERR_COMPUTE, "{body}");
+        assert_eq!(
+            (
+                body["parameter"].as_str(),
+                body["min"].is_null(),
+                body["exclusive_min"].as_f64(),
+                body["max"].is_null(),
+                body["got"].as_f64()
+            ),
+            (Some("threshold"), true, Some(0.0), true, Some(0.0)),
+            "{body}"
+        );
+        let bad = serde_json::json!({ "data": vec![1.0; 40], "sensitivity": 100 });
+        let (_, body) = call(uanalytics_spectral_residual, &bad.to_string());
+        assert_eq!(
+            (
+                body["parameter"].as_str(),
+                body["exclusive_min"].as_f64(),
+                body["exclusive_max"].as_f64(),
+                body["got"].as_f64()
+            ),
+            (Some("sensitivity"), Some(0.0), Some(100.0), Some(100.0)),
+            "{body}"
+        );
 
         // -- X-bar/S, I-MR, run rules --
         let groups: Vec<Vec<f64>> = (0..6)

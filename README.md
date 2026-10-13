@@ -264,13 +264,20 @@ interface AnalyticsError extends Error {
   code: string              // stable reason — branch on this, not on `message`
   index: number | null      // position of the offending element in its input array
   parameter: string | null  // the option the refusal is about, when it is about one
+  // parameter_out_of_range also carries the domain and the value given:
+  min?: number | null       // inclusive lower bound; null when open or unbounded
+  max?: number | null       // inclusive upper bound; null when open or unbounded
+  exclusive_min?: number    // exclusive lower bound — present only when that end is open
+  exclusive_max?: number    // exclusive upper bound — present only when that end is open
+  got?: number
 }
 // try { c_chart([1, 2, 2.5]) } catch (e) { e.code === "count_not_whole"; e.index === 2 }
 // On a [defectives, sample_size] row the code says which member failed:
 //   p_chart([[1, 10], [1.5, 10]]) -> count_not_whole,      index 1
 //   p_chart([[1, 10], [1, 10.5]]) -> sample_size_not_whole, index 1
 // `index` says where in the data; `parameter` says which option:
-//   spectral_residual({ data, threshold: 0 }) -> parameter_out_of_range, parameter "threshold"
+//   spectral_residual({ data, threshold: 0 }) -> parameter_out_of_range, parameter "threshold",
+//                                                min null, exclusive_min 0, max null, got 0
 ```
 
 | `code` | Meaning |
@@ -288,7 +295,7 @@ interface AnalyticsError extends Error {
 | `empty_input` | an argument with nothing in it (`parameter`) |
 | `dimension_mismatch` | arrays that must have the same length do not — `index` is the first that differs, `expected` and `got` the lengths |
 | `standard_out_of_range` | a Phase I `p_bar`/`u_bar`/`phi` outside its domain — `parameter` names which |
-| `parameter_out_of_range` | an option outside its domain — `parameter` names which, `min` / `max` (`null` on an open side) and `got` carry the bound and the value where the domain is a range |
+| `parameter_out_of_range` | a value outside its domain — `parameter` names which (`index` its position for an array element) and `got` the value. `min` / `max` are the inclusive bounds, `null` on a side that is open or unbounded; `exclusive_min` / `exclusive_max` are the exclusive bounds, present only on an open side. `> 0` is `{ min: null, exclusive_min: 0, max: null }`, `(0, 1]` is `{ min: null, exclusive_min: 0, max: 1 }`, `usl` not above `lsl` is `exclusive_min: lsl` |
 | `value_not_finite` | a NaN or ±Infinity anywhere in an argument — `parameter` is the path to it (`input.data`), `index` its position in that array, or `null` |
 | `malformed_input` | not the shape the function takes — a row that is not a pair, an unknown field |
 | `unknown_option` | an option given a name the function does not know — `parameter` names it (`rules`, `cost`, `penalty`, `observation.truncation`), `got` the name and `expected` the names it knows |

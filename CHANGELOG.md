@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.5.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking:** `parameter_out_of_range` refusals (WebAssembly `Error` properties and
+  the C error body) report open bounds as `exclusive_min` / `exclusive_max`. `min` and
+  `max` now carry only inclusive bounds and stay present, `null` on an open or
+  unbounded side; the `exclusive_*` keys appear only on an open side. A value that
+  must be `> 0` (CUSUM/EWMA `sigma`, `h`, `l_factor`, `sigma_within`, a PELT
+  `penalty`, Weibull `shape`/`scale`, Box-Cox `usl`/`lsl`) reports
+  `min: null, exclusive_min: 0` (previously `min: 0`); EWMA `lambda` reports
+  `exclusive_min: 0, max: 1`; `fractions_failed` and `ppm` report both ends
+  exclusive; `usl` not above `lsl` reports `exclusive_min: <lsl>`. Ranges with
+  inclusive bounds only keep their shape.
+- Range refusals that carried no bounds now carry them with `got`: an array element
+  outside its domain (T chart `times`, G chart `gaps`, chi-squared `observed` /
+  `expected` / `table`, adjusted `p_values`), point-process event times and the end
+  of observation (`exclusive_min: 0`), Shapiro-Wilk over 5000 values (`min: 3,
+  max: 5000`), and spectral residual options (`threshold`, `sensitivity`, `min_zscore`,
+  `batch_size`, the window sizes).
+- **Breaking:** `SpectralResidualError::OptionOutOfRange` carries the value given and
+  its domain: `got`, `min`, `exclusive_min`, `max`, `exclusive_max`. The enum no
+  longer implements `Eq` (it holds `f64`s); `PartialEq` remains.
+
 ## [0.19.1] - 2026-10-07
 
 Depends on u-numflow 0.10. The .NET client is `UAnalytics` 0.14.0.

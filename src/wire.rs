@@ -283,8 +283,10 @@ pub(crate) struct WireError {
     pub(crate) parameter: Option<std::borrow::Cow<'static, str>>,
     /// Human-readable description.
     pub(crate) message: String,
-    /// The values behind the reason, by name: `min` / `max` (`null` on an
-    /// open side) and `got` for a value out of range, `got` and `expected`
+    /// The values behind the reason, by name: `min` / `max` (inclusive
+    /// bounds, `null` on an unbounded or open side), `exclusive_min` /
+    /// `exclusive_max` (only on an open side) and `got` for a value out of
+    /// range, `got` and `expected`
     /// for an unknown option name, `min` and `got` for too few values. Set
     /// as properties next to `code` on the WebAssembly `Error`, and as keys
     /// next to `code` in the C error body.
@@ -310,6 +312,68 @@ impl Detail {
             Detail::Text(s) => serde_json::json!(s),
             Detail::List(v) => serde_json::json!(v),
             Detail::Null => serde_json::Value::Null,
+        }
+    }
+}
+
+/// One end of the range a number must fall in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Bound {
+    /// The bound itself is accepted: sent as `min` / `max`.
+    Closed(f64),
+    /// The bound itself is refused: sent as `exclusive_min` / `exclusive_max`,
+    /// with `min` / `max` `null`.
+    Open(f64),
+    /// No limit on this side: `min` / `max` `null`.
+    Unbounded,
+}
+
+impl Bound {
+    /// The end a public error type states as an inclusive / exclusive pair.
+    pub(crate) fn from_pair(inclusive: Option<f64>, exclusive: Option<f64>) -> Self {
+        match (inclusive, exclusive) {
+            (Some(v), _) => Bound::Closed(v),
+            (None, Some(v)) => Bound::Open(v),
+            (None, None) => Bound::Unbounded,
+        }
+    }
+}
+
+/// Whether `v` lies in `low`..`high` (a NaN never does).
+pub(crate) fn within(v: f64, low: Bound, high: Bound) -> bool {
+    let above = match low {
+        Bound::Closed(b) => v >= b,
+        Bound::Open(b) => v > b,
+        Bound::Unbounded => !v.is_nan(),
+    };
+    let below = match high {
+        Bound::Closed(b) => v <= b,
+        Bound::Open(b) => v < b,
+        Bound::Unbounded => !v.is_nan(),
+    };
+    above && below
+}
+
+/// The range in words, for a message: `> 0`, `>= 0`, `in (0, 1]`.
+pub(crate) fn describe(low: Bound, high: Bound) -> String {
+    match (low, high) {
+        (Bound::Unbounded, Bound::Unbounded) => "a finite number".to_owned(),
+        (Bound::Closed(a), Bound::Unbounded) => format!(">= {a}"),
+        (Bound::Open(a), Bound::Unbounded) => format!("> {a}"),
+        (Bound::Unbounded, Bound::Closed(b)) => format!("<= {b}"),
+        (Bound::Unbounded, Bound::Open(b)) => format!("< {b}"),
+        (low, high) => {
+            let (l, a) = match low {
+                Bound::Closed(a) => ('[', a),
+                Bound::Open(a) => ('(', a),
+                Bound::Unbounded => unreachable!("matched above"),
+            };
+            let (h, b) = match high {
+                Bound::Closed(b) => (']', b),
+                Bound::Open(b) => (')', b),
+                Bound::Unbounded => unreachable!("matched above"),
+            };
+            format!("in {l}{a}, {b}{h}")
         }
     }
 }
@@ -409,20 +473,28 @@ impl WireError {
         .with("expected", Detail::List(expected.to_vec()))
     }
 
-    /// A number outside `[min, max]`; `None` is an open side (sent as `null`).
+    /// A number outside the range `low`..`high`. `min` and `max` are always
+    /// sent -- the bound when that end is closed, `null` otherwise -- and an
+    /// open end adds `exclusive_min` / `exclusive_max`.
     pub(crate) fn out_of_range(
-        parameter: &'static str,
-        min: Option<f64>,
-        max: Option<f64>,
+        parameter: impl Into<std::borrow::Cow<'static, str>>,
+        low: Bound,
+        high: Bound,
         got: f64,
         message: impl Into<String>,
     ) -> Self {
-        let side = |b: Option<f64>| b.map_or(Detail::Null, Detail::Num);
-        Self::new(code::PARAMETER_OUT_OF_RANGE, None, message)
-            .about(parameter)
-            .with("min", side(min))
-            .with("max", side(max))
-            .with("got", Detail::Num(got))
+        let mut e = Self::new(code::PARAMETER_OUT_OF_RANGE, None, message).about(parameter);
+        for (closed, open, end) in [
+            ("min", "exclusive_min", low),
+            ("max", "exclusive_max", high),
+        ] {
+            match end {
+                Bound::Closed(v) => e = e.with(closed, Detail::Num(v)),
+                Bound::Open(v) => e = e.with(closed, Detail::Null).with(open, Detail::Num(v)),
+                Bound::Unbounded => e = e.with(closed, Detail::Null),
+            }
+        }
+        e.with("got", Detail::Num(got))
     }
 
     /// Fewer values than needed: `parameter`, `min` and `got`.
@@ -930,21 +1002,27 @@ pub(crate) fn at_least(
     }
 }
 
-/// The first value that `allowed` rejects, as `parameter_out_of_range` at its
-/// index; `bound` states the domain in the message.
+/// The first value outside `low`..`high`, as `parameter_out_of_range` at its
+/// index with the bounds and the value.
 pub(crate) fn each_within(
     values: &[f64],
     param: &'static str,
-    bound: &str,
-    allowed: impl Fn(f64) -> bool,
+    low: Bound,
+    high: Bound,
 ) -> Result<(), WireError> {
-    match values.iter().position(|&v| !allowed(v)) {
-        Some(i) => Err(WireError::new(
-            crate::wire::code::PARAMETER_OUT_OF_RANGE,
-            Some(i),
-            format!("{param}[{i}]: must be {bound}, got {}", values[i]),
-        )
-        .about(param)),
+    match values.iter().position(|&v| !within(v, low, high)) {
+        Some(i) => {
+            let got = values[i];
+            let mut e = WireError::out_of_range(
+                param,
+                low,
+                high,
+                got,
+                format!("{param}[{i}]: must be {}, got {got}", describe(low, high)),
+            );
+            e.index = Some(i);
+            Err(e)
+        }
         None => Ok(()),
     }
 }
@@ -1035,7 +1113,7 @@ pub(crate) fn laney_u_dto(
 /// G chart: inter-event conforming counts, at least 3, each `>= 0`.
 pub(crate) fn g_chart_dto(gaps: &[f64]) -> Result<GChartDto, WireError> {
     let gaps = at_least(gaps.to_vec(), 3, "gaps")?;
-    each_within(&gaps, "gaps", ">= 0", |v| v >= 0.0)?;
+    each_within(&gaps, "gaps", Bound::Closed(0.0), Bound::Unbounded)?;
     let chart =
         crate::spc::g_chart(&gaps).expect("three or more finite counts >= 0 make a G chart");
     Ok(GChartDto {
@@ -1058,7 +1136,7 @@ pub(crate) fn g_chart_dto(gaps: &[f64]) -> Result<GChartDto, WireError> {
 /// T chart: inter-event times, at least 3, each `> 0`.
 pub(crate) fn t_chart_dto(times: &[f64]) -> Result<TChartDto, WireError> {
     let times = at_least(times.to_vec(), 3, "times")?;
-    each_within(&times, "times", "> 0", |v| v > 0.0)?;
+    each_within(&times, "times", Bound::Open(0.0), Bound::Unbounded)?;
     let chart = crate::spc::t_chart(&times).expect("three or more finite times > 0 make a T chart");
     Ok(TChartDto {
         t_bar: chart.t_bar,
@@ -1273,15 +1351,16 @@ pub(crate) mod hypothesis {
     pub(crate) fn shapiro_wilk_dto(data: &[f64]) -> Result<ShapiroWilkDto, WireError> {
         let data = at_least(data.to_vec(), 3, "data")?;
         if data.len() > 5000 {
-            return Err(WireError::new(
-                code::PARAMETER_OUT_OF_RANGE,
-                None,
+            return Err(WireError::out_of_range(
+                "data",
+                Bound::Closed(3.0),
+                Bound::Closed(5000.0),
+                data.len() as f64,
                 format!(
                     "data: Shapiro-Wilk covers 3 to 5000 values (Royston 1995), got {}",
                     data.len()
                 ),
-            )
-            .about("data"));
+            ));
         }
         crate::testing::shapiro_wilk_test(&data)
             .map(|r| ShapiroWilkDto {
@@ -1388,8 +1467,8 @@ pub(crate) mod hypothesis {
             if p > max {
                 return Err(WireError::out_of_range(
                     "max_lags",
-                    Some(0.0),
-                    Some(max as f64),
+                    Bound::Closed(0.0),
+                    Bound::Closed(max as f64),
                     p as f64,
                     format!(
                         "max_lags: {} values leave room for at most {max} lags, got {p}",
@@ -1473,8 +1552,8 @@ pub(crate) mod hypothesis {
     ) -> Result<TestResultDto, WireError> {
         same_length(observed, expected, "observed", "expected")?;
         let observed = at_least(observed.to_vec(), 2, "observed")?;
-        each_within(&observed, "observed", ">= 0", |v| v >= 0.0)?;
-        each_within(expected, "expected", "> 0", |v| v > 0.0)?;
+        each_within(&observed, "observed", Bound::Closed(0.0), Bound::Unbounded)?;
+        each_within(expected, "expected", Bound::Open(0.0), Bound::Unbounded)?;
         crate::testing::chi_squared_goodness_of_fit(&observed, expected)
             .map(Into::into)
             .ok_or_else(|| {
@@ -1530,7 +1609,7 @@ pub(crate) mod hypothesis {
     ) -> Result<TestResultDto, WireError> {
         let cols = rectangular(table, 2, 2)?;
         let flat: Vec<f64> = table.iter().flatten().copied().collect();
-        each_within(&flat, "table", ">= 0", |v| v >= 0.0)?;
+        each_within(&flat, "table", Bound::Closed(0.0), Bound::Unbounded)?;
         crate::testing::chi_squared_independence(&flat, table.len(), cols)
             .map(Into::into)
             .ok_or_else(|| {
@@ -1544,9 +1623,7 @@ pub(crate) mod hypothesis {
     /// Bonferroni or Benjamini-Hochberg adjusted p-values, in input order.
     pub(crate) fn p_adjust_dto(test: &str, p_values: &[f64]) -> Result<Vec<f64>, WireError> {
         let p = at_least(p_values.to_vec(), 1, "p_values")?;
-        each_within(&p, "p_values", "a probability in [0, 1]", |v| {
-            (0.0..=1.0).contains(&v)
-        })?;
+        each_within(&p, "p_values", Bound::Closed(0.0), Bound::Closed(1.0))?;
         let adjusted = if test == "bonferroni_correction" {
             crate::testing::bonferroni_correction(&p)
         } else {
@@ -1686,8 +1763,8 @@ pub(crate) fn capability_dto(input: CapabilityInputDto) -> Result<CapabilityDto,
             if !sigma_within.is_finite() || sigma_within <= 0.0 {
                 return Err(WireError::out_of_range(
                     "sigma_within",
-                    Some(0.0),
-                    None,
+                    Bound::Open(0.0),
+                    Bound::Unbounded,
                     sigma_within,
                     format!(
                         "sigma_within must be a positive, finite number (R-bar/d2 or \
@@ -1907,7 +1984,7 @@ pub(crate) fn default_min_seg() -> usize {
 
 /// The specification limits a capability index is measured against, refused
 /// by name: neither given (`no_specification`), or `usl` not above `lsl`
-/// (`parameter_out_of_range` on `usl`, with `lsl` as its exclusive floor).
+/// (`parameter_out_of_range` on `usl`, with `lsl` as its `exclusive_min`).
 pub(crate) fn check_specification(usl: Option<f64>, lsl: Option<f64>) -> Result<(), WireError> {
     match (usl, lsl) {
         (None, None) => Err(WireError::new(
@@ -1918,8 +1995,8 @@ pub(crate) fn check_specification(usl: Option<f64>, lsl: Option<f64>) -> Result<
         .with("expected", Detail::List(vec!["usl", "lsl"]))),
         (Some(u), Some(l)) if u <= l => Err(WireError::out_of_range(
             "usl",
-            Some(l),
-            None,
+            Bound::Open(l),
+            Bound::Unbounded,
             u,
             format!("usl must be greater than lsl ({l}), got {u}"),
         )),
@@ -2023,8 +2100,8 @@ pub(crate) fn gage_rr_xbar_r_dto(dto: GageRRInputDto) -> Result<GageRRResultDto,
                     "measurements[0]" => "measurements[0]",
                     _ => "measurements[0][0]",
                 },
-                Some(2.0),
-                Some(max as f64),
+                Bound::Closed(2.0),
+                Bound::Closed(max as f64),
                 got as f64,
                 format!("{at}: the X̄-R method supports 2 to {max} {name}, got {got}"),
             ));
@@ -2120,8 +2197,8 @@ pub(crate) fn pelt_from(
         PeltPenaltyDto::Value(v) if !(v.is_finite() && v > 0.0) => {
             return Err(WireError::out_of_range(
                 "penalty",
-                Some(0.0),
-                None,
+                Bound::Open(0.0),
+                Bound::Unbounded,
                 v,
                 format!("penalty must be \"bic\" or a finite number > 0, got {v}"),
             ))
@@ -2131,8 +2208,8 @@ pub(crate) fn pelt_from(
     if min_segment_len < 2 {
         return Err(WireError::out_of_range(
             "min_segment_len",
-            Some(2.0),
-            None,
+            Bound::Closed(2.0),
+            Bound::Unbounded,
             min_segment_len as f64,
             format!("min_segment_len must be at least 2, got {min_segment_len}"),
         ));
@@ -2298,26 +2375,24 @@ pub(crate) struct EwmaDto {
     pub(crate) in_control: bool,
 }
 
-/// `value` must be a finite number within the bounds `ok` states; the refusal
-/// names it, with `min`/`max` (an exclusive bound is reported as the bound
-/// itself -- the message says which side is open).
+/// `value` must be a finite number in `low`..`high`; the refusal names it,
+/// with the closed ends as `min` / `max` and the open ends as
+/// `exclusive_min` / `exclusive_max`.
 fn chart_parameter(
     name: &'static str,
     value: f64,
-    ok: bool,
-    min: Option<f64>,
-    max: Option<f64>,
-    domain: &str,
+    low: Bound,
+    high: Bound,
 ) -> Result<(), WireError> {
-    if value.is_finite() && ok {
+    if value.is_finite() && within(value, low, high) {
         return Ok(());
     }
     Err(WireError::out_of_range(
         name,
-        min,
-        max,
+        low,
+        high,
         value,
-        format!("{name} must be {domain}, got {value}"),
+        format!("{name} must be {}, got {value}", describe(low, high)),
     ))
 }
 
@@ -2332,10 +2407,10 @@ pub(crate) fn cusum_dto(input: CusumInputDto) -> Result<CusumDto, WireError> {
         h,
         ..
     } = input;
-    chart_parameter("target", target, true, None, None, "a finite number")?;
-    chart_parameter("sigma", sigma, sigma > 0.0, Some(0.0), None, "> 0")?;
-    chart_parameter("k", k, k >= 0.0, Some(0.0), None, ">= 0")?;
-    chart_parameter("h", h, h > 0.0, Some(0.0), None, "> 0")?;
+    chart_parameter("target", target, Bound::Unbounded, Bound::Unbounded)?;
+    chart_parameter("sigma", sigma, Bound::Open(0.0), Bound::Unbounded)?;
+    chart_parameter("k", k, Bound::Closed(0.0), Bound::Unbounded)?;
+    chart_parameter("h", h, Bound::Open(0.0), Bound::Unbounded)?;
     let chart = crate::detection::Cusum::with_params(target, sigma, k, h)
         .expect("every parameter was checked against the chart's own conditions above");
 
@@ -2372,17 +2447,10 @@ pub(crate) fn ewma_dto(input: EwmaInputDto) -> Result<EwmaDto, WireError> {
         l_factor,
         ..
     } = input;
-    chart_parameter("target", target, true, None, None, "a finite number")?;
-    chart_parameter("sigma", sigma, sigma > 0.0, Some(0.0), None, "> 0")?;
-    chart_parameter(
-        "lambda",
-        lambda,
-        lambda > 0.0 && lambda <= 1.0,
-        Some(0.0),
-        Some(1.0),
-        "in (0, 1]",
-    )?;
-    chart_parameter("l_factor", l_factor, l_factor > 0.0, Some(0.0), None, "> 0")?;
+    chart_parameter("target", target, Bound::Unbounded, Bound::Unbounded)?;
+    chart_parameter("sigma", sigma, Bound::Open(0.0), Bound::Unbounded)?;
+    chart_parameter("lambda", lambda, Bound::Open(0.0), Bound::Closed(1.0))?;
+    chart_parameter("l_factor", l_factor, Bound::Open(0.0), Bound::Unbounded)?;
     let chart = crate::detection::Ewma::with_params(target, sigma, lambda, l_factor)
         .expect("every parameter was checked against the chart's own conditions above");
 
@@ -2761,9 +2829,9 @@ pub(crate) fn run_rules_dto(
     // other two are ordered about, so the refusal names the limit out of place.
     if !(lcl <= cl && cl <= ucl) {
         let (parameter, min, max, got) = if lcl <= cl {
-            ("limits.ucl", Some(cl), None, ucl)
+            ("limits.ucl", Bound::Closed(cl), Bound::Unbounded, ucl)
         } else {
-            ("limits.lcl", None, Some(cl), lcl)
+            ("limits.lcl", Bound::Unbounded, Bound::Closed(cl), lcl)
         };
         return Err(WireError::out_of_range(
             parameter,
@@ -2934,9 +3002,21 @@ impl From<crate::detection::SpectralResidualError> for WireError {
         use crate::detection::SpectralResidualError as E;
         let message = error.to_string();
         match error {
-            E::OptionOutOfRange { option, .. } => {
-                WireError::new(code::PARAMETER_OUT_OF_RANGE, None, message).about(option)
-            }
+            E::OptionOutOfRange {
+                option,
+                min,
+                exclusive_min,
+                max,
+                exclusive_max,
+                got,
+                ..
+            } => WireError::out_of_range(
+                option,
+                Bound::from_pair(min, exclusive_min),
+                Bound::from_pair(max, exclusive_max),
+                got,
+                message,
+            ),
             E::TooFewObservations { needed, got } => {
                 WireError::too_few("data", needed, got, message)
             }
@@ -3044,8 +3124,8 @@ pub(crate) mod reliability {
         } else {
             Err(WireError::out_of_range(
                 param,
-                Some(0.0),
-                None,
+                Bound::Open(0.0),
+                Bound::Unbounded,
                 x,
                 format!("{param} must be a finite number > 0, got {x}"),
             ))
@@ -3164,15 +3244,15 @@ pub(crate) mod reliability {
         }
         for (i, &f) in input.fractions_failed.iter().enumerate() {
             if !(f > 0.0 && f < 1.0) {
-                return Err(WireError::new(
-                    code::PARAMETER_OUT_OF_RANGE,
-                    Some(i),
+                let mut e = WireError::out_of_range(
+                    "fractions_failed",
+                    Bound::Open(0.0),
+                    Bound::Open(1.0),
+                    f,
                     format!("fractions_failed[{i}]: must be strictly inside (0, 1), got {f}"),
-                )
-                .about("fractions_failed")
-                .with("min", Detail::Num(0.0))
-                .with("max", Detail::Num(1.0))
-                .with("got", Detail::Num(f)));
+                );
+                e.index = Some(i);
+                return Err(e);
             }
         }
         let ra = crate::weibull::ReliabilityAnalysis::new(shape, scale)
@@ -3209,8 +3289,8 @@ pub(crate) mod reliability {
         crate::capability::ppm_to_sigma(ppm).ok_or_else(|| {
             WireError::out_of_range(
                 "ppm",
-                Some(0.0),
-                Some(1_000_000.0),
+                Bound::Open(0.0),
+                Bound::Open(1_000_000.0),
                 ppm,
                 format!("ppm must be finite and strictly inside (0, 1000000), got {ppm}"),
             )
@@ -3383,7 +3463,17 @@ pub(crate) mod reliability {
                 (e.code, e.parameter.as_deref()),
                 ("parameter_out_of_range", Some("ppm"))
             );
-            assert_eq!(e.details[1], ("max", Detail::Num(1_000_000.0)));
+            // (0, 1 000 000): both ends open.
+            assert_eq!(
+                e.details,
+                vec![
+                    ("min", Detail::Null),
+                    ("exclusive_min", Detail::Num(0.0)),
+                    ("max", Detail::Null),
+                    ("exclusive_max", Detail::Num(1_000_000.0)),
+                    ("got", Detail::Num(0.0)),
+                ]
+            );
             let e = sigma_to_ppm_value(f64::NAN).unwrap_err();
             assert_eq!(
                 (e.code, e.parameter.as_deref()),
@@ -3528,11 +3618,20 @@ pub(crate) mod point_process {
             PointProcessError::NotFinite { index: None } => {
                 WireError::new(code::VALUE_NOT_FINITE, None, message).about("observation.end")
             }
-            PointProcessError::NotPositive { index: Some(i), .. } => {
-                WireError::new(code::PARAMETER_OUT_OF_RANGE, Some(i), message).about("times")
-            }
-            PointProcessError::NotPositive { index: None, .. } => {
-                WireError::new(code::PARAMETER_OUT_OF_RANGE, None, message).about("observation.end")
+            PointProcessError::NotPositive { index, got } => {
+                let mut e = WireError::out_of_range(
+                    if index.is_some() {
+                        "times"
+                    } else {
+                        "observation.end"
+                    },
+                    Bound::Open(0.0),
+                    Bound::Unbounded,
+                    got,
+                    message,
+                );
+                e.index = index;
+                e
             }
             PointProcessError::Unordered { index } => {
                 WireError::new(code::EVENTS_UNORDERED, Some(index), message).about("times")
@@ -3777,7 +3876,8 @@ mod input_error_tests {
         assert_eq!(
             e.details,
             vec![
-                ("min", Detail::Num(0.0)),
+                ("min", Detail::Null),
+                ("exclusive_min", Detail::Num(0.0)),
                 ("max", Detail::Null),
                 ("got", Detail::Num(-1.0))
             ]
@@ -3787,6 +3887,15 @@ mod input_error_tests {
         assert_eq!(
             (e.code, e.parameter.as_deref()),
             ("parameter_out_of_range", Some("min_segment_len"))
+        );
+        // A closed bound keeps its shape: `min`, no `exclusive_min`.
+        assert_eq!(
+            e.details,
+            vec![
+                ("min", Detail::Num(2.0)),
+                ("max", Detail::Null),
+                ("got", Detail::Num(1.0))
+            ]
         );
 
         let mut empty = input("l2", bic(), 2);
@@ -3946,9 +4055,8 @@ mod input_error_tests {
         );
     }
 
-    /// The report that prompted this: four different option mistakes reached
-    /// the consumer as one indistinguishable message, so it re-validated the
-    /// options itself. Each now arrives naming its own option.
+    /// Each refused option arrives naming itself, with the value given and
+    /// the bounds of its domain.
     #[test]
     fn a_refused_option_names_itself_on_the_wire() {
         let request = |extra: serde_json::Value| {
@@ -3962,16 +4070,54 @@ mod input_error_tests {
             spectral_residual_dto(input)
         };
 
-        for (option, body) in [
-            ("threshold", json!({ "threshold": 0.0 })),
-            ("sensitivity", json!({ "sensitivity": 100.0 })),
-            ("sensitivity", json!({ "sensitivity": 0.0 })),
-            ("batch_size", json!({ "batch_size": 5 })),
+        for (option, body, details) in [
+            (
+                "threshold",
+                json!({ "threshold": 0.0 }),
+                vec![
+                    ("min", Detail::Null),
+                    ("exclusive_min", Detail::Num(0.0)),
+                    ("max", Detail::Null),
+                    ("got", Detail::Num(0.0)),
+                ],
+            ),
+            (
+                "sensitivity",
+                json!({ "sensitivity": 100.0 }),
+                vec![
+                    ("min", Detail::Null),
+                    ("exclusive_min", Detail::Num(0.0)),
+                    ("max", Detail::Null),
+                    ("exclusive_max", Detail::Num(100.0)),
+                    ("got", Detail::Num(100.0)),
+                ],
+            ),
+            (
+                "sensitivity",
+                json!({ "sensitivity": 0.0 }),
+                vec![
+                    ("min", Detail::Null),
+                    ("exclusive_min", Detail::Num(0.0)),
+                    ("max", Detail::Null),
+                    ("exclusive_max", Detail::Num(100.0)),
+                    ("got", Detail::Num(0.0)),
+                ],
+            ),
+            (
+                "batch_size",
+                json!({ "batch_size": 5 }),
+                vec![
+                    ("min", Detail::Num(12.0)),
+                    ("max", Detail::Null),
+                    ("got", Detail::Num(5.0)),
+                ],
+            ),
         ] {
             let e = request(body).expect_err("refused");
             assert_eq!(e.code, code::PARAMETER_OUT_OF_RANGE, "{}", e.message);
             assert_eq!(e.parameter.as_deref(), Some(option), "{}", e.message);
             assert!(e.message.starts_with(option), "{}", e.message);
+            assert_eq!(e.details, details, "{}", e.message);
         }
 
         // Data problems keep their own codes and the position. A NaN has no

@@ -1681,7 +1681,7 @@ mod dto_strictness_tests {
 #[cfg(test)]
 mod binding_contract_tests {
     use super::*;
-    use crate::wire::each_within;
+    use crate::wire::{each_within, Bound, Detail};
 
     // --- hypothesis tests ---
 
@@ -1777,11 +1777,28 @@ mod binding_contract_tests {
 
     #[test]
     fn a_value_outside_the_domain_is_named_where_it_sits() {
-        let e = each_within(&[1.0, 0.0, 2.0], "times", "> 0", |v| v > 0.0).unwrap_err();
+        let e = each_within(
+            &[1.0, 0.0, 2.0],
+            "times",
+            Bound::Open(0.0),
+            Bound::Unbounded,
+        )
+        .unwrap_err();
         assert_eq!(e.code, crate::wire::code::PARAMETER_OUT_OF_RANGE);
         assert_eq!(e.index, Some(1));
         assert_eq!(e.parameter.as_deref(), Some("times"));
-        assert!(each_within(&[0.0, 2.0], "gaps", ">= 0", |v| v >= 0.0).is_ok());
+        // `> 0`: the open end is `exclusive_min`; `min` and `max` are null.
+        assert_eq!(
+            e.details,
+            vec![
+                ("min", Detail::Null),
+                ("exclusive_min", Detail::Num(0.0)),
+                ("max", Detail::Null),
+                ("got", Detail::Num(0.0)),
+            ]
+        );
+        assert_eq!(e.message, "times[1]: must be > 0, got 0");
+        assert!(each_within(&[0.0, 2.0], "gaps", Bound::Closed(0.0), Bound::Unbounded).is_ok());
     }
 
     // --- rules option on xbar_r_chart ---
@@ -2593,6 +2610,17 @@ mod binding_contract_tests {
                 ("parameter_out_of_range", Some("lambda")),
                 "{e}"
             );
+            // (0, 1]: open below, closed above.
+            assert_eq!(
+                e.details,
+                vec![
+                    ("min", crate::wire::Detail::Null),
+                    ("exclusive_min", crate::wire::Detail::Num(0.0)),
+                    ("max", crate::wire::Detail::Num(1.0)),
+                    ("got", crate::wire::Detail::Num(lambda)),
+                ]
+            );
+            assert_eq!(e.message, format!("lambda must be in (0, 1], got {lambda}"));
         }
     }
 

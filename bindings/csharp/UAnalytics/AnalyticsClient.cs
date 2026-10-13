@@ -610,7 +610,9 @@ public class AnalyticsException : Exception
 
     /// <summary>
     /// The whole error body: <c>error</c>, <c>code</c>, <c>index</c>, <c>parameter</c> and the
-    /// values behind the reason — <c>min</c> / <c>max</c> / <c>got</c> for a value out of range,
+    /// values behind the reason — for a value out of range, <c>got</c>, the inclusive bounds
+    /// <c>min</c> / <c>max</c> (<c>null</c> on a side that is open or unbounded) and the exclusive
+    /// bounds <c>exclusive_min</c> / <c>exclusive_max</c> (present only on an open side);
     /// <c>got</c> / <c>expected</c> for an unknown option name, <c>min</c> / <c>got</c> for too
     /// few values. <c>null</c> when there is no body.
     /// </summary>
