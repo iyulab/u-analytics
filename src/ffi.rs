@@ -331,28 +331,55 @@ pub unsafe extern "C" fn uanalytics_run_rules(
 
 // ── SPC: P Chart ────────────────────────────────────────────
 
-/// A P-chart-family request. `samples` carries `[defectives, sample_size]`
-/// pairs -- the order `PChart::add_sample` takes, and the order the WASM
-/// binding has always used. This entry point used to accept the pair reversed,
-/// which produced a plausible-looking chart from a caller that read the field
-/// names the other way round.
+/// A P chart request. `samples` carries `[defectives, sample_size]` pairs --
+/// the order `PChart::add_sample` takes, and the order the WASM binding has
+/// always used. This entry point used to accept the pair reversed, which
+/// produced a plausible-looking chart from a caller that read the field names
+/// the other way round.
+///
+/// Each chart's request type has exactly the keys that chart reads, so a key
+/// it does not take (`phi` on a P chart) is refused as unknown when the
+/// request is read, like any other.
 #[cfg(feature = "ffi")]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ProportionSamplesRequest {
+struct PChartRequest {
     /// `[[defectives, sample_size], ...]`, read as JSON numbers so a count that
     /// is not a whole number is refused with its row rather than by the parser.
     samples: serde_json::Value,
     /// Known centre line (Phase II); see the WASM `p_chart` options.
     #[serde(default)]
     p_bar: Option<f64>,
-    /// Known sigma-inflation factor, Laney P' only, together with `p_bar`.
+}
+
+#[cfg(feature = "ffi")]
+impl PChartRequest {
+    fn standard(&self) -> crate::wire::AttributeStandardDto {
+        crate::wire::AttributeStandardDto {
+            p_bar: self.p_bar,
+            u_bar: None,
+            phi: None,
+        }
+    }
+}
+
+/// A Laney P' chart request: the P chart's, and the sigma-inflation factor.
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LaneyPChartRequest {
+    /// As [`PChartRequest::samples`].
+    samples: serde_json::Value,
+    /// Known centre line (Phase II), together with `phi`.
+    #[serde(default)]
+    p_bar: Option<f64>,
+    /// Known sigma-inflation factor, together with `p_bar`.
     #[serde(default)]
     phi: Option<f64>,
 }
 
 #[cfg(feature = "ffi")]
-impl ProportionSamplesRequest {
+impl LaneyPChartRequest {
     fn standard(&self) -> crate::wire::AttributeStandardDto {
         crate::wire::AttributeStandardDto {
             p_bar: self.p_bar,
@@ -385,7 +412,7 @@ pub unsafe extern "C" fn uanalytics_p_chart(
             Ok(j) => j,
             Err(e) => return e,
         };
-        let req: ProportionSamplesRequest = match parse_request(&json, result_ptr) {
+        let req: PChartRequest = match parse_request(&json, result_ptr) {
             Ok(r) => r,
             Err(status) => return status,
         };
@@ -420,7 +447,7 @@ pub unsafe extern "C" fn uanalytics_laney_p_chart(
             Err(e) => return e,
         };
 
-        let req: ProportionSamplesRequest = match parse_request(&json, result_ptr) {
+        let req: LaneyPChartRequest = match parse_request(&json, result_ptr) {
             Ok(r) => r,
             Err(status) => return status,
         };
@@ -452,22 +479,42 @@ struct DefectsRequest {
     defects: serde_json::Value,
 }
 
-/// `{ "samples": [[defects, units], ...], "u_bar"?, "phi"? }` for the U and
-/// Laney U' charts.
+/// `{ "samples": [[defects, units], ...], "u_bar"? }` for the U chart.
 #[cfg(feature = "ffi")]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RateSamplesRequest {
+struct UChartRequest {
     samples: serde_json::Value,
     #[serde(default)]
     u_bar: Option<f64>,
-    /// Laney U' only, together with `u_bar`.
+}
+
+#[cfg(feature = "ffi")]
+impl UChartRequest {
+    fn standard(&self) -> crate::wire::AttributeStandardDto {
+        crate::wire::AttributeStandardDto {
+            p_bar: None,
+            u_bar: self.u_bar,
+            phi: None,
+        }
+    }
+}
+
+/// `{ "samples": [[defects, units], ...], "u_bar"?, "phi"? }` for the
+/// Laney U' chart; `u_bar` and `phi` go together.
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LaneyUChartRequest {
+    samples: serde_json::Value,
+    #[serde(default)]
+    u_bar: Option<f64>,
     #[serde(default)]
     phi: Option<f64>,
 }
 
 #[cfg(feature = "ffi")]
-impl RateSamplesRequest {
+impl LaneyUChartRequest {
     fn standard(&self) -> crate::wire::AttributeStandardDto {
         crate::wire::AttributeStandardDto {
             p_bar: None,
@@ -571,7 +618,7 @@ pub unsafe extern "C" fn uanalytics_u_chart(
     result_ptr: *mut *mut libc::c_char,
 ) -> i32 {
     ffi_catch(result_ptr, || unsafe {
-        chart_entry(request_json, result_ptr, |req: RateSamplesRequest| {
+        chart_entry(request_json, result_ptr, |req: UChartRequest| {
             let samples = crate::wire::rate_pairs(&req.samples, "samples")?;
             crate::wire::u_chart_dto(&samples, &req.standard())
         })
@@ -590,7 +637,7 @@ pub unsafe extern "C" fn uanalytics_laney_u_chart(
     result_ptr: *mut *mut libc::c_char,
 ) -> i32 {
     ffi_catch(result_ptr, || unsafe {
-        chart_entry(request_json, result_ptr, |req: RateSamplesRequest| {
+        chart_entry(request_json, result_ptr, |req: LaneyUChartRequest| {
             let samples = crate::wire::rate_pairs(&req.samples, "samples")?;
             crate::wire::laney_u_dto(&samples, &req.standard())
         })
@@ -1971,6 +2018,9 @@ mod tests {
             (code, b["code"].as_str(), b["parameter"].as_str()),
             (-3, Some("unknown_option"), Some("observation.truncation"))
         );
+        // The name given and the names known, as every unknown option.
+        assert_eq!(b["got"], "timed", "{b}");
+        assert_eq!(b["expected"], serde_json::json!(["time", "failure"]), "{b}");
         let (code, b) = call(
             uanalytics_laplace_trend_test,
             r#"{"times": [2, 1], "observation": {"truncation": "failure"}}"#,
@@ -2040,6 +2090,33 @@ mod tests {
         let (code, body) = call(uanalytics_xbar_r_chart, "{not json");
         assert_eq!(code, -2);
         assert!(body["error"].is_string());
+    }
+
+    #[test]
+    fn a_chart_refuses_the_laney_factor_as_an_unknown_key() {
+        // `phi` belongs to the Laney charts; the P and U charts' requests do
+        // not have it, so it is refused when the request is read.
+        for (entry, request) in [
+            (
+                uanalytics_p_chart as Entry,
+                r#"{"samples": [[3, 50], [5, 50]], "phi": 1.2}"#,
+            ),
+            (
+                uanalytics_u_chart,
+                r#"{"samples": [[3, 1.5], [5, 2]], "phi": 1.2}"#,
+            ),
+        ] {
+            let (code, body) = call(entry, request);
+            assert_eq!(code, -2, "{request}: {body}");
+            assert_eq!(body["code"], "malformed_input", "{body}");
+            assert!(
+                body["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("unknown field `phi`"),
+                "{body}"
+            );
+        }
     }
 
     // -- NP, C, U, Laney U', G, T ----------------------------------------
@@ -2669,3 +2746,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, feature = "ffi"))]
+mod request_keys;

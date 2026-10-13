@@ -29,6 +29,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The keys and names each entry point reads, measured by the engine's own tests:
+         every request the client writes is checked against them. -->
+    <None Include="../../../src/ffi/request_keys.json" Link="request_keys.json"
+          CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="$(UAnalyticsNativeDir)/u_analytics.dll" Condition="Exists('$(UAnalyticsNativeDir)/u_analytics.dll')"
           CopyToOutputDirectory="PreserveNewest" Visible="false" />
     <None Include="$(UAnalyticsNativeDir)/libu_analytics.so" Condition="Exists('$(UAnalyticsNativeDir)/libu_analytics.so')"

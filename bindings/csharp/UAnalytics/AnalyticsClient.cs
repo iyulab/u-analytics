@@ -13,6 +13,12 @@ public sealed class AnalyticsClient : IDisposable
     /// <summary>Sees each raw response body before it is read — the contract tests compare the two.</summary>
     internal Action<string>? ResponseObserver { get; set; }
 
+    /// <summary>
+    /// Sees each request body as it is sent, with the entry point it goes to — the contract
+    /// tests check every key and name in it against the ones the engine reads.
+    /// </summary>
+    internal Action<string, string>? RequestObserver { get; set; }
+
     public string GetVersion()
     {
         var ptr = NativeInterop.uanalytics_version();
@@ -542,7 +548,9 @@ public sealed class AnalyticsClient : IDisposable
 
     private T Call<T>(NativeFunc func, JsonTypeInfo<T> result, params (string Key, JsonNode? Value)[] members)
     {
-        var body = Invoke(func, Request.Body(members).ToJsonString());
+        var request = Request.Body(members).ToJsonString();
+        RequestObserver?.Invoke(func.Method.Name, request);
+        var body = Invoke(func, request);
         ResponseObserver?.Invoke(body);
         return JsonSerializer.Deserialize(body, result)
                ?? throw new AnalyticsException(-4, "The engine returned null.");

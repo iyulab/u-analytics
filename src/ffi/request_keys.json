@@ -1,0 +1,455 @@
+{
+  "$comment": "The keys and names each C entry point reads, measured from the entry points (src/ffi/request_keys.rs). Regenerate: UPDATE_REQUEST_KEYS=1 cargo test --features ffi --lib request_keys",
+  "entry_points": {
+    "uanalytics_adf_test": {
+      "properties": {
+        "data": {},
+        "max_lags": {},
+        "model": {
+          "enum": [
+            "none",
+            "constant",
+            "constant_trend"
+          ]
+        }
+      }
+    },
+    "uanalytics_anderson_darling_test": {
+      "properties": {
+        "data": {}
+      }
+    },
+    "uanalytics_bartlett_test": {
+      "properties": {
+        "groups": {}
+      }
+    },
+    "uanalytics_benjamini_hochberg": {
+      "properties": {
+        "p_values": {}
+      }
+    },
+    "uanalytics_bonferroni_correction": {
+      "properties": {
+        "p_values": {}
+      }
+    },
+    "uanalytics_boxcox_capability": {
+      "properties": {
+        "data": {},
+        "lambda_range": {},
+        "lsl": {},
+        "usl": {}
+      }
+    },
+    "uanalytics_c_chart": {
+      "properties": {
+        "defects": {}
+      }
+    },
+    "uanalytics_chi_squared_goodness_of_fit": {
+      "properties": {
+        "expected": {},
+        "observed": {}
+      }
+    },
+    "uanalytics_chi_squared_independence": {
+      "properties": {
+        "table": {}
+      }
+    },
+    "uanalytics_correlation_matrix": {
+      "properties": {
+        "method": {
+          "enum": [
+            "pearson",
+            "spearman",
+            "kendall"
+          ]
+        },
+        "variables": {}
+      }
+    },
+    "uanalytics_cusum": {
+      "properties": {
+        "data": {},
+        "h": {},
+        "k": {},
+        "sigma": {},
+        "target": {}
+      }
+    },
+    "uanalytics_detect_changepoints": {
+      "properties": {
+        "cost": {
+          "enum": [
+            "l2",
+            "normal"
+          ]
+        },
+        "data": {},
+        "min_segment_len": {},
+        "penalty": {
+          "enum": [
+            "bic"
+          ],
+          "number": true
+        }
+      }
+    },
+    "uanalytics_detect_changepoints_multi": {
+      "properties": {
+        "cost": {
+          "enum": [
+            "l2",
+            "normal"
+          ]
+        },
+        "min_segment_len": {},
+        "penalty": {
+          "enum": [
+            "bic"
+          ],
+          "number": true
+        },
+        "signals": {}
+      }
+    },
+    "uanalytics_estimate_period": {
+      "properties": {
+        "data": {}
+      }
+    },
+    "uanalytics_ewma": {
+      "properties": {
+        "data": {},
+        "l_factor": {},
+        "lambda": {},
+        "sigma": {},
+        "target": {}
+      }
+    },
+    "uanalytics_fisher_exact_test": {
+      "properties": {
+        "table": {}
+      }
+    },
+    "uanalytics_fit_best": {
+      "properties": {
+        "data": {}
+      }
+    },
+    "uanalytics_g_chart": {
+      "properties": {
+        "gaps": {}
+      }
+    },
+    "uanalytics_gage_rr_anova": {
+      "properties": {
+        "measurements": {},
+        "tolerance": {}
+      }
+    },
+    "uanalytics_gage_rr_xbar_r": {
+      "properties": {
+        "measurements": {},
+        "tolerance": {}
+      }
+    },
+    "uanalytics_imr_chart": {
+      "properties": {
+        "rules": {
+          "items": {
+            "enum": [
+              "BeyondLimits",
+              "NineOneSide",
+              "SixTrend",
+              "FourteenAlternating",
+              "TwoOfThreeBeyond2Sigma",
+              "FourOfFiveBeyond1Sigma",
+              "FifteenWithin1Sigma",
+              "EightBeyond1Sigma"
+            ]
+          }
+        },
+        "values": {}
+      }
+    },
+    "uanalytics_jarque_bera_test": {
+      "properties": {
+        "data": {}
+      }
+    },
+    "uanalytics_kruskal_wallis_test": {
+      "properties": {
+        "groups": {}
+      }
+    },
+    "uanalytics_laney_p_chart": {
+      "properties": {
+        "p_bar": {},
+        "phi": {},
+        "samples": {}
+      }
+    },
+    "uanalytics_laney_u_chart": {
+      "properties": {
+        "phi": {},
+        "samples": {},
+        "u_bar": {}
+      }
+    },
+    "uanalytics_laplace_trend_test": {
+      "properties": {
+        "observation": {
+          "tag": "truncation",
+          "variants": {
+            "failure": {
+              "properties": {}
+            },
+            "time": {
+              "properties": {
+                "end": {}
+              }
+            }
+          }
+        },
+        "times": {}
+      }
+    },
+    "uanalytics_levene_test": {
+      "properties": {
+        "groups": {}
+      }
+    },
+    "uanalytics_mann_kendall_test": {
+      "properties": {
+        "data": {}
+      }
+    },
+    "uanalytics_mann_whitney_u_test": {
+      "properties": {
+        "a": {},
+        "b": {}
+      }
+    },
+    "uanalytics_mil_hdbk_189_test": {
+      "properties": {
+        "observation": {
+          "tag": "truncation",
+          "variants": {
+            "failure": {
+              "properties": {}
+            },
+            "time": {
+              "properties": {
+                "end": {}
+              }
+            }
+          }
+        },
+        "times": {}
+      }
+    },
+    "uanalytics_np_chart": {
+      "properties": {
+        "defectives": {},
+        "sample_size": {}
+      }
+    },
+    "uanalytics_one_sample_t_test": {
+      "properties": {
+        "data": {},
+        "mu0": {}
+      }
+    },
+    "uanalytics_one_way_anova": {
+      "properties": {
+        "groups": {}
+      }
+    },
+    "uanalytics_p_chart": {
+      "properties": {
+        "p_bar": {},
+        "samples": {}
+      }
+    },
+    "uanalytics_paired_t_test": {
+      "properties": {
+        "x": {},
+        "y": {}
+      }
+    },
+    "uanalytics_percentile_capability": {
+      "properties": {
+        "data": {},
+        "lsl": {},
+        "usl": {}
+      }
+    },
+    "uanalytics_power_law_process_fit": {
+      "properties": {
+        "observation": {
+          "tag": "truncation",
+          "variants": {
+            "failure": {
+              "properties": {}
+            },
+            "time": {
+              "properties": {
+                "end": {}
+              }
+            }
+          }
+        },
+        "times": {}
+      }
+    },
+    "uanalytics_ppm_to_sigma": {
+      "properties": {
+        "ppm": {}
+      }
+    },
+    "uanalytics_process_capability": {
+      "properties": {
+        "data": {},
+        "lsl": {},
+        "sigma_within": {},
+        "target": {},
+        "usl": {}
+      }
+    },
+    "uanalytics_run_rules": {
+      "properties": {
+        "limits": {
+          "properties": {
+            "cl": {},
+            "lcl": {},
+            "ucl": {}
+          }
+        },
+        "rules": {
+          "items": {
+            "enum": [
+              "BeyondLimits",
+              "NineOneSide",
+              "SixTrend",
+              "FourteenAlternating",
+              "TwoOfThreeBeyond2Sigma",
+              "FourOfFiveBeyond1Sigma",
+              "FifteenWithin1Sigma",
+              "EightBeyond1Sigma"
+            ]
+          }
+        },
+        "values": {}
+      }
+    },
+    "uanalytics_shapiro_wilk_test": {
+      "properties": {
+        "data": {}
+      }
+    },
+    "uanalytics_sigma_to_ppm": {
+      "properties": {
+        "sigma": {}
+      }
+    },
+    "uanalytics_simple_regression": {
+      "properties": {
+        "x": {},
+        "y": {}
+      }
+    },
+    "uanalytics_spectral_residual": {
+      "properties": {
+        "averaging_window": {},
+        "batch_size": {},
+        "data": {},
+        "judgement_window": {},
+        "min_zscore": {},
+        "sensitivity": {},
+        "threshold": {}
+      }
+    },
+    "uanalytics_t_chart": {
+      "properties": {
+        "times": {}
+      }
+    },
+    "uanalytics_two_sample_t_test": {
+      "properties": {
+        "a": {},
+        "b": {}
+      }
+    },
+    "uanalytics_u_chart": {
+      "properties": {
+        "samples": {},
+        "u_bar": {}
+      }
+    },
+    "uanalytics_weibull_mle": {
+      "properties": {
+        "failure_times": {}
+      }
+    },
+    "uanalytics_weibull_mrr": {
+      "properties": {
+        "failure_times": {}
+      }
+    },
+    "uanalytics_weibull_reliability": {
+      "properties": {
+        "fractions_failed": {},
+        "scale": {},
+        "shape": {},
+        "times": {}
+      }
+    },
+    "uanalytics_wilcoxon_signed_rank_test": {
+      "properties": {
+        "x": {},
+        "y": {}
+      }
+    },
+    "uanalytics_xbar_r_chart": {
+      "properties": {
+        "rules": {
+          "items": {
+            "enum": [
+              "BeyondLimits",
+              "NineOneSide",
+              "SixTrend",
+              "FourteenAlternating",
+              "TwoOfThreeBeyond2Sigma",
+              "FourOfFiveBeyond1Sigma",
+              "FifteenWithin1Sigma",
+              "EightBeyond1Sigma"
+            ]
+          }
+        },
+        "subgroups": {}
+      }
+    },
+    "uanalytics_xbar_s_chart": {
+      "properties": {
+        "rules": {
+          "items": {
+            "enum": [
+              "BeyondLimits",
+              "NineOneSide",
+              "SixTrend",
+              "FourteenAlternating",
+              "TwoOfThreeBeyond2Sigma",
+              "FourOfFiveBeyond1Sigma",
+              "FifteenWithin1Sigma",
+              "EightBeyond1Sigma"
+            ]
+          }
+        },
+        "subgroups": {}
+      }
+    }
+  }
+}

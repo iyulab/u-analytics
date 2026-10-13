@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.5.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Added
+
+- `src/ffi/request_keys.json` lists the keys and option names each C entry point
+  reads, nested objects, arrays and the variants of `observation` included. The
+  crate's tests measure it from the entry points themselves -- a request with a key
+  no request has, and a value with a name no option has, at every level -- and fail
+  when the file and the entry points differ, or when an exported entry point is not
+  in it.
+- .NET: every request the client writes is tested against that list in both
+  directions -- each key and name it writes is one the entry point reads, and each one
+  the entry point reads can be written -- and a request with every setting given is
+  run against the native library.
+
+### Changed
+
+- **Breaking:** `uanalytics_p_chart` and `uanalytics_u_chart` refuse `phi` as an
+  unknown key when the request is read (status -2, `malformed_input`), like any other
+  key a chart does not take; it was read and then refused (status -3). Each chart's
+  request has exactly the keys that chart reads; the Laney charts take `phi` as
+  before.
+- An unknown `observation.truncation` name is refused with `got` and `expected`
+  beside `code: "unknown_option"`, as every other unknown option is, over both the
+  WebAssembly and the C interfaces.
+
 ## [0.20.0] - 2026-10-13
 
 Depends on u-numflow 0.11. The .NET client is `UAnalytics` 0.15.0.

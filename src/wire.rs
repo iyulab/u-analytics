@@ -3674,15 +3674,11 @@ pub(crate) mod point_process {
         if TRUNCATIONS.contains(&name) {
             return Ok(());
         }
-        Err(WireError::new(
-            code::UNKNOWN_OPTION,
-            None,
-            format!(
-                "observation.truncation: unknown truncation {name:?}; expected one of {}",
-                TRUNCATIONS.join(", ")
-            ),
-        )
-        .about("observation.truncation"))
+        Err(WireError::unknown_option(
+            "observation.truncation",
+            name,
+            TRUNCATIONS,
+        ))
     }
 
     impl From<ObservationDto> for Truncation {
