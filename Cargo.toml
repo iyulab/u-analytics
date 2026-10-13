@@ -16,7 +16,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 wasm = ["dep:wasm-bindgen", "dep:js-sys", "dep:serde-wasm-bindgen", "dep:serde_json", "dep:serde", "dep:tsify", "dep:serde_path_to_error"]
-ffi = ["dep:serde", "dep:serde_json", "dep:libc"]
+ffi = ["dep:serde", "dep:serde_json", "dep:libc", "dep:serde_path_to_error"]
 
 [dependencies]
 u-numflow = "0.10"

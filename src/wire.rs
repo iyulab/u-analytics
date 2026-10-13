@@ -378,6 +378,104 @@ pub(crate) fn describe(low: Bound, high: Bound) -> String {
     }
 }
 
+/// A whole number as the caller sent it: any JSON integer, or a float with no
+/// fractional part (`3.0`).
+///
+/// Count options are read as this rather than as `usize`. An unsigned type
+/// refuses `-1` while deserializing -- as a shape error, before the range
+/// check that refuses `0` or `1` for the same option ever runs -- so two
+/// values wrong for the same reason left by different doors. A fraction is
+/// still refused while deserializing (`malformed_input` at its path, "expected
+/// a whole number"): whether a value is whole is a matter of its type, whether
+/// it is in range a matter of its value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Whole(pub(crate) f64);
+
+impl Whole {
+    /// The value as a count, once a range check has accepted it as `>= 0`.
+    pub(crate) fn count(self) -> usize {
+        debug_assert!(self.0 >= 0.0, "a count is checked non-negative first");
+        // Saturates above `usize::MAX`, which no range a count option has
+        // reaches.
+        self.0 as usize
+    }
+}
+
+impl From<usize> for Whole {
+    fn from(n: usize) -> Self {
+        Whole(n as f64)
+    }
+}
+
+impl<'de> Deserialize<'de> for Whole {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl serde::de::Visitor<'_> for Visitor {
+            type Value = Whole;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a whole number")
+            }
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Whole, E> {
+                Ok(Whole(v as f64))
+            }
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Whole, E> {
+                Ok(Whole(v as f64))
+            }
+            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Whole, E> {
+                if v.is_finite() && v.fract() == 0.0 {
+                    Ok(Whole(v))
+                } else {
+                    Err(E::invalid_type(serde::de::Unexpected::Float(v), &self))
+                }
+            }
+        }
+        deserializer.deserialize_f64(Visitor)
+    }
+}
+
+/// Where in the argument `param` a request stopped deserializing (both
+/// transports read requests through `serde_path_to_error`), as the
+/// refusal reports it: the field (`design[1]`, `points[0].y`) and, when the
+/// failure sits in an array, its position there -- the same `parameter` /
+/// `index` a number array read element by element reports. Without it a
+/// `null` three levels down was "invalid type: null, expected f64" with no
+/// way to say which row (the gap `read_numbers` closed for bare arrays).
+pub(crate) fn failure_site(
+    param: &str,
+    path: &serde_path_to_error::Path,
+) -> (String, Option<usize>) {
+    use serde_path_to_error::Segment;
+    let segments: Vec<&Segment> = path.iter().collect();
+    let index = segments.iter().rev().find_map(|s| match s {
+        Segment::Seq { index } => Some(*index),
+        _ => None,
+    });
+    // A trailing `[i]` is the index, not part of the name.
+    let named = match segments.last() {
+        Some(Segment::Seq { .. }) => &segments[..segments.len() - 1],
+        _ => &segments[..],
+    };
+    let mut name = String::new();
+    for segment in named {
+        match segment {
+            Segment::Seq { index } => name.push_str(&format!("[{index}]")),
+            Segment::Map { key } | Segment::Enum { variant: key } => {
+                if !name.is_empty() {
+                    name.push('.');
+                }
+                name.push_str(key);
+            }
+            Segment::Unknown => name.push_str(".?"),
+        }
+    }
+    // A top-level array argument (`data[1][2]`) or a failure at the root
+    // (a missing field) is named by the argument itself.
+    if name.is_empty() || name.starts_with('[') {
+        name.insert_str(0, param);
+    }
+    (name, index)
+}
+
 /// Error codes. Kept as constants so the transports and their tests name the
 /// same strings.
 pub(crate) mod code {
@@ -1409,7 +1507,7 @@ pub(crate) mod hypothesis {
         /// Lagged differences to include; absent or `null` selects them by AIC.
         #[serde(default)]
         #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
-        pub(crate) max_lags: Option<usize>,
+        pub(crate) max_lags: Option<Whole>,
     }
 
     fn default_adf_model() -> String {
@@ -1463,21 +1561,22 @@ pub(crate) mod hypothesis {
         // residual degree of freedom.
         let n = data.len();
         let max = (n - 2 - ADF_MIN_REGRESSION_ROWS).min((n - 3 - fixed_columns) / 2);
-        if let Some(p) = input.max_lags {
-            if p > max {
+        let max_lags = match input.max_lags {
+            Some(Whole(p)) if !(0.0..=max as f64).contains(&p) => {
                 return Err(WireError::out_of_range(
                     "max_lags",
                     Bound::Closed(0.0),
                     Bound::Closed(max as f64),
-                    p as f64,
+                    p,
                     format!(
-                        "max_lags: {} values leave room for at most {max} lags, got {p}",
+                        "max_lags: {} values leave room for 0 to {max} lags, got {p}",
                         data.len()
                     ),
                 ));
             }
-        }
-        let r = crate::testing::adf_test(&data, model, input.max_lags).ok_or_else(|| {
+            p => p.map(Whole::count),
+        };
+        let r = crate::testing::adf_test(&data, model, max_lags).ok_or_else(|| {
             WireError::invalid_input(
                 "adf_test: the test regression is degenerate -- singular, or an exact \
                  fit of the differences (a deterministic series), so the t-ratio is \
@@ -1951,8 +2050,8 @@ pub(crate) struct PeltInputDto {
     #[cfg_attr(feature = "wasm", tsify(type = "\"bic\" | number"))]
     pub(crate) penalty: PeltPenaltyDto,
     #[serde(default = "default_min_seg")]
-    #[cfg_attr(feature = "wasm", tsify(optional))]
-    pub(crate) min_segment_len: usize,
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number"))]
+    pub(crate) min_segment_len: Whole,
 }
 
 #[derive(Deserialize)]
@@ -1978,8 +2077,8 @@ pub(crate) fn default_penalty() -> PeltPenaltyDto {
     PeltPenaltyDto::Named("bic".to_owned())
 }
 
-pub(crate) fn default_min_seg() -> usize {
-    2
+pub(crate) fn default_min_seg() -> Whole {
+    Whole(2.0)
 }
 
 /// The specification limits a capability index is measured against, refused
@@ -2181,7 +2280,7 @@ pub(crate) fn gage_rr_anova_dto(dto: GageRRInputDto) -> Result<GageRRAnovaResult
 pub(crate) fn pelt_from(
     cost: &str,
     penalty: &PeltPenaltyDto,
-    min_segment_len: usize,
+    min_segment_len: Whole,
 ) -> Result<crate::detection::Pelt, WireError> {
     use crate::detection::{CostFunction, Penalty};
     let cost = match cost {
@@ -2205,15 +2304,18 @@ pub(crate) fn pelt_from(
         }
         PeltPenaltyDto::Value(v) => Penalty::Custom(v),
     };
-    if min_segment_len < 2 {
+    // One check for every value below the floor, `-1` and `1` alike.
+    let Whole(len) = min_segment_len;
+    if len < 2.0 {
         return Err(WireError::out_of_range(
             "min_segment_len",
             Bound::Closed(2.0),
             Bound::Unbounded,
-            min_segment_len as f64,
-            format!("min_segment_len must be at least 2, got {min_segment_len}"),
+            len,
+            format!("min_segment_len must be at least 2, got {len}"),
         ));
     }
+    let min_segment_len = min_segment_len.count();
     Ok(
         crate::detection::Pelt::with_min_segment_len(cost, penalty, min_segment_len)
             .expect("cost, penalty and min_segment_len were checked above"),
@@ -2248,8 +2350,8 @@ pub(crate) struct MultiPeltInputDto {
     #[cfg_attr(feature = "wasm", tsify(type = "\"bic\" | number"))]
     pub(crate) penalty: PeltPenaltyDto,
     #[serde(default = "default_min_seg")]
-    #[cfg_attr(feature = "wasm", tsify(optional))]
-    pub(crate) min_segment_len: usize,
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number"))]
+    pub(crate) min_segment_len: Whole,
 }
 
 pub(crate) fn multi_pelt_dto(input: MultiPeltInputDto) -> Result<PeltResultDto, WireError> {
@@ -2949,11 +3051,11 @@ pub(crate) struct SpectralResidualInputDto {
     #[serde(default)]
     #[cfg_attr(feature = "wasm", tsify(optional))]
     #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
-    pub(crate) averaging_window: Option<usize>,
+    pub(crate) averaging_window: Option<Whole>,
     #[serde(default)]
     #[cfg_attr(feature = "wasm", tsify(optional))]
     #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
-    pub(crate) judgement_window: Option<usize>,
+    pub(crate) judgement_window: Option<Whole>,
     #[serde(default)]
     #[cfg_attr(feature = "wasm", tsify(optional))]
     #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
@@ -2969,7 +3071,7 @@ pub(crate) struct SpectralResidualInputDto {
     #[serde(default)]
     #[cfg_attr(feature = "wasm", tsify(optional))]
     #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
-    pub(crate) batch_size: Option<usize>,
+    pub(crate) batch_size: Option<Whole>,
 }
 
 #[derive(Serialize, Debug)]
@@ -3030,12 +3132,19 @@ impl From<crate::detection::SpectralResidualError> for WireError {
 pub(crate) fn spectral_residual_dto(
     input: SpectralResidualInputDto,
 ) -> Result<SpectralResidualDto, WireError> {
+    use crate::detection::SrCountOption as Count;
+    // A count the builder cannot hold (a negative one) is checked against the
+    // floor the builder's own check applies, so it is refused the same way.
+    let count = |option: Count, value: Whole| -> Result<usize, WireError> {
+        option.check(value.0)?;
+        Ok(value.count())
+    };
     let mut sr = crate::detection::SpectralResidual::new();
     if let Some(q) = input.averaging_window {
-        sr = sr.with_averaging_window(q);
+        sr = sr.with_averaging_window(count(Count::AveragingWindow, q)?);
     }
     if let Some(z) = input.judgement_window {
-        sr = sr.with_judgement_window(z);
+        sr = sr.with_judgement_window(count(Count::JudgementWindow, z)?);
     }
     if let Some(t) = input.threshold {
         sr = sr.with_threshold(t);
@@ -3046,8 +3155,8 @@ pub(crate) fn spectral_residual_dto(
     if let Some(s) = input.sensitivity {
         sr = sr.with_sensitivity(s);
     }
-    if input.batch_size.is_some() {
-        sr = sr.with_batch_size(input.batch_size);
+    if let Some(b) = input.batch_size {
+        sr = sr.with_batch_size(Some(count(Count::BatchSize, b)?));
     }
     // The crate owns these rules, so it is the crate that says which one was
     // broken -- the transports only carry the answer.
@@ -3838,16 +3947,16 @@ mod input_error_tests {
 
     #[test]
     fn pelt_options_are_refused_by_name_with_their_values() {
-        use super::{pelt_dto, Detail, PeltInputDto, PeltPenaltyDto};
-        let input = |cost: &str, penalty: PeltPenaltyDto, min_segment_len: usize| PeltInputDto {
+        use super::{pelt_dto, Detail, PeltInputDto, PeltPenaltyDto, Whole};
+        let input = |cost: &str, penalty: PeltPenaltyDto, min_segment_len: f64| PeltInputDto {
             data: vec![0.0, 0.0, 5.0, 5.0],
             cost: cost.to_string(),
             penalty,
-            min_segment_len,
+            min_segment_len: Whole(min_segment_len),
         };
         let bic = || PeltPenaltyDto::Named("bic".into());
 
-        let e = pelt_dto(input("l1", bic(), 2)).err().unwrap();
+        let e = pelt_dto(input("l1", bic(), 2.0)).err().unwrap();
         assert_eq!(
             (e.code, e.parameter.as_deref()),
             ("unknown_option", Some("cost"))
@@ -3857,7 +3966,7 @@ mod input_error_tests {
             ("expected", Detail::List(vec!["l2", "normal"]))
         );
 
-        let e = pelt_dto(input("l2", PeltPenaltyDto::Named("aic".into()), 2))
+        let e = pelt_dto(input("l2", PeltPenaltyDto::Named("aic".into()), 2.0))
             .err()
             .unwrap();
         assert_eq!(
@@ -3866,7 +3975,7 @@ mod input_error_tests {
         );
         assert_eq!(e.details[0], ("got", Detail::Text("aic".into())));
 
-        let e = pelt_dto(input("l2", PeltPenaltyDto::Value(-1.0), 2))
+        let e = pelt_dto(input("l2", PeltPenaltyDto::Value(-1.0), 2.0))
             .err()
             .unwrap();
         assert_eq!(
@@ -3883,22 +3992,26 @@ mod input_error_tests {
             ]
         );
 
-        let e = pelt_dto(input("l2", bic(), 1)).err().unwrap();
-        assert_eq!(
-            (e.code, e.parameter.as_deref()),
-            ("parameter_out_of_range", Some("min_segment_len"))
-        );
-        // A closed bound keeps its shape: `min`, no `exclusive_min`.
-        assert_eq!(
-            e.details,
-            vec![
-                ("min", Detail::Num(2.0)),
-                ("max", Detail::Null),
-                ("got", Detail::Num(1.0))
-            ]
-        );
+        // A closed bound keeps its shape: `min`, no `exclusive_min`. A
+        // negative length is refused by the same check, in the same shape.
+        for got in [1.0, 0.0, -1.0] {
+            let e = pelt_dto(input("l2", bic(), got)).err().unwrap();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some("min_segment_len"))
+            );
+            assert_eq!(
+                e.details,
+                vec![
+                    ("min", Detail::Num(2.0)),
+                    ("max", Detail::Null),
+                    ("got", Detail::Num(got))
+                ]
+            );
+        }
+        assert!(pelt_dto(input("l2", bic(), 2.0)).is_ok());
 
-        let mut empty = input("l2", bic(), 2);
+        let mut empty = input("l2", bic(), 2.0);
         empty.data.clear();
         let e = pelt_dto(empty).err().unwrap();
         assert_eq!(
@@ -4112,6 +4225,43 @@ mod input_error_tests {
                     ("got", Detail::Num(5.0)),
                 ],
             ),
+            // A negative count is refused by the check a too-small one is.
+            (
+                "batch_size",
+                json!({ "batch_size": -1 }),
+                vec![
+                    ("min", Detail::Num(12.0)),
+                    ("max", Detail::Null),
+                    ("got", Detail::Num(-1.0)),
+                ],
+            ),
+            (
+                "averaging_window",
+                json!({ "averaging_window": 0 }),
+                vec![
+                    ("min", Detail::Num(1.0)),
+                    ("max", Detail::Null),
+                    ("got", Detail::Num(0.0)),
+                ],
+            ),
+            (
+                "averaging_window",
+                json!({ "averaging_window": -1 }),
+                vec![
+                    ("min", Detail::Num(1.0)),
+                    ("max", Detail::Null),
+                    ("got", Detail::Num(-1.0)),
+                ],
+            ),
+            (
+                "judgement_window",
+                json!({ "judgement_window": -1 }),
+                vec![
+                    ("min", Detail::Num(1.0)),
+                    ("max", Detail::Null),
+                    ("got", Detail::Num(-1.0)),
+                ],
+            ),
         ] {
             let e = request(body).expect_err("refused");
             assert_eq!(e.code, code::PARAMETER_OUT_OF_RANGE, "{}", e.message);
@@ -4144,8 +4294,28 @@ mod input_error_tests {
         let e = spectral_residual_dto(input).expect_err("refused");
         assert_eq!(e.code, code::INSUFFICIENT_DATA);
 
-        // And a valid request is still served.
+        // And a valid request is still served, whole counts as given.
         assert!(request(json!({})).is_ok());
+        assert!(request(json!({ "averaging_window": 3, "batch_size": 12 })).is_ok());
+    }
+
+    #[test]
+    fn a_count_is_read_as_a_whole_number_of_either_sign() {
+        let read = |v: serde_json::Value| serde_json::from_value::<Whole>(v);
+        assert_eq!(read(json!(3)).expect("integer"), Whole(3.0));
+        assert_eq!(read(json!(-1)).expect("negative"), Whole(-1.0));
+        assert_eq!(read(json!(3.0)).expect("whole float"), Whole(3.0));
+        assert_eq!(read(json!(u64::MAX)).expect("large").0, u64::MAX as f64);
+        // From text too, as the C ABI reads it.
+        let text = serde_json::from_str::<Whole>("-1").expect("negative text");
+        assert_eq!(text, Whole(-1.0));
+        for refused in [json!(2.5), json!(null), json!("3")] {
+            let e = read(refused.clone()).expect_err("not a whole number");
+            assert!(
+                e.to_string().contains("expected a whole number"),
+                "{refused}: {e}"
+            );
+        }
     }
 
     fn standard(v: serde_json::Value) -> AttributeStandardDto {

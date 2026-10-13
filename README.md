@@ -297,7 +297,7 @@ interface AnalyticsError extends Error {
 | `standard_out_of_range` | a Phase I `p_bar`/`u_bar`/`phi` outside its domain — `parameter` names which |
 | `parameter_out_of_range` | a value outside its domain — `parameter` names which (`index` its position for an array element) and `got` the value. `min` / `max` are the inclusive bounds, `null` on a side that is open or unbounded; `exclusive_min` / `exclusive_max` are the exclusive bounds, present only on an open side. `> 0` is `{ min: null, exclusive_min: 0, max: null }`, `(0, 1]` is `{ min: null, exclusive_min: 0, max: 1 }`, `usl` not above `lsl` is `exclusive_min: lsl` |
 | `value_not_finite` | a NaN or ±Infinity anywhere in an argument — `parameter` is the path to it (`input.data`), `index` its position in that array, or `null` |
-| `malformed_input` | not the shape the function takes — a row that is not a pair, an unknown field |
+| `malformed_input` | not the shape the function takes — a row that is not a pair, an unknown field, a count option with a fraction (`max_lags: 2.5`; a negative count is `parameter_out_of_range`) — `parameter` is the path to the value |
 | `unknown_option` | an option given a name the function does not know — `parameter` names it (`rules`, `cost`, `penalty`, `observation.truncation`), `got` the name and `expected` the names it knows |
 | `events_unordered` | an event time earlier than the one before it (`index`) |
 | `event_after_end` | an event time after the end of observation (`index`) |
@@ -806,7 +806,7 @@ char   *uanalytics_version(void);            // crate version; free with uanalyt
 |---|---|---|
 | `0` | success | the response JSON |
 | `-1` | `request_json` or `result_ptr` was null | null |
-| `-2` | the request did not parse into the expected shape | `{"error": "...", "code": "malformed_input", "index": null, "parameter": null}` |
+| `-2` | the request did not parse into the expected shape | `{"error": "...", "code": "malformed_input", "index": ..., "parameter": ...}` — `parameter` the path to a value of the wrong type (`max_lags`, `signals[1]`), `index` its array position; both `null` for text that is not JSON or a missing field |
 | `-3` | the request parsed, and the computation rejected it | `{"error": "...", "code": "...", "index": ..., "parameter": ...}` |
 | `-4` | internal panic (caught; never unwinds across the boundary) | `{"error": "...", "code": "invalid_input", "index": null, "parameter": null}` |
 

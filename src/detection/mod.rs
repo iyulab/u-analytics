@@ -35,6 +35,8 @@ mod spectral_residual;
 pub use cusum::{Cusum, CusumResult};
 pub use ewma::{Ewma, EwmaResult};
 pub use pelt::{CostFunction, MultiPeltResult, Pelt, PeltResult, Penalty};
+#[cfg(any(feature = "wasm", feature = "ffi"))]
+pub(crate) use spectral_residual::CountOption as SrCountOption;
 pub use spectral_residual::{
     SpectralResidual, SpectralResidualError, SrPoint, MIN_OBSERVATIONS as SR_MIN_OBSERVATIONS,
 };

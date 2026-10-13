@@ -29,6 +29,18 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 - **Breaking:** `SpectralResidualError::OptionOutOfRange` carries the value given and
   its domain: `got`, `min`, `exclusive_min`, `max`, `exclusive_max`. The enum no
   longer implements `Eq` (it holds `f64`s); `PartialEq` remains.
+- **Breaking:** count options are read as whole numbers of either sign and checked
+  against their range, so a negative count is `parameter_out_of_range` with `min`,
+  `max` and `got`, the same refusal a too-small positive one gets — previously
+  `malformed_input`. This covers ADF `max_lags` (`min: 0, max: <room>`), PELT and
+  multi-signal PELT `min_segment_len` (`min: 2`) and spectral residual
+  `averaging_window` / `judgement_window` (`min: 1`) and `batch_size` (`min: 12`). A
+  count with a fraction (`2.5`) stays `malformed_input`, now with `parameter` naming
+  it ("expected a whole number"); `2.0` is read as `2`.
+- The C ABI's `-2` (malformed request) body names where a value of the wrong type
+  sat: `parameter` is its path (`max_lags`, `signals[1]`) and `index` its position in
+  an array, as the WebAssembly binding reports them. Both stay `null` for text that
+  is not JSON and for a missing field.
 
 ## [0.19.1] - 2026-10-07
 

@@ -83,22 +83,40 @@ fn write_error(
 }
 
 /// Parses a request body, reporting a malformed one under [`ERR_PARSE`].
+///
+/// A body that is valid JSON but the wrong shape names where it went wrong
+/// -- `parameter` the field (`max_lags`, `signals[1]`), `index` the array
+/// position -- as the WebAssembly binding does for the same request.
 #[cfg(feature = "ffi")]
 fn parse_request<T: serde::de::DeserializeOwned>(
     json: &str,
     result_ptr: *mut *mut libc::c_char,
 ) -> Result<T, i32> {
-    serde_json::from_str(json).map_err(|e| {
-        write_error(
-            result_ptr,
-            ERR_PARSE,
-            crate::wire::WireError::new(
-                crate::wire::code::MALFORMED_INPUT,
-                None,
-                format!("Invalid JSON: {e}"),
-            ),
-        )
-    })
+    let refuse = |message: String, site: Option<(String, Option<usize>)>| {
+        let mut error =
+            crate::wire::WireError::new(crate::wire::code::MALFORMED_INPUT, None, message);
+        if let Some((parameter, index)) = site {
+            error.index = index;
+            error = error.about(parameter);
+        }
+        write_error(result_ptr, ERR_PARSE, error)
+    };
+    let mut de = serde_json::Deserializer::from_str(json);
+    match serde_path_to_error::deserialize(&mut de) {
+        Ok(value) => match de.end() {
+            Ok(()) => Ok(value),
+            Err(e) => Err(refuse(format!("Invalid JSON: {e}"), None)),
+        },
+        Err(e) => {
+            // A value of the wrong type or range names where it sits. The
+            // request is an object, so the site is named from its first field
+            // down; there is no argument name to prefix. Text that is not
+            // JSON, and a failure at the root (a missing field), have none.
+            let site = (e.inner().is_data() && e.path().iter().next().is_some())
+                .then(|| crate::wire::failure_site("", e.path()));
+            Err(refuse(format!("Invalid JSON: {e}"), site))
+        }
+    }
 }
 
 /// Wraps an FFI body in `catch_unwind`, initializing `result_ptr` to null.
@@ -1743,6 +1761,124 @@ mod tests {
             (b["code"].as_str(), b["min"].as_f64()),
             (Some("insufficient_data"), Some(10.0))
         );
+    }
+
+    #[test]
+    fn a_negative_count_is_out_of_range_in_the_c_body() {
+        let ten = r#"[1, 3, 2, 5, 4, 6, 5, 8, 7, 9]"#;
+        let (code, b) = call(
+            uanalytics_adf_test,
+            &format!(r#"{{"data": {ten}, "max_lags": -1}}"#),
+        );
+        assert_eq!(code, -3, "{b}");
+        assert_eq!(
+            b,
+            serde_json::json!({
+                "error": b["error"],
+                "code": "parameter_out_of_range",
+                "index": null,
+                "parameter": "max_lags",
+                "min": 0.0,
+                "max": 2.0,
+                "got": -1.0,
+            })
+        );
+
+        // `-1` and `1` leave by the same door: the floor of 2.
+        for got in [-1.0, 1.0] {
+            let (code, b) = call(
+                uanalytics_detect_changepoints,
+                &format!(r#"{{"data": [0, 0, 5, 5], "min_segment_len": {got}}}"#),
+            );
+            assert_eq!(code, -3, "{b}");
+            assert_eq!(
+                b,
+                serde_json::json!({
+                    "error": b["error"],
+                    "code": "parameter_out_of_range",
+                    "index": null,
+                    "parameter": "min_segment_len",
+                    "min": 2.0,
+                    "max": null,
+                    "got": got,
+                })
+            );
+        }
+
+        let (code, b) = call(
+            uanalytics_spectral_residual,
+            &serde_json::json!({ "data": vec![1.0; 20], "judgement_window": -1 }).to_string(),
+        );
+        assert_eq!(
+            (
+                code,
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["min"].as_f64(),
+                b["got"].as_f64()
+            ),
+            (
+                -3,
+                Some("parameter_out_of_range"),
+                Some("judgement_window"),
+                Some(1.0),
+                Some(-1.0)
+            ),
+            "{b}"
+        );
+
+        // Whole numbers read as given, `2` and `2.0` alike.
+        for lags in ["2", "2.0"] {
+            let (code, b) = call(
+                uanalytics_adf_test,
+                &format!(r#"{{"data": {ten}, "max_lags": {lags}}}"#),
+            );
+            assert_eq!((code, b["n_lags"].as_u64()), (0, Some(2)), "{b}");
+        }
+    }
+
+    #[test]
+    fn a_fractional_count_is_malformed_at_its_path_in_the_c_body() {
+        let (code, b) = call(
+            uanalytics_adf_test,
+            r#"{"data": [1, 3, 2, 5, 4, 6, 5, 8, 7, 9], "max_lags": 2.5}"#,
+        );
+        assert_eq!(code, -2, "{b}");
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str(), &b["index"]),
+            (
+                Some("malformed_input"),
+                Some("max_lags"),
+                &serde_json::Value::Null
+            ),
+            "{b}"
+        );
+        assert!(
+            b["error"]
+                .as_str()
+                .is_some_and(|m| m.contains("expected a whole number")),
+            "{b}"
+        );
+
+        // Inside an array the position is the index, as over WebAssembly.
+        let (_, b) = call(
+            uanalytics_detect_changepoints_multi,
+            r#"{"signals": [[1, 2], [3, "4"]]}"#,
+        );
+        assert_eq!(
+            (
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["index"].as_u64()
+            ),
+            (Some("malformed_input"), Some("signals[1]"), Some(1)),
+            "{b}"
+        );
+        // Not JSON, or a field missing: no site to name.
+        let (code, b) = call(uanalytics_adf_test, "{");
+        assert_eq!((code, &b["parameter"]), (-2, &serde_json::Value::Null));
+        let (_, b) = call(uanalytics_adf_test, "{}");
+        assert_eq!(b["parameter"], serde_json::Value::Null, "{b}");
     }
 
     #[test]

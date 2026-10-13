@@ -133,6 +133,39 @@ impl core::fmt::Display for SpectralResidualError {
 
 impl std::error::Error for SpectralResidualError {}
 
+/// The options that count something, each with its floor.
+///
+/// The builder takes them as `usize`, but a wire format reads a number, which
+/// can be negative; checking that number here, against the same floor the
+/// builder's value is checked against, keeps `-1` and `0` one refusal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CountOption {
+    AveragingWindow,
+    JudgementWindow,
+    BatchSize,
+}
+
+impl CountOption {
+    /// `got` (a whole number) against this option's floor.
+    pub(crate) fn check(self, got: f64) -> Result<(), SpectralResidualError> {
+        let (option, requirement, min) = match self {
+            CountOption::AveragingWindow => ("averaging_window", ">= 1", 1),
+            CountOption::JudgementWindow => ("judgement_window", ">= 1", 1),
+            CountOption::BatchSize => ("batch_size", "unset, or at least 12", MIN_OBSERVATIONS),
+        };
+        if got < min as f64 {
+            Err(SpectralResidualError::below(
+                option,
+                requirement,
+                got,
+                min as f64,
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 impl SpectralResidualError {
     /// `option` below its inclusive lower bound `min`.
     fn below(option: &'static str, requirement: &'static str, got: f64, min: f64) -> Self {
@@ -274,22 +307,8 @@ impl SpectralResidual {
     /// The first option that is outside its domain, in a fixed order.
     fn check_options(&self) -> Result<(), SpectralResidualError> {
         use SpectralResidualError as E;
-        if self.averaging_window < 1 {
-            return Err(E::below(
-                "averaging_window",
-                ">= 1",
-                self.averaging_window as f64,
-                1.0,
-            ));
-        }
-        if self.judgement_window < 1 {
-            return Err(E::below(
-                "judgement_window",
-                ">= 1",
-                self.judgement_window as f64,
-                1.0,
-            ));
-        }
+        CountOption::AveragingWindow.check(self.averaging_window as f64)?;
+        CountOption::JudgementWindow.check(self.judgement_window as f64)?;
         if !self.threshold.is_finite() || self.threshold <= 0.0 {
             return Err(E::not_above(
                 "threshold",
@@ -315,13 +334,8 @@ impl SpectralResidual {
                 100.0,
             ));
         }
-        if let Some(b) = self.batch_size.filter(|&b| b < MIN_OBSERVATIONS) {
-            return Err(E::below(
-                "batch_size",
-                "unset, or at least 12",
-                b as f64,
-                MIN_OBSERVATIONS as f64,
-            ));
+        if let Some(b) = self.batch_size {
+            CountOption::BatchSize.check(b as f64)?;
         }
         Ok(())
     }

@@ -18,8 +18,8 @@ use wasm_bindgen::prelude::*;
 // transports cannot drift apart again. See `crate::wire`.
 use crate::wire::{
     c_chart_dto, capability_dto, correlation_matrix_dto, count_pairs, count_rows, cusum_dto,
-    default_correlation_method, ewma_dto, fit_best_dto, g_chart_dto, gage_rr_anova_dto,
-    gage_rr_xbar_r_dto,
+    default_correlation_method, ewma_dto, failure_site, fit_best_dto, g_chart_dto,
+    gage_rr_anova_dto, gage_rr_xbar_r_dto,
     hypothesis::{
         adf_dto, anderson_darling_dto, chi_squared_gof_dto, chi_squared_independence_dto,
         fisher_exact_dto, groups_test_dto, jarque_bera_dto, mann_kendall_dto, mann_whitney_dto,
@@ -241,45 +241,6 @@ fn from_json<T: serde::de::DeserializeOwned>(
         )
         .about(parameter)
     })
-}
-
-/// Where in the argument `param` a request stopped deserializing, as the
-/// refusal reports it: the field (`design[1]`, `points[0].y`) and, when the
-/// failure sits in an array, its position there -- the same `parameter` /
-/// `index` a number array read element by element reports. Without it a
-/// `null` three levels down was "invalid type: null, expected f64" with no
-/// way to say which row (the gap `read_numbers` closed for bare arrays).
-fn failure_site(param: &str, path: &serde_path_to_error::Path) -> (String, Option<usize>) {
-    use serde_path_to_error::Segment;
-    let segments: Vec<&Segment> = path.iter().collect();
-    let index = segments.iter().rev().find_map(|s| match s {
-        Segment::Seq { index } => Some(*index),
-        _ => None,
-    });
-    // A trailing `[i]` is the index, not part of the name.
-    let named = match segments.last() {
-        Some(Segment::Seq { .. }) => &segments[..segments.len() - 1],
-        _ => &segments[..],
-    };
-    let mut name = String::new();
-    for segment in named {
-        match segment {
-            Segment::Seq { index } => name.push_str(&format!("[{index}]")),
-            Segment::Map { key } | Segment::Enum { variant: key } => {
-                if !name.is_empty() {
-                    name.push('.');
-                }
-                name.push_str(key);
-            }
-            Segment::Unknown => name.push_str(".?"),
-        }
-    }
-    // A top-level array argument (`data[1][2]`) or a failure at the root
-    // (a missing field) is named by the argument itself.
-    if name.is_empty() || name.starts_with('[') {
-        name.insert_str(0, param);
-    }
-    (name, index)
 }
 
 /// One element of a JS number array, as found.
@@ -2470,6 +2431,96 @@ mod binding_contract_tests {
             .err()
             .expect("target is required");
         assert_eq!(e.parameter.as_deref(), Some("input"), "{e}");
+    }
+
+    // ── Counts: a whole number of either sign, range-checked after ──
+    //
+    // `from_js` hands `from_json` what serde-wasm-bindgen makes of the JS
+    // value: a safe integer (`3`, `-1`) as an integer, anything else (`2.5`)
+    // as a float -- the two `json!` spellings below.
+
+    #[test]
+    fn a_fractional_count_is_malformed_where_it_sits() {
+        for (body, parameter) in [
+            (
+                json!({ "data": vec![1.0; 20], "max_lags": 2.5 }),
+                "max_lags",
+            ),
+            (
+                json!({ "data": vec![1.0; 20], "averaging_window": 2.5 }),
+                "averaging_window",
+            ),
+            (
+                json!({ "data": [1.0], "min_segment_len": 2.5 }),
+                "min_segment_len",
+            ),
+        ] {
+            let e = match parameter {
+                "max_lags" => super::from_json::<super::AdfInputDto>(body, "input").map(|_| ()),
+                "averaging_window" => {
+                    super::from_json::<super::SpectralResidualInputDto>(body, "input").map(|_| ())
+                }
+                _ => super::from_json::<super::PeltInputDto>(body, "input").map(|_| ()),
+            }
+            .expect_err("a fraction is not a count");
+            assert_eq!(
+                (e.code, e.parameter.as_deref(), e.index),
+                ("malformed_input", Some(parameter), None),
+                "{e}"
+            );
+            assert!(e.message.contains("expected a whole number"), "{e}");
+        }
+    }
+
+    #[test]
+    fn a_negative_count_is_out_of_range_not_malformed() {
+        let ten = [1.0, 3.0, 2.0, 5.0, 4.0, 6.0, 5.0, 8.0, 7.0, 9.0];
+        let adf = |max_lags: serde_json::Value| {
+            super::adf_dto(
+                super::from_json(json!({ "data": ten, "max_lags": max_lags }), "input")
+                    .expect("a whole number reads"),
+            )
+        };
+        for got in [-1.0, 3.0] {
+            let e = adf(json!(got as i64)).expect_err("outside [0, 2]");
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some("max_lags"))
+            );
+            assert_eq!(
+                e.details,
+                vec![
+                    ("min", Detail::Num(0.0)),
+                    ("max", Detail::Num(2.0)),
+                    ("got", Detail::Num(got)),
+                ]
+            );
+        }
+        // An integer is still read as one, and `2.0` is the same count.
+        assert_eq!(adf(json!(2)).expect("in range").n_lags, 2);
+        assert_eq!(adf(json!(2.0)).expect("in range").n_lags, 2);
+
+        let e = super::pelt_dto(
+            super::from_json(
+                json!({ "data": [1.0, 2.0], "min_segment_len": -1 }),
+                "input",
+            )
+            .expect("a whole number reads"),
+        )
+        .err()
+        .expect("below 2");
+        assert_eq!(
+            (e.code, e.parameter.as_deref(), &e.details[..]),
+            (
+                "parameter_out_of_range",
+                Some("min_segment_len"),
+                &[
+                    ("min", Detail::Num(2.0)),
+                    ("max", Detail::Null),
+                    ("got", Detail::Num(-1.0)),
+                ][..]
+            )
+        );
     }
 
     // ── CUSUM / EWMA ────────────────────────────────────────────────
