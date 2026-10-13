@@ -16,7 +16,8 @@ public sealed class AnalyticsClient : IDisposable
 {
     private bool _disposed;
 
-    /// <summary>Sees each raw response body before it is read — the contract tests compare the two.</summary>
+    /// <summary>Sees each raw response body before it is read — the contract tests compare
+    /// the two.</summary>
     internal Action<string>? ResponseObserver { get; set; }
 
     /// <summary>
@@ -78,8 +79,10 @@ public sealed class AnalyticsClient : IDisposable
     /// (with <c>z</c>, as for <see cref="PChart"/>).
     /// </summary>
     /// <param name="samples"><c>[defectives, sampleSize]</c> pairs.</param>
-    /// <param name="pBar">Phase I p-bar; given together with <paramref name="phi"/> or not at all.</param>
-    /// <param name="phi">Phase I sigma-inflation factor (≥ 0); given together with <paramref name="pBar"/>.</param>
+    /// <param name="pBar">Phase I p-bar; given together with <paramref name="phi"/> or not
+    /// at all.</param>
+    /// <param name="phi">Phase I sigma-inflation factor (≥ 0); given together with
+    /// <paramref name="pBar"/>.</param>
     public LaneyPChartResult LaneyPChart(ulong[][] samples, double? pBar = null, double? phi = null)
         => Call(NativeInterop.uanalytics_laney_p_chart, AnalyticsJson.Default.LaneyPChartResult,
             ("samples", Request.Counts(samples)), ("p_bar", Request.Num("p_bar", pBar)),
@@ -119,8 +122,10 @@ public sealed class AnalyticsClient : IDisposable
     /// Returns <c>u_bar</c>, <c>phi</c> and per-point <c>points</c> (with <c>z</c>).
     /// </summary>
     /// <param name="samples"><c>[defects, units]</c> pairs.</param>
-    /// <param name="uBar">Phase I u-bar; given together with <paramref name="phi"/> or not at all.</param>
-    /// <param name="phi">Phase I sigma-inflation factor (&#8805; 0); given together with <paramref name="uBar"/>.</param>
+    /// <param name="uBar">Phase I u-bar; given together with <paramref name="phi"/> or not
+    /// at all.</param>
+    /// <param name="phi">Phase I sigma-inflation factor (&#8805; 0); given together with
+    /// <paramref name="uBar"/>.</param>
     public LaneyUChartResult LaneyUChart(double[][] samples, double? uBar = null, double? phi = null)
         => Call(NativeInterop.uanalytics_laney_u_chart, AnalyticsJson.Default.LaneyUChartResult,
             ("samples", Request.Rows("samples", samples)), ("u_bar", Request.Num("u_bar", uBar)),
@@ -219,7 +224,8 @@ public sealed class AnalyticsClient : IDisposable
             ("measurements", Request.Rows("measurements", measurements)),
             ("tolerance", Request.Num("tolerance", tolerance)));
 
-    /// <summary>Gage R&amp;R by the ANOVA method; same input as <see cref="GageRRXbarR"/>.</summary>
+    /// <summary>Gage R&amp;R by the ANOVA method; same input as <see
+    /// cref="GageRRXbarR"/>.</summary>
     public GageRRAnovaResult GageRRAnova(double[][][] measurements, double? tolerance = null)
         => Call(NativeInterop.uanalytics_gage_rr_anova, AnalyticsJson.Default.GageRRAnovaResult,
             ("measurements", Request.Rows("measurements", measurements)),
@@ -271,19 +277,22 @@ public sealed class AnalyticsClient : IDisposable
             ("lsl", Request.Num("lsl", lsl)),
             ("lambda_range", lambdaRange is { } r ? Request.Nums("lambda_range", [r.Min, r.Max]) : null));
 
-    /// <summary>Defect rate in PPM at a sigma level, with the conventional 1.5σ shift (6σ → 3.4 PPM).</summary>
+    /// <summary>Defect rate in PPM at a sigma level, with the conventional 1.5σ shift (6σ →
+    /// 3.4 PPM).</summary>
     public double SigmaToPpm(double sigma)
         => Call(NativeInterop.uanalytics_sigma_to_ppm, AnalyticsJson.Default.ValueBody,
             ("sigma", Request.Num("sigma", sigma))).Value;
 
-    /// <summary>Sigma level at a defect rate in PPM strictly inside (0, 1 000 000) — the inverse of <see cref="SigmaToPpm"/>.</summary>
+    /// <summary>Sigma level at a defect rate in PPM strictly inside (0, 1 000 000) — the
+    /// inverse of <see cref="SigmaToPpm"/>.</summary>
     public double PpmToSigma(double ppm)
         => Call(NativeInterop.uanalytics_ppm_to_sigma, AnalyticsJson.Default.ValueBody,
             ("ppm", Request.Num("ppm", ppm))).Value;
 
     // ── Hypothesis tests (same results as the WASM binding) ──
 
-    /// <summary>One-sample t test of <paramref name="data"/> against <paramref name="mu0"/>: <c>statistic</c>, <c>df</c>, <c>p_value</c>.</summary>
+    /// <summary>One-sample t test of <paramref name="data"/> against <paramref
+    /// name="mu0"/>: <c>statistic</c>, <c>df</c>, <c>p_value</c>.</summary>
     public TestResult OneSampleTTest(double[] data, double mu0)
         => Call(NativeInterop.uanalytics_one_sample_t_test, AnalyticsJson.Default.TestResult,
             ("data", Request.Nums("data", data)), ("mu0", Request.Num("mu0", mu0)));
@@ -303,7 +312,8 @@ public sealed class AnalyticsClient : IDisposable
         => Call(NativeInterop.uanalytics_mann_whitney_u_test, AnalyticsJson.Default.TestResult,
             ("a", Request.Nums("a", a)), ("b", Request.Nums("b", b)));
 
-    /// <summary>Wilcoxon signed-rank test (pairs with x = y dropped): <c>statistic</c>, <c>df</c>, <c>p_value</c>.</summary>
+    /// <summary>Wilcoxon signed-rank test (pairs with x = y dropped): <c>statistic</c>,
+    /// <c>df</c>, <c>p_value</c>.</summary>
     public TestResult WilcoxonSignedRankTest(double[] x, double[] y)
         => Call(NativeInterop.uanalytics_wilcoxon_signed_rank_test, AnalyticsJson.Default.TestResult,
             ("x", Request.Nums("x", x)), ("y", Request.Nums("y", y)));
@@ -366,12 +376,14 @@ public sealed class AnalyticsClient : IDisposable
         => Call(NativeInterop.uanalytics_bartlett_test, AnalyticsJson.Default.TestResult,
             ("groups", Request.Rows("groups", groups)));
 
-    /// <summary>Chi-squared goodness of fit of <paramref name="observed"/> counts against <paramref name="expected"/>.</summary>
+    /// <summary>Chi-squared goodness of fit of <paramref name="observed"/> counts against
+    /// <paramref name="expected"/>.</summary>
     public TestResult ChiSquaredGoodnessOfFit(double[] observed, double[] expected)
         => Call(NativeInterop.uanalytics_chi_squared_goodness_of_fit, AnalyticsJson.Default.TestResult,
             ("observed", Request.Nums("observed", observed)), ("expected", Request.Nums("expected", expected)));
 
-    /// <summary>Chi-squared test of independence on a contingency <paramref name="table"/>.</summary>
+    /// <summary>Chi-squared test of independence on a contingency <paramref
+    /// name="table"/>.</summary>
     public TestResult ChiSquaredIndependence(double[][] table)
         => Call(NativeInterop.uanalytics_chi_squared_independence, AnalyticsJson.Default.TestResult,
             ("table", Request.Rows("table", table)));
@@ -386,7 +398,8 @@ public sealed class AnalyticsClient : IDisposable
         => Call(NativeInterop.uanalytics_bonferroni_correction, AnalyticsJson.Default.ValuesBody,
             ("p_values", Request.Nums("p_values", pValues))).Values;
 
-    /// <summary>Benjamini-Hochberg (false discovery rate) adjusted p-values, in input order.</summary>
+    /// <summary>Benjamini-Hochberg (false discovery rate) adjusted p-values, in input
+    /// order.</summary>
     public IReadOnlyList<double> BenjaminiHochberg(double[] pValues)
         => Call(NativeInterop.uanalytics_benjamini_hochberg, AnalyticsJson.Default.ValuesBody,
             ("p_values", Request.Nums("p_values", pValues))).Values;
@@ -609,66 +622,79 @@ public sealed class AnalyticsClient : IDisposable
 }
 
 /// <summary>
-/// A call the engine refused. <see cref="Exception.Message"/> is human-readable;
-/// <see cref="Reason"/>, <see cref="Parameter"/>, <see cref="Index"/> and <see cref="Details"/>
-/// are for programs.
+/// A call the engine refused. <see cref="Exception.Message"/> is readable text; <see
+/// cref="ErrorCode"/>,
+/// <see cref="Parameter"/>, <see cref="Index"/> and <see cref="Details"/> are for programs —
+/// the same members, with the same meaning, on every sibling package's exception.
 /// </summary>
 public class AnalyticsException : Exception
 {
-    /// <summary>Native status: -1 null pointer, -2 malformed request, -3 refused input, -4 internal panic.</summary>
-    public int Code { get; }
+    /// <summary>Native status: -1 null pointer, -2 malformed request, -3 refused input, -4
+    /// internal panic.</summary>
+    public int Status { get; }
 
     /// <summary>
-    /// Stable, machine-readable reason, e.g. <c>count_not_whole</c>,
-    /// <c>sample_size_not_whole</c>, <c>defectives_exceed_sample</c>,
-    /// <c>units_not_positive</c>, <c>insufficient_data</c>, <c>empty_input</c>,
-    /// <c>parameter_out_of_range</c>, <c>unknown_option</c>, <c>value_not_finite</c>,
-    /// <c>malformed_input</c>, <c>invalid_input</c>. <c>null</c> when the engine returned no body.
+    /// Stable, machine-readable reason: the <c>code</c> of the engine's error body, the same
+    /// name the WebAssembly binding puts on its <c>Error</c> — <c>insufficient_data</c>,
+    /// <c>empty_input</c>, <c>parameter_out_of_range</c>, <c>dimension_mismatch</c>,
+    /// <c>value_not_finite</c>, <c>unknown_option</c>, <c>malformed_input</c>,
+    /// <c>defectives_exceed_sample</c>, <c>no_specification</c>, ….
+    /// <c>null</c> when the engine returned no readable body.
     /// </summary>
-    public string? Reason { get; }
+    public string? ErrorCode { get; }
 
-    /// <summary>Zero-based position of the offending element in its input array, when there is one.</summary>
-    public int? Index { get; }
-
-    /// <summary>The argument or option the refusal is about (<c>penalty</c>, <c>times</c>, …), when there is one.</summary>
+    /// <summary>
+    /// The argument or option the refusal is about, as a path into the request
+    /// (<c>penalty</c>, <c>subgroups[1]</c>, …) — the body's <c>parameter</c>. <c>null</c>
+    /// when the refusal is not
+    /// about one value.
+    /// </summary>
     public string? Parameter { get; }
 
     /// <summary>
-    /// The whole error body: <c>error</c>, <c>code</c>, <c>index</c>, <c>parameter</c> and the
-    /// values behind the reason — for a value out of range, <c>got</c>, the inclusive bounds
-    /// <c>min</c> / <c>max</c> (<c>null</c> on a side that is open or unbounded) and the exclusive
-    /// bounds <c>exclusive_min</c> / <c>exclusive_max</c> (present only on an open side);
-    /// <c>got</c> / <c>expected</c> for an unknown option name, <c>min</c> / <c>got</c> for too
-    /// few values. <c>null</c> when there is no body.
+    /// Zero-based position of the offending element in the array <see cref="Parameter"/>
+    /// names — the body's <c>index</c>. <c>null</c> when the value is not an array element.
+    /// </summary>
+    public int? Index { get; }
+
+    /// <summary>
+    /// The whole error body: <c>error</c>, <c>code</c> and the values behind the reason
+    /// (<c>parameter</c>, <c>index</c>, <c>got</c>, <c>min</c>, <c>max</c>,
+    /// <c>exclusive_min</c>, <c>exclusive_max</c>, <c>expected</c>). For
+    /// <c>parameter_out_of_range</c>, <c>min</c> / <c>max</c> are the closed
+    /// (included) bounds — <c>null</c> on a side that is open or unbounded — and
+    /// <c>exclusive_min</c> / <c>exclusive_max</c> the open (excluded) ones, present only on
+    /// an open side. <c>null</c> when there is no body.
     /// </summary>
     public JsonElement? Details { get; }
 
     /// <summary>A refusal with no readable body.</summary>
-    /// <param name="code">Native status, see <see cref="Code"/>.</param>
+    /// <param name="status">Native status, see <see cref="Status"/>.</param>
     /// <param name="message">What went wrong, in words.</param>
-    public AnalyticsException(int code, string message) : base(message)
+    public AnalyticsException(int status, string message) : base(message)
     {
-        Code = code;
+        Status = status;
     }
 
-    /// <summary>A refusal with the engine's reason and the values behind it.</summary>
-    public AnalyticsException(int code, string message, string? reason, int? index) : base(message)
+    /// <summary>
+    /// A refusal with the engine's reason and the values behind it; <see cref="Parameter"/>
+    /// and <see cref="Index"/> are read from <paramref name="details"/>.
+    /// </summary>
+    /// <param name="status">Native status, see <see cref="Status"/>.</param>
+    /// <param name="message">What went wrong, in words.</param>
+    /// <param name="errorCode">The body's <c>code</c>.</param>
+    /// <param name="details">The error body.</param>
+    public AnalyticsException(int status, string message, string? errorCode, JsonElement? details) : base(message)
     {
-        Code = code;
-        Reason = reason;
-        Index = index;
-    }
-
-    /// <summary>A refusal with the engine's reason and the values behind it.</summary>
-    public AnalyticsException(int code, string message, string? reason, int? index, string? parameter,
-        JsonElement? details) : this(code, message, reason, index)
-    {
-        Parameter = parameter;
+        Status = status;
+        ErrorCode = errorCode;
         Details = details;
+        Parameter = ParameterIn(details);
+        Index = IndexIn(details);
     }
 
-    /// <summary>Reads the engine's <c>{"error", "code", "index", "parameter", ...}</c> error body.</summary>
-    internal static AnalyticsException FromErrorBody(int code, string body)
+    /// <summary>Reads the engine's <c>{"error", "code", ...}</c> error body.</summary>
+    internal static AnalyticsException FromErrorBody(int status, string body)
     {
         try
         {
@@ -677,20 +703,29 @@ public class AnalyticsException : Exception
             var message = root.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.String
                 ? e.GetString()!
                 : body;
-            string? reason = root.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String
+            string? errorCode = root.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String
                 ? c.GetString()
                 : null;
-            int? index = root.TryGetProperty("index", out var i) && i.ValueKind == JsonValueKind.Number
-                ? i.GetInt32()
-                : null;
-            string? parameter = root.TryGetProperty("parameter", out var p) && p.ValueKind == JsonValueKind.String
-                ? p.GetString()
-                : null;
-            return new AnalyticsException(code, message, reason, index, parameter, root.Clone());
+            return new AnalyticsException(status, message, errorCode, root.Clone());
         }
         catch (JsonException)
         {
-            return new AnalyticsException(code, body);
+            return new AnalyticsException(status, body);
         }
     }
+
+    /// <summary>The body's <c>parameter</c>, when it is a string.</summary>
+    private static string? ParameterIn(JsonElement? details) =>
+        details is { ValueKind: JsonValueKind.Object } d
+        && d.TryGetProperty("parameter", out var p) && p.ValueKind == JsonValueKind.String
+            ? p.GetString()
+            : null;
+
+    /// <summary>The body's <c>index</c>, when it is a whole number.</summary>
+    private static int? IndexIn(JsonElement? details) =>
+        details is { ValueKind: JsonValueKind.Object } d
+        && d.TryGetProperty("index", out var i) && i.ValueKind == JsonValueKind.Number
+        && i.TryGetInt32(out var n)
+            ? n
+            : null;
 }

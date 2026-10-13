@@ -890,9 +890,10 @@ results — `uanalytics_one_sample_t_test` `{data, mu0}`, `uanalytics_two_sample
 The .NET client (`bindings/csharp/UAnalytics`, package `UAnalytics`) wraps each
 entry point as a method on `AnalyticsClient` — `XbarRChart`, `ImrChart`, `PChart(samples, pBar)`, `LaneyPChart(samples, pBar, phi)`,
 `ProcessCapability`, `DetectChangepoints`, … — serialising the arguments to the
-request above and returning the response as a `JsonElement`. A non-zero status
-surfaces as `AnalyticsException` carrying the status (`Code`), the `error`
-message, and the body's `code` and `index` as `Reason` and `Index`. The
+request above and returning the response as a typed record. A non-zero status
+surfaces as `AnalyticsException` carrying the native status (`Status`), the `error`
+message, the body's `code`, `parameter` and `index` as `ErrorCode`, `Parameter`
+and `Index`, and the whole body as `Details`. The
 package follows its own version line (it is a binding, not the crate), noted
 in the CHANGELOG entry that changes it.
 

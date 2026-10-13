@@ -8,6 +8,13 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking (.NET `UAnalytics`):** `AnalyticsException` names its members the way the other
+  .NET bindings' exceptions do — `Status` is the native status (was `Code`),
+  `ErrorCode` the error body's `code` (was `Reason`), and `Parameter` / `Index`
+  are read from the body as before. Migrate: `ex.Code` → `ex.Status`, `ex.Reason` → `ex.ErrorCode`.
+
 ## [0.21.0] - 2026-10-13
 
 ### Added

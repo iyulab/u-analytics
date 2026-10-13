@@ -65,9 +65,9 @@ applies and reports), `TrendDirection`, `SigmaSource`, `GageStatus`, and the opt
 `AdfModel`, `PeltCost` and `CorrelationMethod`.
 
 Input that cannot be analysed is refused rather than approximated: `AnalyticsException`
-carries a stable `Reason` (`insufficient_data`, `parameter_out_of_range`,
+carries a stable `ErrorCode` — the error body's `code` (`insufficient_data`, `parameter_out_of_range`,
 `value_not_finite`, …), the `Parameter` it is about, the `Index` of the offending
-element, and the whole error body in `Details`. For `parameter_out_of_range`, `Details`
+element, the whole error body in `Details` and the native status in `Status`. For `parameter_out_of_range`, `Details`
 holds `got`, the inclusive bounds `min` / `max` (`null` on a side that is open or
 unbounded) and, only on an open side, `exclusive_min` / `exclusive_max`.
 

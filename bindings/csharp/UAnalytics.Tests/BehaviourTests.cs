@@ -11,7 +11,7 @@ public class BehaviourTests
     public void A_non_finite_value_is_refused_where_it_sits()
     {
         var e = Assert.Throws<AnalyticsException>(() => _client.XbarRChart([[1, 2], [3, double.NaN]]));
-        Assert.Equal("value_not_finite", e.Reason);
+        Assert.Equal("value_not_finite", e.ErrorCode);
         Assert.Equal("subgroups[1]", e.Parameter);
         Assert.Equal(1, e.Index);
 
@@ -31,8 +31,8 @@ public class BehaviourTests
     public void The_engine_still_names_what_it_refuses()
     {
         var e = Assert.Throws<AnalyticsException>(() => _client.TChart([1.0, -2.0, 3.0]));
-        Assert.Equal(-3, e.Code);
-        Assert.NotNull(e.Reason);
+        Assert.Equal(-3, e.Status);
+        Assert.NotNull(e.ErrorCode);
         Assert.Equal(1, e.Index);
     }
 
