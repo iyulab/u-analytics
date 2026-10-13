@@ -102,7 +102,7 @@ fn check_proportion_standard(p: f64, parameter: &'static str) -> Result<f64, Con
     if p.is_finite() && p > 0.0 && p < 1.0 {
         Ok(p)
     } else {
-        Err(ControlChartError::InvalidStandard { parameter })
+        Err(ControlChartError::proportion_standard(parameter, p))
     }
 }
 
@@ -111,7 +111,7 @@ fn check_rate_standard(u: f64, parameter: &'static str) -> Result<f64, ControlCh
     if u.is_finite() && u > 0.0 {
         Ok(u)
     } else {
-        Err(ControlChartError::InvalidStandard { parameter })
+        Err(ControlChartError::rate_standard(parameter, u))
     }
 }
 
@@ -723,7 +723,7 @@ fn laney_preconditions(
         check_center(s.center, center_name).map_err(ChartInputError::Standard)?;
         if !(s.phi.is_finite() && s.phi >= 0.0) {
             return Err(ChartInputError::Standard(
-                ControlChartError::InvalidStandard { parameter: "phi" },
+                ControlChartError::dispersion_standard("phi", s.phi),
             ));
         }
     }
@@ -1588,11 +1588,18 @@ mod tests {
     #[test]
     fn a_standard_outside_its_domain_is_refused() {
         for p in [0.0, 1.0, -0.1, f64::NAN] {
-            assert_eq!(
-                PChart::with_center(p).err(),
-                Some(ControlChartError::InvalidStandard { parameter: "p_bar" }),
-                "p̄ = {p}"
-            );
+            match PChart::with_center(p).err() {
+                Some(ControlChartError::InvalidStandard {
+                    parameter: "p_bar",
+                    got,
+                    exclusive_min: Some(0.0),
+                    exclusive_max: Some(1.0),
+                    min: None,
+                    max: None,
+                    ..
+                }) => assert!(got == p || (got.is_nan() && p.is_nan()), "p̄ = {p}"),
+                other => panic!("p̄ = {p}: {other:?}"),
+            }
         }
         assert!(UChart::with_center(0.0).is_err());
         let bad_phi = LaneyStandard {
@@ -1601,7 +1608,7 @@ mod tests {
         };
         assert_eq!(
             laney_p_chart(&[(1, 10)], Some(bad_phi)).unwrap_err(),
-            ChartInputError::Standard(ControlChartError::InvalidStandard { parameter: "phi" })
+            ChartInputError::Standard(ControlChartError::dispersion_standard("phi", -1.0))
         );
         let good = LaneyStandard {
             center: 0.1,

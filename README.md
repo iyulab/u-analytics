@@ -289,13 +289,11 @@ interface AnalyticsError extends Error {
 | `defectives_exceed_sample` | more defectives than the sample has items |
 | `units_not_positive` | units inspected that are not a positive number |
 | `subgroup_length_mismatch` | a subgroup of a different length than the first |
-| `subgroup_size_out_of_range` | a subgroup size the factor tables do not cover |
 | `insufficient_data` | fewer values than the function needs — `parameter` names the argument, `min` and `got` the counts (`index: null`) |
 | `no_specification` | `expected` (`["usl", "lsl"]`) | a capability index with neither specification limit — there is nothing to measure the spread against (`index` and `parameter` are `null`) |
 | `empty_input` | an argument with nothing in it (`parameter`) |
 | `dimension_mismatch` | arrays that must have the same length do not — `index` is the first that differs, `expected` and `got` the lengths |
-| `standard_out_of_range` | a Phase I `p_bar`/`u_bar`/`phi` outside its domain — `parameter` names which |
-| `parameter_out_of_range` | a value outside its domain — `parameter` names which (`index` its position for an array element) and `got` the value. `min` / `max` are the inclusive bounds, `null` on a side that is open or unbounded; `exclusive_min` / `exclusive_max` are the exclusive bounds, present only on an open side. `> 0` is `{ min: null, exclusive_min: 0, max: null }`, `(0, 1]` is `{ min: null, exclusive_min: 0, max: 1 }`, `usl` not above `lsl` is `exclusive_min: lsl` |
+| `parameter_out_of_range` | a value outside its domain — an option, a Phase I `p_bar` (`(0, 1)`) / `u_bar` (`> 0`) / `phi` (`>= 0`), a subgroup size the factor tables do not cover (`parameter: "subgroups"`, `min: 2, max: 25`), an array element. `parameter` names which (`index` its position for an array element) and `got` the value. `min` / `max` are the inclusive bounds, `null` on a side that is open or unbounded; `exclusive_min` / `exclusive_max` are the exclusive bounds, present only on an open side. `> 0` is `{ min: null, exclusive_min: 0, max: null }`, `(0, 1]` is `{ min: null, exclusive_min: 0, max: 1 }`, `usl` not above `lsl` is `exclusive_min: lsl` |
 | `value_not_finite` | a NaN or ±Infinity anywhere in an argument — `parameter` is the path to it (`input.data`), `index` its position in that array, or `null` |
 | `malformed_input` | not the shape the function takes — a row that is not a pair, an unknown field, a count option with a fraction (`max_lags: 2.5`; a negative count is `parameter_out_of_range`) — `parameter` is the path to the value |
 | `unknown_option` | an option given a name the function does not know — `parameter` names it (`rules`, `cost`, `penalty`, `observation.truncation`), `got` the name and `expected` the names it knows |
@@ -486,9 +484,9 @@ study's `p_bar`/`u_bar` (and `phi` for the Laney charts): every limit then uses
 the Phase I values with each sample's own size, and a single sample is enough.
 Charting Phase I and Phase II together instead would let a Phase II shift pull
 the centre toward itself and widen its own limits. A `p_bar` outside (0, 1), a
-`u_bar` ≤ 0 or a negative `phi` is refused as `standard_out_of_range`; a Laney
-standard with only one of its two parts, or a key the chart does not take, is
-refused rather than completed or ignored.
+`u_bar` ≤ 0 or a negative `phi` is refused as `parameter_out_of_range`, naming
+it with its domain and `got`; a Laney standard with only one of its two parts,
+or a key the chart does not take, is refused rather than completed or ignored.
 
 ```js
 const phaseOne = laney_p_chart(firstTwelve)              // { p_bar, phi, points }

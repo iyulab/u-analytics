@@ -500,15 +500,13 @@ pub(crate) mod code {
     pub(crate) const UNITS_NOT_POSITIVE: &str = "units_not_positive";
     /// A subgroup whose length differs from the first subgroup's.
     pub(crate) const SUBGROUP_LENGTH_MISMATCH: &str = "subgroup_length_mismatch";
-    /// A subgroup size outside the factor tables.
-    pub(crate) const SUBGROUP_SIZE_OUT_OF_RANGE: &str = "subgroup_size_out_of_range";
     /// A NaN or an infinity where a measurement belongs.
     pub(crate) const VALUE_NOT_FINITE: &str = "value_not_finite";
     /// Fewer samples than the chart needs.
     pub(crate) const INSUFFICIENT_DATA: &str = "insufficient_data";
-    /// A known (Phase I) parameter outside its domain.
-    pub(crate) const STANDARD_OUT_OF_RANGE: &str = "standard_out_of_range";
-    /// An option outside its domain. `parameter` names which one.
+    /// A value outside its domain -- an option, a Phase I standard, a subgroup
+    /// size the factor tables do not cover, an array element. `parameter`
+    /// names which, `min` / `max` / `exclusive_*` the domain, `got` the value.
     pub(crate) const PARAMETER_OUT_OF_RANGE: &str = "parameter_out_of_range";
     /// An argument with nothing in it.
     pub(crate) const EMPTY_INPUT: &str = "empty_input";
@@ -645,13 +643,38 @@ impl WireError {
             Some(i) => format!("{label}[{i}]: {error}"),
             None => error.to_string(),
         };
-        let wire = Self::new(chart_error_code(error), index, message);
-        match error {
-            // The domain error already names the parameter; the wire record
-            // should not make a consumer read it back out of the message.
-            crate::spc::ControlChartError::InvalidStandard { parameter } => wire.about(*parameter),
-            _ => wire,
-        }
+        use crate::spc::ControlChartError as E;
+        let mut wire = match error {
+            // The domain error names the parameter and carries the domain; the
+            // wire record should not make a consumer read either back out of
+            // the message.
+            E::InvalidStandard {
+                parameter,
+                got,
+                min,
+                exclusive_min,
+                max,
+                exclusive_max,
+                ..
+            } => Self::out_of_range(
+                *parameter,
+                Bound::from_pair(*min, *exclusive_min),
+                Bound::from_pair(*max, *exclusive_max),
+                *got,
+                message,
+            ),
+            // The size is the width of the subgroups given.
+            E::SubgroupSizeOutOfRange { got, min, max } => Self::out_of_range(
+                label.to_string(),
+                Bound::Closed(*min as f64),
+                Bound::Closed(*max as f64),
+                *got as f64,
+                message,
+            ),
+            _ => Self::new(chart_error_code(error), index, message),
+        };
+        wire.index = index;
+        wire
     }
 
     /// A whole-slice chart's refusal.
@@ -707,9 +730,12 @@ pub(crate) fn chart_error_code(error: &crate::spc::ControlChartError) -> &'stati
         E::NonFiniteValue => code::VALUE_NOT_FINITE,
         E::DefectivesExceedSampleSize { .. } => code::DEFECTIVES_EXCEED_SAMPLE,
         E::NonPositiveUnits => code::UNITS_NOT_POSITIVE,
-        E::SubgroupSizeOutOfRange { .. } => code::SUBGROUP_SIZE_OUT_OF_RANGE,
+        // A domain the error states as bounds: `parameter` (with the bounds)
+        // tells the two apart.
+        E::SubgroupSizeOutOfRange { .. } | E::InvalidStandard { .. } => {
+            code::PARAMETER_OUT_OF_RANGE
+        }
         E::ZeroSampleSize => code::SAMPLE_SIZE_NOT_WHOLE,
-        E::InvalidStandard { .. } => code::STANDARD_OUT_OF_RANGE,
     }
 }
 
@@ -4116,8 +4142,12 @@ mod input_error_tests {
         assert_eq!((c, i), (code::UNITS_NOT_POSITIVE, Some(1)));
     }
 
+    /// The code and `parameter` together tell every chart refusal apart. The
+    /// two that state a domain share `parameter_out_of_range` and differ by
+    /// `parameter` (the subgroups, or the standard named) and carry the
+    /// domain; every other reason has its own code.
     #[test]
-    fn every_chart_error_has_its_own_code() {
+    fn every_chart_error_is_told_apart_by_code_and_parameter() {
         use crate::spc::ControlChartError as E;
         let all = [
             E::SampleLengthMismatch {
@@ -4136,11 +4166,69 @@ mod input_error_tests {
                 max: 25,
             },
             E::ZeroSampleSize,
-            E::InvalidStandard { parameter: "phi" },
+            E::dispersion_standard("phi", -1.0),
+            E::proportion_standard("p_bar", 1.5),
         ];
-        let codes: std::collections::HashSet<_> = all.iter().map(chart_error_code).collect();
-        assert_eq!(codes.len(), all.len(), "codes must tell the reasons apart");
-        assert!(!codes.contains(code::INVALID_INPUT));
+        let refusals: Vec<_> = all
+            .iter()
+            .map(|e| WireError::chart("subgroups", None, e))
+            .collect();
+        let reasons: std::collections::HashSet<_> = refusals
+            .iter()
+            .map(|w| (w.code, w.parameter.clone()))
+            .collect();
+        assert_eq!(reasons.len(), all.len(), "reasons must be told apart");
+        assert!(!reasons.iter().any(|(c, _)| *c == code::INVALID_INPUT));
+        // No range reason keeps a code of its own.
+        assert!(refusals
+            .iter()
+            .all(|w| !w.code.ends_with("_out_of_range") || w.code == code::PARAMETER_OUT_OF_RANGE));
+
+        let fields = |w: &WireError| -> std::collections::HashMap<&'static str, Detail> {
+            w.details.iter().cloned().collect()
+        };
+        let num = Detail::Num;
+        let size = fields(&refusals[4]);
+        assert_eq!(
+            (
+                refusals[4].code,
+                refusals[4].parameter.as_deref(),
+                &size["min"],
+                &size["max"],
+                &size["got"]
+            ),
+            (
+                code::PARAMETER_OUT_OF_RANGE,
+                Some("subgroups"),
+                &num(2.0),
+                &num(25.0),
+                &num(1.0)
+            )
+        );
+        let phi = fields(&refusals[6]);
+        assert_eq!(refusals[6].parameter.as_deref(), Some("phi"));
+        assert_eq!(
+            (&phi["min"], &phi["max"], &phi["got"]),
+            (&num(0.0), &Detail::Null, &num(-1.0))
+        );
+        assert!(!phi.contains_key("exclusive_min"));
+        let p_bar = fields(&refusals[7]);
+        assert_eq!(
+            (
+                &p_bar["min"],
+                &p_bar["exclusive_min"],
+                &p_bar["max"],
+                &p_bar["exclusive_max"],
+                &p_bar["got"]
+            ),
+            (
+                &Detail::Null,
+                &num(0.0),
+                &Detail::Null,
+                &num(1.0),
+                &num(1.5)
+            )
+        );
     }
 
     #[test]
@@ -4347,12 +4435,12 @@ mod input_error_tests {
         assert!(m.contains("phi"), "{m}");
         // Outside its domain.
         let (c, i, _) = err(p_chart_dto(&samples, &standard(json!({ "p_bar": 1.5 }))));
-        assert_eq!((c, i), (code::STANDARD_OUT_OF_RANGE, None));
+        assert_eq!((c, i), (code::PARAMETER_OUT_OF_RANGE, None));
         let (c, _, _) = err(laney_p_dto(
             &samples,
             &standard(json!({ "p_bar": 0.05, "phi": -2.0 })),
         ));
-        assert_eq!(c, code::STANDARD_OUT_OF_RANGE);
+        assert_eq!(c, code::PARAMETER_OUT_OF_RANGE);
         // Unknown option keys are refused by the schema.
         assert!(serde_json::from_value::<AttributeStandardDto>(json!({ "pbar": 0.1 })).is_err());
     }

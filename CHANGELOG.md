@@ -10,6 +10,20 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Changed
 
+- **Breaking:** the two range reasons that had codes of their own are
+  `parameter_out_of_range`, with the domain and `got` like every other value outside
+  its domain. A Phase I standard outside its domain (`standard_out_of_range` before)
+  names it in `parameter` and carries `p_bar` `exclusive_min: 0, exclusive_max: 1`,
+  `u_bar` `exclusive_min: 0`, `phi` `min: 0`; a subgroup size the factor tables do
+  not cover (`subgroup_size_out_of_range` before) carries `parameter: "subgroups"`,
+  `min: 2`, `max: 25` and the size as `got`. A program that branched on either old
+  code reads `code` and `parameter` together.
+- **Breaking:** `ControlChartError::InvalidStandard` carries the value given and the
+  domain — `requirement`, `got`, `min`, `exclusive_min`, `max`, `exclusive_max`, the
+  shape of `SpectralResidualError::OptionOutOfRange` — and its message states that
+  domain for the parameter refused rather than for all three. `ControlChartError` and
+  `ChartInputError` no longer implement `Eq` (they hold an `f64`); `PartialEq` stays.
+
 - **Breaking:** `parameter_out_of_range` refusals (WebAssembly `Error` properties and
   the C error body) report open bounds as `exclusive_min` / `exclusive_max`. `min` and
   `max` now carry only inclusive bounds and stay present, `null` on an open or

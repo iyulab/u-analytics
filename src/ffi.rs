@@ -2095,7 +2095,18 @@ mod tests {
             r#"{"samples": [[3, 1.5]], "u_bar": -1}"#,
         );
         assert_eq!(code, -3, "{body}");
-        assert_eq!(body["code"], "standard_out_of_range", "{body}");
+        // A Phase I standard outside its domain carries the domain: u_bar > 0.
+        assert_eq!(body["code"], "parameter_out_of_range", "{body}");
+        assert_eq!(body["parameter"], "u_bar", "{body}");
+        assert_eq!(
+            (
+                body["min"].is_null(),
+                body["exclusive_min"].as_f64(),
+                body["got"].as_f64()
+            ),
+            (true, Some(0.0), Some(-1.0)),
+            "{body}"
+        );
 
         let (code, body) = call(uanalytics_t_chart, r#"{"times": [1, 0, 2]}"#);
         assert_eq!(code, -3, "{body}");

@@ -155,7 +155,7 @@ pub const MAX_SUBGROUP_SIZE: usize = 25;
 
 /// Errors returned when a control chart cannot be constructed or cannot take
 /// a sample.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum ControlChartError {
     /// A sample is not the length the chart takes: a subgroup of another size,
@@ -192,11 +192,68 @@ pub enum ControlChartError {
     },
     /// A sample size of zero: there is nothing to take a proportion of.
     ZeroSampleSize,
-    /// A known (Phase I) parameter outside its domain.
+    /// A known (Phase I) parameter outside its domain: `p_bar` in (0, 1),
+    /// `u_bar` > 0, `phi` >= 0, each finite.
+    ///
+    /// Carries the value given and the domain, so a caller can say what the
+    /// parameter has to be without restating the rule.
     InvalidStandard {
         /// The parameter's name (`p_bar`, `u_bar`, `phi`).
         parameter: &'static str,
+        /// What the parameter has to satisfy, for a message.
+        requirement: &'static str,
+        /// The value given.
+        got: f64,
+        /// Inclusive lower bound.
+        min: Option<f64>,
+        /// Exclusive lower bound.
+        exclusive_min: Option<f64>,
+        /// Inclusive upper bound.
+        max: Option<f64>,
+        /// Exclusive upper bound.
+        exclusive_max: Option<f64>,
     },
+}
+
+impl ControlChartError {
+    /// A known proportion outside (0, 1).
+    pub(crate) fn proportion_standard(parameter: &'static str, got: f64) -> Self {
+        Self::InvalidStandard {
+            parameter,
+            requirement: "in (0, 1)",
+            got,
+            min: None,
+            exclusive_min: Some(0.0),
+            max: None,
+            exclusive_max: Some(1.0),
+        }
+    }
+
+    /// A known rate that is not > 0.
+    pub(crate) fn rate_standard(parameter: &'static str, got: f64) -> Self {
+        Self::InvalidStandard {
+            parameter,
+            requirement: "> 0",
+            got,
+            min: None,
+            exclusive_min: Some(0.0),
+            max: None,
+            exclusive_max: None,
+        }
+    }
+
+    /// A known dispersion factor below 0.
+    pub(crate) fn dispersion_standard(parameter: &'static str, got: f64) -> Self {
+        Self::InvalidStandard {
+            parameter,
+            requirement: ">= 0",
+            got,
+            min: Some(0.0),
+            exclusive_min: None,
+            max: None,
+            exclusive_max: None,
+        }
+    }
 }
 
 impl fmt::Display for ControlChartError {
@@ -206,9 +263,14 @@ impl fmt::Display for ControlChartError {
                 write!(f, "subgroup size must be {min}..={max}, got {got}")
             }
             ControlChartError::ZeroSampleSize => write!(f, "sample size must be at least 1"),
-            ControlChartError::InvalidStandard { parameter } => write!(
+            ControlChartError::InvalidStandard {
+                parameter,
+                requirement,
+                got,
+                ..
+            } => write!(
                 f,
-                "{parameter}: outside its domain (p_bar in (0, 1), u_bar > 0, phi >= 0, all finite)"
+                "{parameter} must be a finite number {requirement}, got {got}"
             ),
             ControlChartError::SampleLengthMismatch { expected, got } => {
                 write!(f, "sample has {got} values, expected {expected}")
@@ -237,7 +299,7 @@ impl std::error::Error for ControlChartError {}
 /// Carries the position of the refused sample, which a sample-by-sample
 /// [`ControlChartError`] cannot: the chart functions that take every sample
 /// at once are the only place that position is known.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum ChartInputError {
     /// The sample at `index` cannot be charted.

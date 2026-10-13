@@ -537,7 +537,7 @@ fn standard_option(options: Option<JsValue>) -> Result<AttributeStandardDto, JsV
 /// `sample_size_not_whole` for a sample size that is not a whole number >= 1
 /// (zero, negative, fractional or not a number alike),
 /// `defectives_exceed_sample`, `malformed_input` for a row that is not a pair,
-/// `insufficient_data` for an empty array, `standard_out_of_range` for a
+/// `insufficient_data` for an empty array, `parameter_out_of_range` for a
 /// `p_bar` outside (0, 1).
 ///
 /// # Options
@@ -809,7 +809,7 @@ pub fn c_chart(
 ///
 /// Throws an `Error` with `code` and `index` (the row): `count_not_whole`,
 /// `units_not_positive`, `malformed_input`, `insufficient_data`,
-/// `standard_out_of_range`.
+/// `parameter_out_of_range` (with the domain and `got`).
 ///
 /// # Options
 ///
