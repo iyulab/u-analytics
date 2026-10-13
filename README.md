@@ -283,7 +283,7 @@ interface AnalyticsError extends Error {
 | `code` | Meaning |
 |---|---|
 | `count_not_whole` | a defect or defective count is not a whole number ≥ 0 |
-| `non_positive_data` | a value that must be `> 0` is not — Box-Cox `data`, Weibull `failure_times` (`index`, `got`) |
+| `non_positive_data` | a value that must be `> 0` is not — Box-Cox `data`, Weibull `failure_times`, `percentile_capability` `data` under a `distribution` on (0, ∞) (`index`, `got`) |
 | `invalid_option` | a setting refused for a reason a range cannot state — a `lambda_range` with `min >= max` (`parameter`) |
 | `sample_size_not_whole` | a sample size is not a whole number ≥ 1 — zero, negative, fractional and not-a-number alike |
 | `defectives_exceed_sample` | more defectives than the sample has items |
@@ -769,10 +769,17 @@ gage_rr_anova(input: { measurements: number[][][], tolerance?: number }): {
   ndc: number, status: string, interaction_significant: boolean, interaction_pooled: boolean,
 }
 
-// Non-parametric (percentile) capability — >= 20 observations, at least one limit
-percentile_capability(input: { data: number[], usl?: number, lsl?: number }): {
+// Percentile capability (ISO 22514-2) — >= 20 observations, at least one limit.
+// The 0.135 % / 50 % / 99.865 % quantiles of a distribution fitted to `data`:
+// `distribution` names the family, absent = the one fit_best ranks first.
+percentile_capability(input: {
+  data: number[], usl?: number, lsl?: number,
+  distribution?: "Normal" | "LogNormal" | "Weibull" | "Gamma" | "Exponential" | "Beta",
+}): {
   cp_star, cpk_star, cpu_star, cpl_star: number | null,
   median: number, percentile_lower: number, percentile_upper: number,
+  distribution: string,                // the family fitted (fit_best's names)
+  parameters: Record<string, number>,  // its parameters, as fit_best reports them
 }
 ```
 

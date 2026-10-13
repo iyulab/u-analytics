@@ -1,24 +1,152 @@
 //! Percentile-based process capability (ISO 22514-2).
 //!
-//! When process data is non-normal, traditional capability indices based on
-//! mean and standard deviation can be misleading. The percentile method uses
-//! empirical quantiles (0.135th and 99.865th percentiles) as the natural
-//! process spread — equivalent to the ±3σ spread for normal data.
+//! When process data is non-normal, capability indices based on mean and
+//! standard deviation can be misleading. The percentile method replaces the
+//! ±3σ spread with the distance between the 0.135 % and 99.865 % quantiles of
+//! the process distribution, and the mean with its median.
+//!
+//! Those quantiles are taken from a **distribution fitted to the data**, not
+//! from the data's own order statistics. With fewer than about 740 values the
+//! sample's 0.135 % point is its minimum (and the 99.865 % point its maximum),
+//! so an empirical spread is the sample range -- which is shorter than the
+//! process spread, and the shorter the smaller the sample: on normal data with
+//! a true Cp of 1.0 it reported about 1.37 at n = 50. The fitted model is the
+//! one [`fit_best`](crate::distribution::fit_best) ranks first by AIC, or the
+//! family the caller names.
 //!
 //! # Indices
 //!
 //! - **Cp\*** — (USL − LSL) / (X₉₉.₈₆₅ − X₀.₁₃₅)
 //! - **Cpk\*** — min(Cpu\*, Cpl\*)
-//! - **Cpu\*** — (USL − median) / (X₉₉.₈₆₅ − median)
-//! - **Cpl\*** — (median − LSL) / (median − X₀.₁₃₅)
+//! - **Cpu\*** — (USL − X₅₀) / (X₉₉.₈₆₅ − X₅₀)
+//! - **Cpl\*** — (X₅₀ − LSL) / (X₅₀ − X₀.₁₃₅)
 //!
 //! # References
 //!
-//! - ISO 22514-2:2017. "Statistical methods in process management — Capability and performance",
-//!   §4.3, percentile method.
-//! - Clements, J.A. (1989). "Process capability calculations for non-normal distributions."
+//! - ISO 22514-2, "Statistical methods in process management — Capability and
+//!   performance — Part 2: Process capability and performance of time-dependent
+//!   process models" (quantile method on an identified distribution).
+//! - Clements, J.A. (1989). "Process capability calculations for non-normal
+//!   distributions." *Quality Progress*, 22(9), 95–100 (quantiles of a fitted
+//!   distribution, there Pearson curves).
 
-use u_numflow::stats;
+use std::fmt;
+
+use u_numflow::distributions::{
+    BetaDistribution, Exponential, GammaDistribution, LogNormal, Normal, Weibull,
+};
+
+use crate::distribution::{
+    fit_best, fit_beta, fit_exponential, fit_gamma, fit_lognormal, fit_normal, fit_weibull,
+    FitResult,
+};
+
+/// Lower tail probability: the normal 3σ point, Φ(−3).
+const P_LOWER: f64 = 0.001_349_898_031_630_094_6;
+/// Upper tail probability: Φ(3).
+const P_UPPER: f64 = 1.0 - P_LOWER;
+
+/// Fewest values the method accepts.
+pub const MIN_PERCENTILE_DATA: usize = 20;
+
+/// The distribution family a percentile capability is computed from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum CapabilityModel {
+    /// The family [`fit_best`] ranks first by AIC.
+    #[default]
+    Auto,
+    /// Normal.
+    Normal,
+    /// Log-normal (positive data).
+    LogNormal,
+    /// Two-parameter Weibull (positive data).
+    Weibull,
+    /// Gamma (positive data).
+    Gamma,
+    /// Exponential (positive data).
+    Exponential,
+    /// Beta (data within (0, 1)).
+    Beta,
+}
+
+impl CapabilityModel {
+    /// The fitted families, in the names [`FitResult::distribution`] uses.
+    fn of_fit(name: &str) -> Option<Self> {
+        Some(match name {
+            "Normal" => Self::Normal,
+            "LogNormal" => Self::LogNormal,
+            "Weibull" => Self::Weibull,
+            "Gamma" => Self::Gamma,
+            "Exponential" => Self::Exponential,
+            "Beta" => Self::Beta,
+            _ => return None,
+        })
+    }
+
+    fn fit(self, data: &[f64]) -> Option<FitResult> {
+        match self {
+            Self::Auto => fit_best(data)
+                .into_iter()
+                .find(|f| Self::of_fit(&f.distribution).is_some()),
+            Self::Normal => fit_normal(data),
+            Self::LogNormal => fit_lognormal(data),
+            Self::Weibull => fit_weibull(data),
+            Self::Gamma => fit_gamma(data),
+            Self::Exponential => fit_exponential(data),
+            Self::Beta => fit_beta(data),
+        }
+    }
+}
+
+/// Why a percentile capability was refused.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum PercentileCapabilityError {
+    /// Neither USL nor LSL was given.
+    NoSpecification,
+    /// USL is not above LSL.
+    InvalidSpecification,
+    /// Fewer than [`MIN_PERCENTILE_DATA`] values.
+    InsufficientData {
+        /// How many were given.
+        got: usize,
+    },
+    /// A value is NaN or infinite.
+    NonFiniteData {
+        /// Position of the first one.
+        index: usize,
+    },
+    /// Every value is the same.
+    NoVariation,
+    /// The named family cannot describe the data (log-normal, Weibull, gamma
+    /// and exponential need positive values, beta values within (0, 1)).
+    ModelNotFitted(CapabilityModel),
+}
+
+impl fmt::Display for PercentileCapabilityError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoSpecification => {
+                write!(f, "at least one specification limit (USL or LSL) is required")
+            }
+            Self::InvalidSpecification => write!(f, "USL must be greater than LSL"),
+            Self::InsufficientData { got } => write!(
+                f,
+                "at least {MIN_PERCENTILE_DATA} data points are required for percentile capability, got {got}"
+            ),
+            Self::NonFiniteData { index } => {
+                write!(f, "data[{index}] is not a finite number")
+            }
+            Self::NoVariation => write!(f, "data has no variation"),
+            Self::ModelNotFitted(model) => {
+                write!(f, "the {model:?} distribution cannot be fitted to this data")
+            }
+        }
+    }
+}
+
+impl std::error::Error for PercentileCapabilityError {}
 
 /// Result of percentile-based process capability analysis.
 #[derive(Debug, Clone)]
@@ -27,112 +155,92 @@ pub struct PercentileCapabilityResult {
     pub cp_star: Option<f64>,
     /// Cpk* = min(Cpu*, Cpl*). Requires at least one limit.
     pub cpk_star: Option<f64>,
-    /// Cpu* = (USL − median) / (X₉₉.₈₆₅ − median). Requires USL.
+    /// Cpu* = (USL − X₅₀) / (X₉₉.₈₆₅ − X₅₀). Requires USL.
     pub cpu_star: Option<f64>,
-    /// Cpl* = (median − LSL) / (median − X₀.₁₃₅). Requires LSL.
+    /// Cpl* = (X₅₀ − LSL) / (X₅₀ − X₀.₁₃₅). Requires LSL.
     pub cpl_star: Option<f64>,
-    /// Sample median.
+    /// Median of the fitted distribution, X₅₀.
     pub median: f64,
-    /// 0.135th percentile value (lower natural process limit).
+    /// 0.135 % quantile of the fitted distribution (lower natural process limit).
     pub percentile_lower: f64,
-    /// 99.865th percentile value (upper natural process limit).
+    /// 99.865 % quantile of the fitted distribution (upper natural process limit).
     pub percentile_upper: f64,
+    /// The family the quantiles come from — never [`CapabilityModel::Auto`].
+    pub model: CapabilityModel,
+    /// Its fitted parameters, as [`FitResult::parameters`] names them.
+    pub parameters: Vec<(String, f64)>,
 }
 
-/// Compute percentile-based capability indices (ISO 22514-2).
+/// Computes percentile-based process capability indices.
 ///
-/// Uses empirical quantiles at 0.00135 and 0.99865 (corresponding to ±3σ
-/// for normal distributions) to define the natural process spread.
+/// Fits `model` to `data` (or, for [`CapabilityModel::Auto`], the family
+/// [`fit_best`] ranks first) and takes the 0.135 %, 50 % and 99.865 %
+/// quantiles from it.
 ///
-/// # Arguments
+/// # Errors
 ///
-/// * `data` — Process observations (at least 20 data points required).
-/// * `lsl` — Lower specification limit (optional).
-/// * `usl` — Upper specification limit (optional).
-///
-/// # Returns
-///
-/// `Err` if:
-/// - Fewer than 20 data points (insufficient for extreme percentile estimation).
-/// - Neither `usl` nor `lsl` is provided.
-/// - Data contains non-finite values.
-/// - The percentile spread is zero or negative (degenerate data).
+/// [`PercentileCapabilityError`] — no limit, USL ≤ LSL, fewer than
+/// [`MIN_PERCENTILE_DATA`] values, a value that is not finite, no variation,
+/// or a named family the data does not admit.
 ///
 /// # Examples
 ///
 /// ```
-/// use u_analytics::capability::percentile_capability;
+/// use u_analytics::capability::{percentile_capability, CapabilityModel};
 ///
 /// let data: Vec<f64> = (0..100).map(|i| 10.0 + (i as f64) * 0.1).collect();
-/// let result = percentile_capability(&data, Some(5.0), Some(15.0)).unwrap();
+/// let result = percentile_capability(&data, Some(5.0), Some(15.0), CapabilityModel::Auto).unwrap();
 /// assert!(result.cp_star.is_some());
-/// assert!(result.median > 0.0);
+/// assert_ne!(result.model, CapabilityModel::Auto);
 /// ```
 pub fn percentile_capability(
     data: &[f64],
     lsl: Option<f64>,
     usl: Option<f64>,
-) -> Result<PercentileCapabilityResult, &'static str> {
-    // Validate inputs
+    model: CapabilityModel,
+) -> Result<PercentileCapabilityResult, PercentileCapabilityError> {
     if usl.is_none() && lsl.is_none() {
-        return Err("at least one specification limit (USL or LSL) is required");
-    }
-    if data.len() < 20 {
-        return Err("at least 20 data points are required for percentile capability");
-    }
-    if data.iter().any(|v| !v.is_finite()) {
-        return Err("all data values must be finite");
+        return Err(PercentileCapabilityError::NoSpecification);
     }
     if let (Some(u), Some(l)) = (usl, lsl) {
         if u <= l {
-            return Err("USL must be greater than LSL");
+            return Err(PercentileCapabilityError::InvalidSpecification);
         }
     }
-
-    // Compute percentiles using u-numflow (R-7 linear interpolation)
-    let p_lower = stats::quantile(data, 0.00135).ok_or("failed to compute 0.135th percentile")?;
-    let p_upper = stats::quantile(data, 0.99865).ok_or("failed to compute 99.865th percentile")?;
-    let median = stats::quantile(data, 0.5).ok_or("failed to compute median")?;
-
-    // Validate spread
-    let spread = p_upper - p_lower;
-    if spread < 1e-300 {
-        return Err("percentile spread is zero — data has no variation");
+    if data.len() < MIN_PERCENTILE_DATA {
+        return Err(PercentileCapabilityError::InsufficientData { got: data.len() });
+    }
+    if let Some(index) = data.iter().position(|v| !v.is_finite()) {
+        return Err(PercentileCapabilityError::NonFiniteData { index });
+    }
+    if data.iter().all(|&v| v == data[0]) {
+        return Err(PercentileCapabilityError::NoVariation);
     }
 
+    let fit = model
+        .fit(data)
+        .ok_or(PercentileCapabilityError::ModelNotFitted(model))?;
+    let fitted = CapabilityModel::of_fit(&fit.distribution)
+        .ok_or(PercentileCapabilityError::ModelNotFitted(model))?;
+    let (p_lower, median, p_upper) =
+        quantiles(fitted, &fit).ok_or(PercentileCapabilityError::ModelNotFitted(model))?;
+
+    let spread = p_upper - p_lower;
+    if spread <= 0.0 {
+        return Err(PercentileCapabilityError::NoVariation);
+    }
     let upper_spread = p_upper - median;
     let lower_spread = median - p_lower;
 
-    // Cp* = (USL - LSL) / (p_upper - p_lower)
     let cp_star = match (usl, lsl) {
         (Some(u), Some(l)) => Some((u - l) / spread),
         _ => None,
     };
-
-    // Cpu* = (USL - median) / (p_upper - median)
-    let cpu_star = usl.and_then(|u| {
-        if upper_spread > 1e-300 {
-            Some((u - median) / upper_spread)
-        } else {
-            None
-        }
-    });
-
-    // Cpl* = (median - LSL) / (median - p_lower)
-    let cpl_star = lsl.and_then(|l| {
-        if lower_spread > 1e-300 {
-            Some((median - l) / lower_spread)
-        } else {
-            None
-        }
-    });
-
-    // Cpk* = min of available Cpu*/Cpl*
+    let cpu_star = usl.and_then(|u| (upper_spread > 0.0).then(|| (u - median) / upper_spread));
+    let cpl_star = lsl.and_then(|l| (lower_spread > 0.0).then(|| (median - l) / lower_spread));
     let cpk_star = match (cpu_star, cpl_star) {
         (Some(u), Some(l)) => Some(u.min(l)),
-        (Some(u), None) => Some(u),
-        (None, Some(l)) => Some(l),
-        (None, None) => None,
+        (one, other) => one.or(other),
     };
 
     Ok(PercentileCapabilityResult {
@@ -143,7 +251,49 @@ pub fn percentile_capability(
         median,
         percentile_lower: p_lower,
         percentile_upper: p_upper,
+        model: fitted,
+        parameters: fit.parameters,
     })
+}
+
+/// The 0.135 %, 50 % and 99.865 % quantiles of a fitted family.
+fn quantiles(model: CapabilityModel, fit: &FitResult) -> Option<(f64, f64, f64)> {
+    let param = |name: &str| {
+        fit.parameters
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|&(_, v)| v)
+    };
+    let q: Box<dyn Fn(f64) -> Option<f64>> = match model {
+        CapabilityModel::Normal => {
+            let d = Normal::new(param("mu")?, param("sigma")?).ok()?;
+            Box::new(move |p| d.quantile(p))
+        }
+        CapabilityModel::LogNormal => {
+            let d = LogNormal::new(param("mu")?, param("sigma")?).ok()?;
+            Box::new(move |p| d.quantile(p))
+        }
+        CapabilityModel::Weibull => {
+            let d = Weibull::new(param("shape")?, param("scale")?).ok()?;
+            Box::new(move |p| d.quantile(p))
+        }
+        CapabilityModel::Gamma => {
+            // `fit_gamma` reports the rate as `beta`.
+            let d = GammaDistribution::new(param("alpha")?, param("beta")?).ok()?;
+            Box::new(move |p| d.quantile(p))
+        }
+        CapabilityModel::Exponential => {
+            let d = Exponential::new(param("lambda")?).ok()?;
+            Box::new(move |p| d.quantile(p))
+        }
+        CapabilityModel::Beta => {
+            let d = BetaDistribution::new(param("alpha")?, param("beta")?).ok()?;
+            Box::new(move |p| d.quantile(p))
+        }
+        CapabilityModel::Auto => return None,
+    };
+    let (lo, mid, hi) = (q(P_LOWER)?, q(0.5)?, q(P_UPPER)?);
+    (lo.is_finite() && mid.is_finite() && hi.is_finite()).then_some((lo, mid, hi))
 }
 
 // ---------------------------------------------------------------------------
@@ -153,6 +303,7 @@ pub fn percentile_capability(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use u_numflow::distributions::Sample;
 
     /// Generate uniform-like data for testing.
     fn uniform_data(n: usize) -> Vec<f64> {
@@ -161,18 +312,24 @@ mod tests {
             .collect()
     }
 
+    fn pc(
+        data: &[f64],
+        lsl: Option<f64>,
+        usl: Option<f64>,
+    ) -> Result<PercentileCapabilityResult, PercentileCapabilityError> {
+        percentile_capability(data, lsl, usl, CapabilityModel::Auto)
+    }
+
     #[test]
     fn basic_two_sided() {
         let data = uniform_data(100);
-        let result = percentile_capability(&data, Some(5.0), Some(25.0)).unwrap();
+        let result = pc(&data, Some(5.0), Some(25.0)).unwrap();
 
         assert!(result.cp_star.is_some());
         assert!(result.cpk_star.is_some());
         assert!(result.cpu_star.is_some());
         assert!(result.cpl_star.is_some());
         assert!(result.cp_star.unwrap() > 0.0);
-
-        // Median should be approximately the midpoint of the data
         assert!(
             (result.median - 15.0).abs() < 0.5,
             "median should be ~15, got {}",
@@ -183,105 +340,152 @@ mod tests {
     #[test]
     fn usl_only() {
         let data = uniform_data(50);
-        let result = percentile_capability(&data, None, Some(25.0)).unwrap();
+        let result = pc(&data, None, Some(25.0)).unwrap();
 
         assert!(result.cp_star.is_none(), "Cp* requires both limits");
         assert!(result.cpu_star.is_some());
         assert!(result.cpl_star.is_none());
-        assert!(result.cpk_star.is_some());
-        assert_eq!(result.cpk_star.unwrap(), result.cpu_star.unwrap());
+        assert_eq!(result.cpk_star, result.cpu_star);
     }
 
     #[test]
     fn lsl_only() {
         let data = uniform_data(50);
-        let result = percentile_capability(&data, Some(5.0), None).unwrap();
+        let result = pc(&data, Some(5.0), None).unwrap();
 
         assert!(result.cp_star.is_none());
         assert!(result.cpu_star.is_none());
         assert!(result.cpl_star.is_some());
-        assert!(result.cpk_star.is_some());
-        assert_eq!(result.cpk_star.unwrap(), result.cpl_star.unwrap());
+        assert_eq!(result.cpk_star, result.cpl_star);
     }
 
     #[test]
-    fn rejects_insufficient_data() {
-        let data: Vec<f64> = (0..19).map(|i| i as f64).collect();
-        assert!(percentile_capability(&data, Some(0.0), Some(20.0)).is_err());
-    }
-
-    #[test]
-    fn rejects_no_spec_limits() {
+    fn refusals_name_their_reason() {
+        let few: Vec<f64> = (0..19).map(|i| i as f64).collect();
+        assert_eq!(
+            pc(&few, Some(0.0), Some(20.0)).unwrap_err(),
+            PercentileCapabilityError::InsufficientData { got: 19 }
+        );
         let data = uniform_data(30);
-        assert!(percentile_capability(&data, None, None).is_err());
-    }
-
-    #[test]
-    fn rejects_non_finite_data() {
-        let mut data = uniform_data(30);
-        data[10] = f64::NAN;
-        assert!(percentile_capability(&data, Some(0.0), Some(30.0)).is_err());
-    }
-
-    #[test]
-    fn rejects_usl_leq_lsl() {
-        let data = uniform_data(30);
-        assert!(percentile_capability(&data, Some(10.0), Some(5.0)).is_err());
-        assert!(percentile_capability(&data, Some(10.0), Some(10.0)).is_err());
+        assert_eq!(
+            pc(&data, None, None).unwrap_err(),
+            PercentileCapabilityError::NoSpecification
+        );
+        assert_eq!(
+            pc(&data, Some(10.0), Some(5.0)).unwrap_err(),
+            PercentileCapabilityError::InvalidSpecification
+        );
+        assert_eq!(
+            pc(&data, Some(10.0), Some(10.0)).unwrap_err(),
+            PercentileCapabilityError::InvalidSpecification
+        );
+        let mut nan = uniform_data(30);
+        nan[10] = f64::NAN;
+        assert_eq!(
+            pc(&nan, Some(0.0), Some(30.0)).unwrap_err(),
+            PercentileCapabilityError::NonFiniteData { index: 10 }
+        );
+        assert_eq!(
+            pc(&[3.0; 25], Some(0.0), Some(30.0)).unwrap_err(),
+            PercentileCapabilityError::NoVariation
+        );
+        let mut negative = uniform_data(30);
+        negative[0] = -1.0;
+        assert_eq!(
+            percentile_capability(
+                &negative,
+                Some(-5.0),
+                Some(30.0),
+                CapabilityModel::LogNormal
+            )
+            .unwrap_err(),
+            PercentileCapabilityError::ModelNotFitted(CapabilityModel::LogNormal)
+        );
     }
 
     #[test]
     fn cpk_star_equals_min_of_cpu_cpl() {
         let data = uniform_data(100);
-        let result = percentile_capability(&data, Some(5.0), Some(25.0)).unwrap();
-
-        let cpu = result.cpu_star.unwrap();
-        let cpl = result.cpl_star.unwrap();
-        let cpk = result.cpk_star.unwrap();
-        assert!(
-            (cpk - cpu.min(cpl)).abs() < 1e-10,
-            "Cpk* should equal min(Cpu*, Cpl*)"
+        let result = pc(&data, Some(5.0), Some(25.0)).unwrap();
+        let (cpu, cpl, cpk) = (
+            result.cpu_star.unwrap(),
+            result.cpl_star.unwrap(),
+            result.cpk_star.unwrap(),
         );
-    }
-
-    #[test]
-    fn percentiles_bracket_data() {
-        let data = uniform_data(200);
-        let result = percentile_capability(&data, Some(5.0), Some(25.0)).unwrap();
-
-        // Lower percentile should be near but >= data minimum
-        assert!(
-            result.percentile_lower >= data.iter().copied().fold(f64::INFINITY, f64::min) - 1e-10,
-            "lower percentile below data min"
-        );
-        // Upper percentile should be near but <= data maximum
-        assert!(
-            result.percentile_upper
-                <= data.iter().copied().fold(f64::NEG_INFINITY, f64::max) + 1e-10,
-            "upper percentile above data max"
-        );
-        // p_lower < median < p_upper
-        assert!(result.percentile_lower < result.median);
-        assert!(result.median < result.percentile_upper);
+        assert!((cpk - cpu.min(cpl)).abs() < 1e-10);
     }
 
     #[test]
     fn symmetric_data_gives_balanced_cpu_cpl() {
-        // Symmetric data centered at 50
         let data: Vec<f64> = (0..200).map(|i| 40.0 + (i as f64) * 0.1).collect();
-        let lsl = 30.0;
-        let usl = 70.0;
-        let result = percentile_capability(&data, Some(lsl), Some(usl)).unwrap();
-
-        let cpu = result.cpu_star.unwrap();
-        let cpl = result.cpl_star.unwrap();
-
-        // For roughly symmetric data centered between limits, Cpu ≈ Cpl
+        let result = pc(&data, Some(30.0), Some(70.0)).unwrap();
+        let (cpu, cpl) = (result.cpu_star.unwrap(), result.cpl_star.unwrap());
         assert!(
             (cpu - cpl).abs() < cpu * 0.2,
-            "symmetric data should give similar Cpu* ({}) and Cpl* ({})",
-            cpu,
-            cpl
+            "symmetric data should give similar Cpu* ({cpu}) and Cpl* ({cpl})"
+        );
+    }
+
+    /// The defect this module was rewritten for: on normal data with a true Cp
+    /// of 1.0 (limits at ±3σ), the empirical 0.135 % / 99.865 % points are the
+    /// sample minimum and maximum, so Cp* averaged 1.37 at n = 50 and 1.68 at
+    /// n = 20. Quantiles of the fitted normal stay near 1.0 at every size.
+    #[test]
+    fn small_samples_do_not_inflate_cp_star() {
+        let process = Normal::new(10.0, 1.0).unwrap();
+        for (n, empirical_at_least) in [(20_usize, 1.5), (50, 1.25), (100, 1.15)] {
+            let reps = 400;
+            let (mut sum, mut empirical) = (0.0, 0.0);
+            for rep in 0..reps {
+                let data = process.sample_n(n, 1_000 + rep as u64 * 7 + n as u64);
+                let r =
+                    percentile_capability(&data, Some(7.0), Some(13.0), CapabilityModel::Normal)
+                        .unwrap();
+                sum += r.cp_star.unwrap();
+                // What the empirical points gave on the same samples.
+                let lo = u_numflow::stats::quantile(&data, P_LOWER).unwrap();
+                let hi = u_numflow::stats::quantile(&data, P_UPPER).unwrap();
+                empirical += 6.0 / (hi - lo);
+            }
+            let mean = sum / reps as f64;
+            let empirical = empirical / reps as f64;
+            assert!(
+                empirical > empirical_at_least,
+                "n = {n}: the empirical Cp* {empirical} no longer shows the bias this guards"
+            );
+            // The MLE σ is low by about (n−1)/n, and 1/σ̂ is biased up; both
+            // are a few percent at these sizes. The empirical method was 37 %
+            // high at n = 50.
+            assert!(
+                (mean - 1.0).abs() < 0.08,
+                "n = {n}: mean Cp* {mean} (true 1.0)"
+            );
+        }
+    }
+
+    #[test]
+    fn quantiles_are_the_fitted_model_s() {
+        let process = Normal::new(50.0, 2.0).unwrap();
+        let data = process.sample_n(200, 42);
+        let r =
+            percentile_capability(&data, Some(40.0), Some(60.0), CapabilityModel::Normal).unwrap();
+        let mu = r.parameters.iter().find(|(n, _)| n == "mu").unwrap().1;
+        let sigma = r.parameters.iter().find(|(n, _)| n == "sigma").unwrap().1;
+        assert_eq!(r.model, CapabilityModel::Normal);
+        assert!((r.median - mu).abs() < 1e-9);
+        assert!((r.percentile_lower - (mu - 3.0 * sigma)).abs() < 1e-6);
+        assert!((r.percentile_upper - (mu + 3.0 * sigma)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn auto_reports_the_family_it_used() {
+        let process = LogNormal::new(1.0, 0.6).unwrap();
+        let data = process.sample_n(300, 7);
+        let r = pc(&data, None, Some(30.0)).unwrap();
+        assert_ne!(r.model, CapabilityModel::Auto);
+        assert_eq!(
+            CapabilityModel::of_fit(&fit_best(&data)[0].distribution),
+            Some(r.model)
         );
     }
 }

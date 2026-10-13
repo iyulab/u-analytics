@@ -23,6 +23,22 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Changed
 
+- **Breaking:** `percentile_capability` takes its quantiles from a
+  distribution fitted to the data, not from the data's own order statistics.
+  With fewer than about 740 values the sample's 0.135 % and 99.865 % points
+  are its minimum and maximum, so the spread was the sample range and Cp\*
+  came out high, the more so the smaller the sample: on normal data with a
+  true Cp of 1.0 it averaged 1.37 at n = 50 and 1.68 at n = 20. The family is
+  the new `model` argument (`CapabilityModel::Auto` fits what `fit_best` ranks
+  first); the result carries the family and its parameters, and `median` is
+  the fitted distribution's. Refusals are `PercentileCapabilityError` rather
+  than a string. WASM and the C interface take an optional `distribution`
+  (`fit_best`'s names) and return `distribution` and `parameters`; a family on
+  (0, ∞) given data at or below 0 is `non_positive_data` naming the first such
+  value, and an unknown name is `unknown_option`. C#:
+  `PercentileCapability(…, CapabilityDistribution? distribution)`, and the
+  result's `Distribution` and `Parameters`.
+
 - **Breaking:** `uanalytics_p_chart` and `uanalytics_u_chart` refuse `phi` as an
   unknown key when the request is read (status -2, `malformed_input`), like any other
   key a chart does not take; it was read and then refused (status -3). Each chart's

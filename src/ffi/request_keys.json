@@ -283,6 +283,16 @@
     "uanalytics_percentile_capability": {
       "properties": {
         "data": {},
+        "distribution": {
+          "enum": [
+            "Normal",
+            "LogNormal",
+            "Weibull",
+            "Gamma",
+            "Exponential",
+            "Beta"
+          ]
+        },
         "lsl": {},
         "usl": {}
       }

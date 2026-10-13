@@ -184,12 +184,18 @@ public sealed class AnalyticsClient : IDisposable
 
     /// <summary>
     /// Percentile capability (ISO 22514-2) for non-normal data: the 0.135 % and 99.865 %
-    /// percentiles and the median stand in for μ ± 3σ and μ.
+    /// quantiles and the median of a distribution fitted to <paramref name="data"/> (at least
+    /// 20 values) stand in for μ ± 3σ and μ. The family is <paramref name="distribution"/>, or
+    /// when it is null the one <see cref="FitBest"/> ranks first; the result names the family
+    /// and its parameters.
     /// </summary>
-    public PercentileCapabilityResult PercentileCapability(double[] data, double? usl, double? lsl)
+    public PercentileCapabilityResult PercentileCapability(double[] data, double? usl, double? lsl,
+        CapabilityDistribution? distribution = null)
         => Call(NativeInterop.uanalytics_percentile_capability, AnalyticsJson.Default.PercentileCapabilityResult,
             ("data", Request.Nums("data", data)), ("usl", Request.Num("usl", usl)),
-            ("lsl", Request.Num("lsl", lsl)));
+            ("lsl", Request.Num("lsl", lsl)),
+            ("distribution", distribution is { } d
+                ? Request.Option(d, AnalyticsJson.Default.CapabilityDistribution) : null));
 
     // ── MSA ──
 

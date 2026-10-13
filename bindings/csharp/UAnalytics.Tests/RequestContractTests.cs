@@ -87,6 +87,12 @@ public class RequestContractTests
         ["TChart"] = c => c.TChart([1.5, 2.0, 0.5, 3.0]),
         ["ProcessCapability"] = c => c.ProcessCapability(Series, 11, 9, target: 10, sigmaWithin: 0.25),
         ["PercentileCapability"] = c => c.PercentileCapability(Series, 11, 9),
+        ["PercentileCapability(Normal)"] = c => c.PercentileCapability(Series, 11, 9, CapabilityDistribution.Normal),
+        ["PercentileCapability(LogNormal)"] = c => c.PercentileCapability(Series, 11, 9, CapabilityDistribution.LogNormal),
+        ["PercentileCapability(Weibull)"] = c => c.PercentileCapability(Series, 11, 9, CapabilityDistribution.Weibull),
+        ["PercentileCapability(Gamma)"] = c => c.PercentileCapability(Series, 11, 9, CapabilityDistribution.Gamma),
+        ["PercentileCapability(Exponential)"] = c => c.PercentileCapability(Series, 11, 9, CapabilityDistribution.Exponential),
+        ["PercentileCapability(Beta)"] = c => c.PercentileCapability([.. Series.Select(v => v / 20)], 0.55, 0.45, CapabilityDistribution.Beta),
         ["GageRRXbarR"] = c => c.GageRRXbarR(Gage(), tolerance: 10),
         ["GageRRAnova"] = c => c.GageRRAnova(Gage(), tolerance: 10),
         ["WeibullMle"] = c => c.WeibullMle(Positive),
@@ -227,6 +233,7 @@ public class RequestContractTests
         Assert.Equal(RequestKeys.Names("uanalytics_adf_test", "$.model"), Names(Enum.GetValues<AdfModel>(), AnalyticsJson.Default.AdfModel));
         Assert.Equal(RequestKeys.Names("uanalytics_detect_changepoints", "$.cost"), Names(Enum.GetValues<PeltCost>(), AnalyticsJson.Default.PeltCost));
         Assert.Equal(RequestKeys.Names("uanalytics_correlation_matrix", "$.method"), Names(Enum.GetValues<CorrelationMethod>(), AnalyticsJson.Default.CorrelationMethod));
+        Assert.Equal(RequestKeys.Names("uanalytics_percentile_capability", "$.distribution"), Names(Enum.GetValues<CapabilityDistribution>(), AnalyticsJson.Default.CapabilityDistribution));
     }
 
     private static string[] Names<T>(T[] values, JsonTypeInfo<T> info)

@@ -131,7 +131,29 @@ public sealed record CapabilityResult(
 /// <summary>Percentile (ISO 22514-2) capability for non-normal data.</summary>
 public sealed record PercentileCapabilityResult(
     double? CpStar, double? CpkStar, double? CpuStar, double? CplStar,
-    double Median, double PercentileLower, double PercentileUpper);
+    double Median, double PercentileLower, double PercentileUpper,
+    CapabilityDistribution Distribution, IReadOnlyDictionary<string, double> Parameters);
+
+/// <summary>
+/// The distribution family a percentile capability's quantiles come from — the names
+/// <see cref="AnalyticsClient.FitBest"/> reports.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<CapabilityDistribution>))]
+public enum CapabilityDistribution
+{
+    /// <summary>Normal (<c>mu</c>, <c>sigma</c>).</summary>
+    [JsonStringEnumMemberName("Normal")] Normal,
+    /// <summary>Log-normal (<c>mu</c>, <c>sigma</c> of the log); positive data.</summary>
+    [JsonStringEnumMemberName("LogNormal")] LogNormal,
+    /// <summary>Two-parameter Weibull (<c>shape</c>, <c>scale</c>); positive data.</summary>
+    [JsonStringEnumMemberName("Weibull")] Weibull,
+    /// <summary>Gamma (<c>alpha</c>, rate <c>beta</c>); positive data.</summary>
+    [JsonStringEnumMemberName("Gamma")] Gamma,
+    /// <summary>Exponential (<c>lambda</c>); positive data.</summary>
+    [JsonStringEnumMemberName("Exponential")] Exponential,
+    /// <summary>Beta (<c>alpha</c>, <c>beta</c>); data within (0, 1).</summary>
+    [JsonStringEnumMemberName("Beta")] Beta,
+}
 
 /// <summary>
 /// Capability on the Box-Cox transformed scale. <see cref="LambdaAtBound"/> says the

@@ -1943,6 +1943,54 @@ pub(crate) struct PercentileCapabilityInputDto {
     #[cfg_attr(feature = "wasm", tsify(optional))]
     #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
     pub(crate) usl: Option<f64>,
+    /// The family to fit, by the names `fit_best` reports; absent = the one it
+    /// ranks first.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(
+        feature = "wasm",
+        tsify(
+            type = "\"Normal\" | \"LogNormal\" | \"Weibull\" | \"Gamma\" | \"Exponential\" | \"Beta\" | null"
+        )
+    )]
+    pub(crate) distribution: Option<String>,
+}
+
+/// The families `percentile_capability` fits, by the names `fit_best` uses.
+pub(crate) const CAPABILITY_MODELS: &[&str] = &[
+    "Normal",
+    "LogNormal",
+    "Weibull",
+    "Gamma",
+    "Exponential",
+    "Beta",
+];
+
+fn capability_model(name: &str) -> Option<crate::capability::CapabilityModel> {
+    use crate::capability::CapabilityModel as M;
+    Some(match name {
+        "Normal" => M::Normal,
+        "LogNormal" => M::LogNormal,
+        "Weibull" => M::Weibull,
+        "Gamma" => M::Gamma,
+        "Exponential" => M::Exponential,
+        "Beta" => M::Beta,
+        _ => return None,
+    })
+}
+
+fn capability_model_name(model: crate::capability::CapabilityModel) -> &'static str {
+    use crate::capability::CapabilityModel as M;
+    match model {
+        M::Normal => "Normal",
+        M::LogNormal => "LogNormal",
+        M::Weibull => "Weibull",
+        M::Gamma => "Gamma",
+        M::Exponential => "Exponential",
+        M::Beta => "Beta",
+        // `percentile_capability` reports the family it fitted, never `Auto`.
+        _ => "Auto",
+    }
 }
 
 #[derive(Serialize)]
@@ -1956,6 +2004,17 @@ pub(crate) struct PercentileCapabilityDto {
     pub(crate) median: f64,
     pub(crate) percentile_lower: f64,
     pub(crate) percentile_upper: f64,
+    /// The family the quantiles come from (`fit_best`'s names).
+    #[cfg_attr(
+        feature = "wasm",
+        tsify(
+            type = "\"Normal\" | \"LogNormal\" | \"Weibull\" | \"Gamma\" | \"Exponential\" | \"Beta\""
+        )
+    )]
+    pub(crate) distribution: &'static str,
+    /// Its fitted parameters by name, as `fit_best` reports them.
+    #[cfg_attr(feature = "wasm", tsify(type = "Record<string, number>"))]
+    pub(crate) parameters: std::collections::BTreeMap<String, f64>,
 }
 
 #[derive(Deserialize)]
@@ -2194,10 +2253,38 @@ fn check_gage_shape(measurements: &[Vec<Vec<f64>>]) -> Result<(usize, usize, usi
 pub(crate) fn percentile_capability_dto(
     input: PercentileCapabilityInputDto,
 ) -> Result<PercentileCapabilityDto, WireError> {
+    use crate::capability::{CapabilityModel as M, PercentileCapabilityError as E};
     check_specification(input.usl, input.lsl)?;
-    let data = at_least(input.data, 20, "data")?;
-    let result = crate::capability::percentile_capability(&data, input.lsl, input.usl)
-        .map_err(|e| WireError::invalid_input(e).about("data"))?;
+    let model = match input.distribution.as_deref() {
+        None => M::Auto,
+        Some(name) => capability_model(name)
+            .ok_or_else(|| WireError::unknown_option("distribution", name, CAPABILITY_MODELS))?,
+    };
+    let data = at_least(input.data, crate::capability::MIN_PERCENTILE_DATA, "data")?;
+    let result = crate::capability::percentile_capability(&data, input.lsl, input.usl, model)
+        .map_err(|e| {
+            let message = e.to_string();
+            match e {
+                E::NonFiniteData { index } => {
+                    WireError::new(code::VALUE_NOT_FINITE, Some(index), message).about("data")
+                }
+                // The families on (0, inf) refuse data that reaches 0 or
+                // below; name the first such value.
+                E::ModelNotFitted(M::LogNormal | M::Weibull | M::Gamma | M::Exponential)
+                    if data.iter().any(|&v| v <= 0.0) =>
+                {
+                    let index = data.iter().position(|&v| v <= 0.0);
+                    let got = index.map_or(Detail::Null, |i| Detail::Num(data[i]));
+                    WireError::new(code::NON_POSITIVE_DATA, index, message)
+                        .about("data")
+                        .with("got", got)
+                }
+                E::ModelNotFitted(_) => {
+                    WireError::new(code::INVALID_OPTION, None, message).about("distribution")
+                }
+                _ => WireError::invalid_input(message).about("data"),
+            }
+        })?;
     Ok(PercentileCapabilityDto {
         cp_star: result.cp_star,
         cpk_star: result.cpk_star,
@@ -2206,6 +2293,8 @@ pub(crate) fn percentile_capability_dto(
         median: result.median,
         percentile_lower: result.percentile_lower,
         percentile_upper: result.percentile_upper,
+        distribution: capability_model_name(result.model),
+        parameters: result.parameters.into_iter().collect(),
     })
 }
 
@@ -3891,6 +3980,45 @@ mod input_error_tests {
         assert_eq!(
             (e.code, e.parameter.as_deref()),
             ("insufficient_data", Some("data"))
+        );
+
+        // The family: named, refused by name, or refused at the first value its
+        // support excludes -- and the result says which one it fitted.
+        let pct = |extra: serde_json::Value| {
+            let mut body = serde_json::json!({
+                "data": (1..=30).map(|i| 10.0 + (i % 7) as f64 * 0.3).collect::<Vec<_>>(),
+                "usl": 14.0, "lsl": 8.0,
+            });
+            for (k, v) in extra.as_object().unwrap() {
+                body[k] = v.clone();
+            }
+            percentile_capability_dto(serde_json::from_value(body).unwrap())
+        };
+        let ok = pct(serde_json::json!({ "distribution": "Normal" })).expect("normal fits");
+        assert_eq!(ok.distribution, "Normal");
+        assert_eq!(
+            ok.parameters.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["mu", "sigma"]
+        );
+        assert_ne!(
+            pct(serde_json::json!({})).expect("auto").distribution,
+            "Auto"
+        );
+        let e = pct(serde_json::json!({ "distribution": "normal" }))
+            .err()
+            .expect("unknown");
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("unknown_option", Some("distribution"))
+        );
+        let mut low: Vec<f64> = (1..=30).map(|i| i as f64).collect();
+        low[4] = -2.0;
+        let e = pct(serde_json::json!({ "data": low, "lsl": -5.0, "distribution": "Weibull" }))
+            .err()
+            .expect("weibull needs positive data");
+        assert_eq!(
+            (e.code, e.parameter.as_deref(), e.index),
+            ("non_positive_data", Some("data"), Some(4))
         );
 
         let grr = |m: serde_json::Value| {
