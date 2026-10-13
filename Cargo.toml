@@ -10,6 +10,16 @@ repository = "https://github.com/iyulab/u-analytics"
 keywords = ["spc", "statistics", "quality", "weibull", "reliability"]
 categories = ["science", "mathematics"]
 readme = "README.md"
+# What a published crate is: its source, tests and documents -- not the
+# repository's CI, scripts or language bindings.
+include = [
+    "/src/**",
+    "/tests/**",
+    "/benches/**",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
