@@ -6,6 +6,12 @@ using UAnalytics.Interop;
 
 namespace UAnalytics;
 
+/// <summary>
+/// Calls into the u-analytics native engine. Each call is one request in and one
+/// result or <see cref="AnalyticsException"/> out; the instance holds no
+/// state between calls and no native resources, so disposing it releases nothing;
+/// it is <see cref="IDisposable"/> so it can sit in a <c>using</c> block.
+/// </summary>
 public sealed class AnalyticsClient : IDisposable
 {
     private bool _disposed;
@@ -19,6 +25,10 @@ public sealed class AnalyticsClient : IDisposable
     /// </summary>
     internal Action<string, string>? RequestObserver { get; set; }
 
+    /// <summary>
+    /// The version of the native engine — the u-analytics Rust crate the package
+    /// carries — not the UAnalytics package version.
+    /// </summary>
     public string GetVersion()
     {
         var ptr = NativeInterop.uanalytics_version();
@@ -587,6 +597,7 @@ public sealed class AnalyticsClient : IDisposable
         }
     }
 
+    /// <summary>Marks the client disposed; it holds no native resources to release.</summary>
     public void Dispose()
     {
         if (!_disposed)
@@ -632,11 +643,15 @@ public class AnalyticsException : Exception
     /// </summary>
     public JsonElement? Details { get; }
 
+    /// <summary>A refusal with no readable body.</summary>
+    /// <param name="code">Native status, see <see cref="Code"/>.</param>
+    /// <param name="message">What went wrong, in words.</param>
     public AnalyticsException(int code, string message) : base(message)
     {
         Code = code;
     }
 
+    /// <summary>A refusal with the engine's reason and the values behind it.</summary>
     public AnalyticsException(int code, string message, string? reason, int? index) : base(message)
     {
         Code = code;
@@ -644,6 +659,7 @@ public class AnalyticsException : Exception
         Index = index;
     }
 
+    /// <summary>A refusal with the engine's reason and the values behind it.</summary>
     public AnalyticsException(int code, string message, string? reason, int? index, string? parameter,
         JsonElement? details) : this(code, message, reason, index)
     {
