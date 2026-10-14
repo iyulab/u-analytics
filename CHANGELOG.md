@@ -8,6 +8,8 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-14
+
 ### Changed
 
 - **Breaking:** a subgroup whose size differs from the first is refused as
