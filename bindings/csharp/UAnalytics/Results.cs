@@ -10,8 +10,10 @@ namespace UAnalytics;
 
 /// <summary>
 /// A run test: the vocabulary <see cref="ChartPoint.Violations"/> reports and the
-/// <c>rules</c> argument of the charts and <see cref="AnalyticsClient.RunRules"/> takes.
-/// The first four are Nelson's tests 1–4 (and Western Electric's), the rest Nelson's 5–8.
+/// <c>rules</c> argument of the charts and <see cref="AnalyticsClient.RunRules(double[], double, double, double, IReadOnlyList{RunRule}?)"/>
+/// takes. The first eight are Nelson's tests 1–8 in his numbering; <see cref="EightOneSide"/>
+/// is the Western Electric run rule, which asks for eight points on one side where Nelson's
+/// test 2 asks for nine. The named sets are <see cref="RunRuleSet"/>.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter<RunRule>))]
 public enum RunRule
@@ -32,6 +34,24 @@ public enum RunRule
     FifteenWithin1Sigma,
     /// <summary>Eight points in a row beyond 1σ on either side (Nelson 8).</summary>
     EightBeyond1Sigma,
+    /// <summary>Eight points in a row on one side of the centre line (Western Electric 4).</summary>
+    EightOneSide,
+}
+
+/// <summary>
+/// A named set of run tests, as the engine defines it. Each added test raises the false alarm
+/// rate of a process that is in control, so a chart applies <see cref="Shewhart"/> unless told
+/// otherwise; the supplementary sets are for bringing a process into control (ISO 7870-2:2023, 8.2.7).
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<RunRuleSet>))]
+public enum RunRuleSet
+{
+    /// <summary>The 3-sigma test alone (<see cref="RunRule.BeyondLimits"/>) — the default.</summary>
+    [JsonStringEnumMemberName("shewhart")] Shewhart,
+    /// <summary>Western Electric's four: Nelson 1, 5 and 6, and <see cref="RunRule.EightOneSide"/>.</summary>
+    [JsonStringEnumMemberName("western_electric")] WesternElectric,
+    /// <summary>Nelson's eight tests.</summary>
+    [JsonStringEnumMemberName("nelson")] Nelson,
 }
 
 // ── Variables charts ──

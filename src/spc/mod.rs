@@ -17,9 +17,10 @@
 //!
 //! # Run Rules
 //!
-//! - [`RuleSet`] — any subset of the eight tests; [`RuleSet::nelson`] is the default
-//! - [`WesternElectricRules`] — the 4 classic run rules
-//! - [`NelsonRules`] — 8 rules (superset of Western Electric)
+//! - [`RuleSet`] — any subset of the tests; [`RuleSet::shewhart`] (the 3-sigma
+//!   test alone) is the default, [`RuleSet::named`] looks up a named set
+//! - [`WesternElectricRules`] — the 4 classic run rules (eight points on one side)
+//! - [`NelsonRules`] — Nelson's 8 rules (nine points on one side)
 //!
 //! # References
 //!

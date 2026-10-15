@@ -15,6 +15,8 @@
 //! - `{"items": value}` -- an array of objects or of names;
 //! - `{"enum": [name, ...]}` -- one of these names, with `"number": true` when
 //!   a number is taken there too;
+//! - `{"enum": [name, ...], "items": {"enum": [...]}}` -- one of these names,
+//!   or an array of the other names (a named set, or the members spelt out);
 //! - `{}` -- anything else: a number, an array of numbers.
 //!
 //! An object that does not refuse an unknown key cannot be measured, and fails
@@ -221,6 +223,14 @@ fn describe(name: &str, entry: Entry, base: &Value, path: &[Step]) -> Value {
     // A name, or an array of names.
     let (_, body) = call(entry, &put(base, path, json!(PROBE)));
     if let Some(names) = known_names(&body, &at) {
+        // A name, or an array of other names: the array is refused with those.
+        let (_, listed) = call(entry, &put(base, path, json!([PROBE])));
+        let items = known_names(&listed, &at)
+            .or_else(|| known_names(&listed, &format!("{at}[0]")))
+            .filter(|items| *items != names);
+        if let Some(items) = items {
+            return json!({ "enum": names, "items": { "enum": items } });
+        }
         let (_, body) = call(entry, &put(base, path, json!(1)));
         let text = body["error"].as_str().unwrap_or_default();
         return if text.contains("invalid type") {

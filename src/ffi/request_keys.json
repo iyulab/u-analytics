@@ -159,6 +159,11 @@
     "uanalytics_imr_chart": {
       "properties": {
         "rules": {
+          "enum": [
+            "shewhart",
+            "western_electric",
+            "nelson"
+          ],
           "items": {
             "enum": [
               "BeyondLimits",
@@ -168,7 +173,8 @@
               "TwoOfThreeBeyond2Sigma",
               "FourOfFiveBeyond1Sigma",
               "FifteenWithin1Sigma",
-              "EightBeyond1Sigma"
+              "EightBeyond1Sigma",
+              "EightOneSide"
             ]
           }
         },
@@ -339,6 +345,11 @@
           }
         },
         "rules": {
+          "enum": [
+            "shewhart",
+            "western_electric",
+            "nelson"
+          ],
           "items": {
             "enum": [
               "BeyondLimits",
@@ -348,7 +359,8 @@
               "TwoOfThreeBeyond2Sigma",
               "FourOfFiveBeyond1Sigma",
               "FifteenWithin1Sigma",
-              "EightBeyond1Sigma"
+              "EightBeyond1Sigma",
+              "EightOneSide"
             ]
           }
         },
@@ -426,6 +438,11 @@
     "uanalytics_xbar_r_chart": {
       "properties": {
         "rules": {
+          "enum": [
+            "shewhart",
+            "western_electric",
+            "nelson"
+          ],
           "items": {
             "enum": [
               "BeyondLimits",
@@ -435,7 +452,8 @@
               "TwoOfThreeBeyond2Sigma",
               "FourOfFiveBeyond1Sigma",
               "FifteenWithin1Sigma",
-              "EightBeyond1Sigma"
+              "EightBeyond1Sigma",
+              "EightOneSide"
             ]
           }
         },
@@ -445,6 +463,11 @@
     "uanalytics_xbar_s_chart": {
       "properties": {
         "rules": {
+          "enum": [
+            "shewhart",
+            "western_electric",
+            "nelson"
+          ],
           "items": {
             "enum": [
               "BeyondLimits",
@@ -454,7 +477,8 @@
               "TwoOfThreeBeyond2Sigma",
               "FourOfFiveBeyond1Sigma",
               "FifteenWithin1Sigma",
-              "EightBeyond1Sigma"
+              "EightBeyond1Sigma",
+              "EightOneSide"
             ]
           }
         },

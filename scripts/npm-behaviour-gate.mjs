@@ -125,4 +125,20 @@ ok(rowErr && rowErr.code === 'malformed_input' && rowErr.index === 2 && rowErr.p
 const anova = m.one_way_anova([[1, 2, 3], [2, 3, 4], [5, 6, 7]])
 ok(anova.df_between === 2 && anova.df_within === 6 && anova.f_statistic === 13, `anova ${JSON.stringify(anova)}`)
 
+// Run-test sets by name: eight points above the centre line are Western
+// Electric's run (eight), not Nelson's (nine), and the default -- the 3-sigma
+// test alone -- sees nothing.
+const eight = [1, 1, 1, 1, 1, 1, 1, 1]
+const limits = { ucl: 3, cl: 0, lcl: -3 }
+const fired = (opts) => m.run_rules(eight, limits, opts).flatMap((p) => p.violations)
+ok(JSON.stringify(fired({ rules: 'western_electric' })) === '["EightOneSide"]',
+  `western_electric: ${JSON.stringify(fired({ rules: 'western_electric' }))}`)
+ok(fired({ rules: 'nelson' }).length === 0, `nelson: ${JSON.stringify(fired({ rules: 'nelson' }))}`)
+ok(fired(undefined).length === 0, `default: ${JSON.stringify(fired(undefined))}`)
+let setErr = null
+try { m.run_rules(eight, limits, { rules: 'weco' }) } catch (err) { setErr = err }
+ok(setErr && setErr.code === 'unknown_option' && setErr.parameter === 'rules' &&
+  JSON.stringify(setErr.expected) === '["shewhart","western_electric","nelson"]',
+  `unknown set: ${setErr ? setErr.code + ' ' + JSON.stringify(setErr.expected) : 'no error'}`)
+
 console.log(`binding behaviour gate: ok (${checks} checks)`)

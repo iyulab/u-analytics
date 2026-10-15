@@ -91,6 +91,8 @@ internal static class Request
         => JsonSerializer.SerializeToNode(value, info)
            ?? throw new InvalidOperationException($"{typeof(T).Name} has no JSON form.");
 
+    internal static JsonNode Rules(RunRuleSet set) => Option(set, AnalyticsJson.Default.RunRuleSet);
+
     internal static JsonArray? Rules(IReadOnlyList<RunRule>? rules)
     {
         if (rules is null)

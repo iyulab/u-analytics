@@ -1,13 +1,26 @@
 //! Run rules for detecting non-random patterns in control charts.
 //!
-//! Implements Western Electric (4 rules) and Nelson (8 rules) run tests
-//! for identifying special causes of variation in control chart data.
+//! Implements the Western Electric (4 rules) and Nelson (8 rules) run tests
+//! for identifying special causes of variation in control chart data. The two
+//! sets share three tests and differ in the fourth: a run on one side of the
+//! centre line is **eight** points in the Western Electric handbook and
+//! **nine** in Nelson's list, so each has its own [`ViolationType`].
+//!
+//! # Choosing a set
+//!
+//! Every added test raises the false alarm rate of an in-control process. The
+//! supplementary tests help find a shift while a process is being brought into
+//! control (Phase I); in routine monitoring (Phase II) the 3-sigma test alone is
+//! the conventional choice (ISO 7870-2:2023, 8.2.7). That is why an unspecified
+//! set is [`RuleSet::shewhart`].
 //!
 //! # References
 //!
 //! - Nelson, L.S. (1984). "The Shewhart Control Chart — Tests for Special Causes",
 //!   *Journal of Quality Technology* 16(4), pp. 237-239.
 //! - Western Electric (1956). *Statistical Quality Control Handbook*.
+//! - NIST/SEMATECH e-Handbook of Statistical Methods, 6.3.2 ("What are the WECO rules").
+//! - ISO 7870-2:2023, *Control charts — Part 2: Shewhart control charts*, 8.2.7 and Annex B.
 //! - Montgomery, D.C. (2019). *Introduction to Statistical Quality Control*, 8th ed.
 
 use super::chart::{ChartPoint, ControlLimits, ViolationType};
@@ -24,22 +37,23 @@ pub trait RunRule {
     fn check(&self, points: &[ChartPoint], limits: &ControlLimits) -> Vec<(usize, ViolationType)>;
 }
 
-/// Western Electric rules (4 rules).
+/// Western Electric rules (4 rules) -- [`RuleSet::western_electric`].
 ///
-/// A subset of Nelson's rules, these are the original run tests from the
-/// Western Electric *Statistical Quality Control Handbook* (1956):
+/// The original run tests of the Western Electric *Statistical Quality Control
+/// Handbook* (1956):
 ///
 /// 1. Any point beyond 3 sigma (Nelson Rule 1)
 /// 2. 2 of 3 consecutive points beyond 2 sigma, same side (Nelson Rule 5)
 /// 3. 4 of 5 consecutive points beyond 1 sigma, same side (Nelson Rule 6)
-/// 4. 9 consecutive points on the same side of center line (Nelson Rule 2)
+/// 4. **8** consecutive points on the same side of the center line
+///    ([`ViolationType::EightOneSide`] -- Nelson's Rule 2 asks for nine)
 pub struct WesternElectricRules;
 
-/// Nelson rules (8 rules, superset of Western Electric).
+/// Nelson rules (8 rules) -- [`RuleSet::nelson`].
 ///
 /// The full set of eight tests for special causes as defined by
-/// Nelson (1984). Rules 1, 2, 5, and 6 correspond to the Western
-/// Electric rules.
+/// Nelson (1984). Rules 1, 5 and 6 are also Western Electric rules; Rule 2
+/// (nine points on one side) is a longer run than Western Electric's eight.
 ///
 /// # Examples
 ///
@@ -82,12 +96,18 @@ fn check_rule1(points: &[ChartPoint], limits: &ControlLimits) -> Vec<(usize, Vio
     violations
 }
 
-/// Nelson Rule 2: 9 consecutive points on the same side of center line.
+/// `run` consecutive points on the same side of the center line, reported as
+/// `rule` -- Nelson Rule 2 (nine) and the Western Electric run rule (eight).
 ///
 /// Indicates a sustained shift in the process mean.
-fn check_rule2(points: &[ChartPoint], limits: &ControlLimits) -> Vec<(usize, ViolationType)> {
+fn check_one_side(
+    points: &[ChartPoint],
+    limits: &ControlLimits,
+    run: usize,
+    rule: ViolationType,
+) -> Vec<(usize, ViolationType)> {
     let mut violations = Vec::new();
-    if points.len() < 9 {
+    if points.len() < run {
         return violations;
     }
 
@@ -114,8 +134,8 @@ fn check_rule2(points: &[ChartPoint], limits: &ControlLimits) -> Vec<(usize, Vio
         } else {
             run_length = 1;
         }
-        if run_length >= 9 {
-            violations.push((points[i].index, ViolationType::NineOneSide));
+        if run_length >= run {
+            violations.push((points[i].index, rule));
         }
     }
     violations
@@ -328,15 +348,17 @@ fn check_rule8(points: &[ChartPoint], limits: &ControlLimits) -> Vec<(usize, Vio
 // Selectable rule sets
 // ---------------------------------------------------------------------------
 
-/// A chosen subset of the eight run tests.
+/// A chosen subset of the run tests.
 ///
 /// Each test reports exactly one [`ViolationType`], so a rule is named by what
 /// it would report rather than by a parallel enum that would have to be kept in
 /// step with this one.
 ///
-/// [`nelson`](RuleSet::nelson) and [`western_electric`](RuleSet::western_electric)
-/// are the two named sets in the literature; any other combination is built from
-/// the tests a process actually warrants. A rule that a process is known to
+/// Three sets have names -- [`shewhart`](RuleSet::shewhart) (the 3-sigma test
+/// alone, the default), [`western_electric`](RuleSet::western_electric) and
+/// [`nelson`](RuleSet::nelson) -- and [`RuleSet::named`] looks them up by the
+/// names a wire request uses; any other combination is built from the tests a
+/// process actually warrants. A rule that a process is known to
 /// trigger for a benign reason -- a deliberately drifting tool, a bimodal
 /// fixture -- otherwise has to be filtered out downstream, after it has already
 /// been counted as an out-of-control signal.
@@ -361,49 +383,63 @@ fn check_rule8(points: &[ChartPoint], limits: &ControlLimits) -> Vec<(usize, Vio
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuleSet {
-    mask: u8,
+    mask: u16,
 }
 
-/// The eight tests, in Nelson's numbering.
-const ALL_RULES: [ViolationType; 8] = [
-    ViolationType::BeyondLimits,
-    ViolationType::NineOneSide,
-    ViolationType::SixTrend,
-    ViolationType::FourteenAlternating,
-    ViolationType::TwoOfThreeBeyond2Sigma,
-    ViolationType::FourOfFiveBeyond1Sigma,
-    ViolationType::FifteenWithin1Sigma,
-    ViolationType::EightBeyond1Sigma,
-];
-
-fn bit_of(v: ViolationType) -> u8 {
-    match v {
-        ViolationType::BeyondLimits => 1 << 0,
-        ViolationType::NineOneSide => 1 << 1,
-        ViolationType::SixTrend => 1 << 2,
-        ViolationType::FourteenAlternating => 1 << 3,
-        ViolationType::TwoOfThreeBeyond2Sigma => 1 << 4,
-        ViolationType::FourOfFiveBeyond1Sigma => 1 << 5,
-        ViolationType::FifteenWithin1Sigma => 1 << 6,
-        ViolationType::EightBeyond1Sigma => 1 << 7,
-    }
+fn bit_of(v: ViolationType) -> u16 {
+    let position = ViolationType::ALL
+        .iter()
+        .position(|&r| r == v)
+        .expect("ViolationType::ALL lists every variant");
+    1 << position
 }
 
 impl RuleSet {
-    /// All eight tests -- Nelson (1984). This is what every chart applies unless
-    /// told otherwise, so the default behaviour is unchanged.
-    pub fn nelson() -> Self {
-        Self { mask: u8::MAX }
+    /// The names [`RuleSet::named`] takes, in the order a refusal lists them.
+    pub const NAMES: [&'static str; 3] = ["shewhart", "western_electric", "nelson"];
+
+    /// The 3-sigma test alone -- Shewhart's criterion, and the default.
+    ///
+    /// In routine monitoring each added test raises the false alarm rate of an
+    /// in-control process (ISO 7870-2:2023, 8.2.7), so the supplementary tests
+    /// are chosen, not assumed.
+    pub fn shewhart() -> Self {
+        Self::from_iter([ViolationType::BeyondLimits])
     }
 
-    /// The four Western Electric tests: Nelson rules 1, 2, 5 and 6.
-    pub fn western_electric() -> Self {
+    /// Nelson's eight tests (1984).
+    pub fn nelson() -> Self {
         Self::from_iter([
             ViolationType::BeyondLimits,
             ViolationType::NineOneSide,
+            ViolationType::SixTrend,
+            ViolationType::FourteenAlternating,
             ViolationType::TwoOfThreeBeyond2Sigma,
             ViolationType::FourOfFiveBeyond1Sigma,
+            ViolationType::FifteenWithin1Sigma,
+            ViolationType::EightBeyond1Sigma,
         ])
+    }
+
+    /// The four Western Electric tests (1956): Nelson rules 1, 5 and 6, and
+    /// eight points in a row on one side of the centre line.
+    pub fn western_electric() -> Self {
+        Self::from_iter([
+            ViolationType::BeyondLimits,
+            ViolationType::TwoOfThreeBeyond2Sigma,
+            ViolationType::FourOfFiveBeyond1Sigma,
+            ViolationType::EightOneSide,
+        ])
+    }
+
+    /// The set a name in [`RuleSet::NAMES`] stands for.
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "shewhart" => Some(Self::shewhart()),
+            "western_electric" => Some(Self::western_electric()),
+            "nelson" => Some(Self::nelson()),
+            _ => None,
+        }
     }
 
     /// The empty set: no run test is applied.
@@ -432,9 +468,9 @@ impl RuleSet {
         self
     }
 
-    /// The tests in this set, in Nelson's numbering.
+    /// The tests in this set, in the order of [`ViolationType::ALL`].
     pub fn iter(&self) -> impl Iterator<Item = ViolationType> + '_ {
-        ALL_RULES.into_iter().filter(|&r| self.contains(r))
+        ViolationType::ALL.into_iter().filter(|&r| self.contains(r))
     }
 
     /// How many tests this set applies.
@@ -449,16 +485,15 @@ impl RuleSet {
 }
 
 impl Default for RuleSet {
-    /// [`RuleSet::nelson`] -- the behaviour every chart had before rule
-    /// selection existed.
+    /// [`RuleSet::shewhart`] -- the 3-sigma test alone.
     fn default() -> Self {
-        Self::nelson()
+        Self::shewhart()
     }
 }
 
 impl FromIterator<ViolationType> for RuleSet {
     fn from_iter<I: IntoIterator<Item = ViolationType>>(iter: I) -> Self {
-        let mut mask = 0u8;
+        let mut mask = 0u16;
         for v in iter {
             mask |= bit_of(v);
         }
@@ -472,7 +507,12 @@ impl RunRule for RuleSet {
         for rule in self.iter() {
             results.extend(match rule {
                 ViolationType::BeyondLimits => check_rule1(points, limits),
-                ViolationType::NineOneSide => check_rule2(points, limits),
+                ViolationType::NineOneSide => {
+                    check_one_side(points, limits, 9, ViolationType::NineOneSide)
+                }
+                ViolationType::EightOneSide => {
+                    check_one_side(points, limits, 8, ViolationType::EightOneSide)
+                }
                 ViolationType::SixTrend => check_rule3(points, limits),
                 ViolationType::FourteenAlternating => check_rule4(points, limits),
                 ViolationType::TwoOfThreeBeyond2Sigma => check_rule5(points, limits),
@@ -492,8 +532,6 @@ impl RunRule for RuleSet {
 
 impl RunRule for WesternElectricRules {
     /// Apply the 4 Western Electric run rules.
-    ///
-    /// These correspond to Nelson Rules 1, 2, 5, and 6.
     fn check(&self, points: &[ChartPoint], limits: &ControlLimits) -> Vec<(usize, ViolationType)> {
         RuleSet::western_electric().check(points, limits)
     }
@@ -570,13 +608,14 @@ mod tests {
         assert_eq!(RuleSet::western_electric().len(), 4);
         for r in [
             ViolationType::BeyondLimits,
-            ViolationType::NineOneSide,
             ViolationType::TwoOfThreeBeyond2Sigma,
             ViolationType::FourOfFiveBeyond1Sigma,
+            ViolationType::EightOneSide,
         ] {
             assert!(RuleSet::western_electric().contains(r), "{r:?} missing");
         }
         for r in [
+            ViolationType::NineOneSide,
             ViolationType::SixTrend,
             ViolationType::FourteenAlternating,
             ViolationType::FifteenWithin1Sigma,
@@ -668,7 +707,7 @@ mod tests {
         // 9 points above center line
         let values: Vec<f64> = (0..9).map(|_| 26.0).collect();
         let points = make_points(&values);
-        let violations = check_rule2(&points, &limits);
+        let violations = check_one_side(&points, &limits, 9, ViolationType::NineOneSide);
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].1, ViolationType::NineOneSide);
     }
@@ -682,7 +721,7 @@ mod tests {
         };
         let values: Vec<f64> = (0..8).map(|_| 26.0).collect();
         let points = make_points(&values);
-        let violations = check_rule2(&points, &limits);
+        let violations = check_one_side(&points, &limits, 9, ViolationType::NineOneSide);
         assert!(violations.is_empty());
     }
 
@@ -695,8 +734,68 @@ mod tests {
         };
         let values: Vec<f64> = (0..9).map(|_| 24.0).collect();
         let points = make_points(&values);
-        let violations = check_rule2(&points, &limits);
+        let violations = check_one_side(&points, &limits, 9, ViolationType::NineOneSide);
         assert_eq!(violations.len(), 1);
+    }
+
+    // --- Western Electric run rule: 8 on one side ---
+
+    /// Eight points above the centre line: the Western Electric set signals at
+    /// the eighth point, Nelson's (nine) does not -- the one test where the two
+    /// sets disagree.
+    #[test]
+    fn western_electric_run_is_eight_points_nelson_is_nine() {
+        let limits = ControlLimits {
+            ucl: 30.0,
+            cl: 25.0,
+            lcl: 20.0,
+        };
+        let points = make_points(&[26.0; 8]);
+
+        let we = RuleSet::western_electric().check(&points, &limits);
+        assert_eq!(we, vec![(7, ViolationType::EightOneSide)]);
+        assert!(RuleSet::nelson().check(&points, &limits).is_empty());
+        assert_eq!(WesternElectricRules.check(&points, &limits), we);
+
+        // Seven is not a run for either.
+        let seven = make_points(&[26.0; 7]);
+        assert!(RuleSet::western_electric()
+            .check(&seven, &limits)
+            .is_empty());
+    }
+
+    /// The default set is the 3-sigma test alone: a run that both named sets
+    /// flag is not a signal until a set asks for it.
+    #[test]
+    fn default_set_is_the_three_sigma_test() {
+        let limits = ControlLimits {
+            ucl: 30.0,
+            cl: 25.0,
+            lcl: 20.0,
+        };
+        let mut values = vec![26.0; 12];
+        values.push(31.0);
+        let points = make_points(&values);
+
+        assert_eq!(RuleSet::default(), RuleSet::shewhart());
+        assert_eq!(
+            RuleSet::default().check(&points, &limits),
+            vec![(12, ViolationType::BeyondLimits)]
+        );
+        assert!(RuleSet::nelson().check(&points, &limits).len() > 1);
+    }
+
+    #[test]
+    fn named_sets_round_trip_and_names_round_trip() {
+        for name in RuleSet::NAMES {
+            assert!(RuleSet::named(name).is_some(), "{name}");
+        }
+        assert_eq!(RuleSet::named("weco"), None);
+        for v in ViolationType::ALL {
+            assert_eq!(ViolationType::from_name(v.name()), Some(v));
+        }
+        let all: RuleSet = ViolationType::ALL.into_iter().collect();
+        assert_eq!(all.len(), ViolationType::ALL.len());
     }
 
     // --- Rule 3: 6 trending ---
@@ -923,7 +1022,7 @@ mod tests {
         };
         let values: Vec<f64> = (0..10).map(|_| 26.0).collect();
         let points = make_points(&values);
-        let violations = check_rule2(&points, &limits);
+        let violations = check_one_side(&points, &limits, 9, ViolationType::NineOneSide);
         // Should fire at index 8 and 9
         assert_eq!(violations.len(), 2);
         assert_eq!(violations[0].0, 8);

@@ -45,15 +45,17 @@ pub struct ChartPoint {
     pub violations: Vec<ViolationType>,
 }
 
-/// Types of control chart violations based on Nelson's eight rules.
+/// Types of control chart violations: Nelson's eight tests, and the Western
+/// Electric run rule where it differs from Nelson's.
 ///
-/// Each variant corresponds to one of Nelson's tests for special causes
-/// of variation.
+/// Each variant is one test for special causes of variation, and its
+/// [`name`](ViolationType::name) is the name it goes by on the wire.
 ///
 /// # Reference
 ///
 /// Nelson, L.S. (1984). "The Shewhart Control Chart — Tests for Special Causes",
 /// *Journal of Quality Technology* 16(4), pp. 237-239.
+/// Western Electric (1956). *Statistical Quality Control Handbook*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViolationType {
     /// Point beyond control limits (Nelson Rule 1).
@@ -95,6 +97,47 @@ pub enum ViolationType {
     ///
     /// Indicates a mixture pattern — points avoid the center zone.
     EightBeyond1Sigma,
+
+    /// 8 points in a row on same side of center line (Western Electric rule 4).
+    ///
+    /// The Western Electric handbook's run rule; Nelson's Rule 2
+    /// ([`NineOneSide`](ViolationType::NineOneSide)) asks for nine.
+    EightOneSide,
+}
+
+impl ViolationType {
+    /// Every test: Nelson's eight in his numbering, then Western Electric's run rule.
+    pub const ALL: [ViolationType; 9] = [
+        ViolationType::BeyondLimits,
+        ViolationType::NineOneSide,
+        ViolationType::SixTrend,
+        ViolationType::FourteenAlternating,
+        ViolationType::TwoOfThreeBeyond2Sigma,
+        ViolationType::FourOfFiveBeyond1Sigma,
+        ViolationType::FifteenWithin1Sigma,
+        ViolationType::EightBeyond1Sigma,
+        ViolationType::EightOneSide,
+    ];
+
+    /// The name a point's violations and a request's rules use for this test.
+    pub fn name(self) -> &'static str {
+        match self {
+            ViolationType::BeyondLimits => "BeyondLimits",
+            ViolationType::NineOneSide => "NineOneSide",
+            ViolationType::SixTrend => "SixTrend",
+            ViolationType::FourteenAlternating => "FourteenAlternating",
+            ViolationType::TwoOfThreeBeyond2Sigma => "TwoOfThreeBeyond2Sigma",
+            ViolationType::FourOfFiveBeyond1Sigma => "FourOfFiveBeyond1Sigma",
+            ViolationType::FifteenWithin1Sigma => "FifteenWithin1Sigma",
+            ViolationType::EightBeyond1Sigma => "EightBeyond1Sigma",
+            ViolationType::EightOneSide => "EightOneSide",
+        }
+    }
+
+    /// The test a [`name`](ViolationType::name) stands for.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.name() == name)
+    }
 }
 
 /// A violation detected on the chart.

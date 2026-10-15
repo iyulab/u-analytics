@@ -363,15 +363,18 @@ fn read_number_rows(value: &JsValue, param: &'static str) -> Result<Vec<Vec<f64>
 ///
 /// # Options (optional second argument)
 ///
-/// `{ rules?: string[] }` -- which run tests to apply. Names are the same
-/// values that appear in each point's `violations`, so the set is written in
-/// the vocabulary the output already uses:
+/// `{ rules?: RuleSetName | RunRule[] }` -- which run tests to apply: a named
+/// set (`"shewhart"` -- the 3-sigma test alone; `"western_electric"`;
+/// `"nelson"` -- all eight of Nelson's), or the tests spelt out by the names
+/// that appear in each point's `violations`:
 /// `BeyondLimits`, `NineOneSide`, `SixTrend`, `FourteenAlternating`,
 /// `TwoOfThreeBeyond2Sigma`, `FourOfFiveBeyond1Sigma`, `FifteenWithin1Sigma`,
-/// `EightBeyond1Sigma`.
+/// `EightBeyond1Sigma`, `EightOneSide` (Western Electric's eight-point run;
+/// Nelson's is `NineOneSide`).
 ///
-/// Omitted, `undefined`, `null`, or an object without `rules` all mean all
-/// eight (Nelson), which is what this binding did before the option existed.
+/// Omitted, `undefined`, `null`, or an object without `rules` all mean
+/// `"shewhart"`: every added test raises the false alarm rate of a stable
+/// process, so the supplementary tests are asked for, not assumed.
 /// `{ rules: [] }` applies none, leaving control limits only.
 #[wasm_bindgen(unchecked_return_type = "XbarRChartDto")]
 pub fn xbar_r_chart(
@@ -399,7 +402,7 @@ pub fn xbar_r_chart(
 ///
 /// # Options (optional second argument)
 ///
-/// `{ rules?: string[] }`, exactly as for [`xbar_r_chart`].
+/// `{ rules?: RuleSetName | RunRule[] }`, exactly as for [`xbar_r_chart`].
 #[wasm_bindgen(unchecked_return_type = "XbarSChartDto")]
 pub fn xbar_s_chart(
     #[wasm_bindgen(unchecked_param_type = "number[][]")] data: JsValue,
@@ -424,7 +427,7 @@ pub fn xbar_s_chart(
 ///
 /// # Options (optional second argument)
 ///
-/// `{ rules?: string[] }`, exactly as for [`xbar_r_chart`].
+/// `{ rules?: RuleSetName | RunRule[] }`, exactly as for [`xbar_r_chart`].
 #[wasm_bindgen(unchecked_return_type = "ImrChartDto")]
 pub fn imr_chart(
     #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] values: JsValue,
@@ -444,7 +447,7 @@ pub fn imr_chart(
 ///
 /// - `values`: `[x1, x2, ...]`
 /// - `limits`: `{ ucl, cl, lcl }` with `lcl <= cl <= ucl`
-/// - `options` (optional): `{ rules?: string[] }`, as for [`xbar_r_chart`]
+/// - `options` (optional): `{ rules?: RuleSetName | RunRule[] }`, as for [`xbar_r_chart`]
 ///
 /// # Output JSON
 ///
@@ -471,10 +474,12 @@ pub fn run_rules(
 #[wasm_bindgen(typescript_custom_section)]
 const OPTIONS_TS: &'static str = r#"
 /** A run test, by the name a point's `violations` reports it under. */
-export type RunRule = "BeyondLimits" | "NineOneSide" | "SixTrend" | "FourteenAlternating" | "TwoOfThreeBeyond2Sigma" | "FourOfFiveBeyond1Sigma" | "FifteenWithin1Sigma" | "EightBeyond1Sigma";
-/** Which run tests to apply. Omitted or `null`: all eight. `[]`: none. */
+export type RunRule = "BeyondLimits" | "NineOneSide" | "SixTrend" | "FourteenAlternating" | "TwoOfThreeBeyond2Sigma" | "FourOfFiveBeyond1Sigma" | "FifteenWithin1Sigma" | "EightBeyond1Sigma" | "EightOneSide";
+/** A named set of run tests: the 3-sigma test alone, Western Electric's four, or Nelson's eight. */
+export type RuleSetName = "shewhart" | "western_electric" | "nelson";
+/** Which run tests to apply: a named set, or the tests spelt out. Omitted or `null`: `"shewhart"`. `[]`: none. */
 export interface RuleOptions {
-    rules?: RunRule[] | null;
+    rules?: RuleSetName | RunRule[] | null;
 }
 /** A known centre line from a Phase I study. */
 export interface PChartOptions {
@@ -1764,20 +1769,46 @@ mod binding_contract_tests {
 
     // --- rules option on xbar_r_chart ---
 
-    /// Every way of not asking for a rule set must mean the set the binding
-    /// applied before the option existed. A caller that never passes options is
-    /// the common case, and it must not have changed.
+    /// Every way of not asking for a rule set means the 3-sigma test alone.
     #[test]
-    fn rules_option_absent_means_the_default_set() {
-        use crate::spc::RuleSet;
+    fn rules_option_absent_means_the_shewhart_set() {
+        use crate::spc::{RuleSet, ViolationType};
         for absent in [
             None,
             Some(serde_json::Value::Null),
             Some(serde_json::json!({})),
             Some(serde_json::json!({ "rules": null })),
         ] {
-            assert_eq!(rules_from_json(absent).unwrap(), RuleSet::default());
+            let set = rules_from_json(absent).unwrap();
+            assert_eq!(set, RuleSet::shewhart());
+            assert_eq!(
+                set.iter().collect::<Vec<_>>(),
+                [ViolationType::BeyondLimits]
+            );
         }
+    }
+
+    /// A set's name selects exactly that set; Western Electric's run rule is
+    /// eight points, not Nelson's nine.
+    #[test]
+    fn rules_option_names_a_set() {
+        use crate::spc::{RuleSet, ViolationType};
+        for (name, set) in [
+            ("shewhart", RuleSet::shewhart()),
+            ("western_electric", RuleSet::western_electric()),
+            ("nelson", RuleSet::nelson()),
+        ] {
+            assert_eq!(
+                rules_from_json(Some(serde_json::json!({ "rules": name }))).unwrap(),
+                set
+            );
+        }
+        let we = RuleSet::western_electric();
+        assert!(we.contains(ViolationType::EightOneSide));
+        assert!(!we.contains(ViolationType::NineOneSide));
+        assert_eq!(we.len(), 4);
+        assert_eq!(RuleSet::nelson().len(), 8);
+        assert!(!RuleSet::nelson().contains(ViolationType::EightOneSide));
     }
 
     #[test]
@@ -1815,15 +1846,29 @@ mod binding_contract_tests {
             err.details[0],
             ("got", crate::wire::Detail::Text("Rule1".into()))
         );
+        let rule_names: Vec<&str> = crate::spc::ViolationType::ALL
+            .iter()
+            .map(|v| v.name())
+            .collect();
+        assert_eq!(
+            err.details[1],
+            ("expected", crate::wire::Detail::List(rule_names))
+        );
+        // A string names a set, not a test.
+        let err =
+            rules_from_json(Some(serde_json::json!({ "rules": "BeyondLimits" }))).unwrap_err();
+        assert_eq!(
+            (err.code, err.parameter.as_deref()),
+            ("unknown_option", Some("rules"))
+        );
         assert_eq!(
             err.details[1],
             (
                 "expected",
-                crate::wire::Detail::List(crate::wire::RULE_NAMES.to_vec())
+                crate::wire::Detail::List(crate::spc::RuleSet::NAMES.to_vec())
             )
         );
-        let err =
-            rules_from_json(Some(serde_json::json!({ "rules": "BeyondLimits" }))).unwrap_err();
+        let err = rules_from_json(Some(serde_json::json!({ "rules": 3 }))).unwrap_err();
         assert_eq!(err.code, "malformed_input");
         assert!(err.message.contains("array"), "{err}");
     }

@@ -77,6 +77,18 @@ public class RequestContractTests
         ["XbarSChart"] = c => c.XbarSChart(Subgroups, AllRules),
         ["ImrChart"] = c => c.ImrChart(Series, AllRules),
         ["RunRules"] = c => c.RunRules([0, 1, 4, 0.5, -0.2, 3.5], 3, 0, -3, AllRules),
+        ["XbarRChart(Shewhart)"] = c => c.XbarRChart(Subgroups, RunRuleSet.Shewhart),
+        ["XbarSChart(WesternElectric)"] = c => c.XbarSChart(Subgroups, RunRuleSet.WesternElectric),
+        ["ImrChart(Nelson)"] = c => c.ImrChart(Series, RunRuleSet.Nelson),
+        ["RunRules(Shewhart)"] = c => c.RunRules([0, 1, 4, 0.5, -0.2, 3.5], 3, 0, -3, RunRuleSet.Shewhart),
+        ["RunRules(WesternElectric)"] = c => c.RunRules([0, 1, 4, 0.5, -0.2, 3.5], 3, 0, -3, RunRuleSet.WesternElectric),
+        ["RunRules(Nelson)"] = c => c.RunRules([0, 1, 4, 0.5, -0.2, 3.5], 3, 0, -3, RunRuleSet.Nelson),
+        ["XbarRChart(WesternElectric)"] = c => c.XbarRChart(Subgroups, RunRuleSet.WesternElectric),
+        ["XbarRChart(Nelson)"] = c => c.XbarRChart(Subgroups, RunRuleSet.Nelson),
+        ["XbarSChart(Shewhart)"] = c => c.XbarSChart(Subgroups, RunRuleSet.Shewhart),
+        ["XbarSChart(Nelson)"] = c => c.XbarSChart(Subgroups, RunRuleSet.Nelson),
+        ["ImrChart(Shewhart)"] = c => c.ImrChart(Series, RunRuleSet.Shewhart),
+        ["ImrChart(WesternElectric)"] = c => c.ImrChart(Series, RunRuleSet.WesternElectric),
         ["PChart"] = c => c.PChart([[3, 50], [5, 50], [2, 40]], pBar: 0.08),
         ["LaneyPChart"] = c => c.LaneyPChart([[3, 50], [5, 50], [2, 40]], pBar: 0.08, phi: 1.2),
         ["NpChart"] = c => c.NpChart([3, 5, 2, 4, 6], 50),
@@ -230,6 +242,7 @@ public class RequestContractTests
     public void Each_option_is_a_name_the_engine_reads()
     {
         Assert.Equal(RequestKeys.Names("uanalytics_xbar_r_chart", "$.rules[]"), Names(AllRules, AnalyticsJson.Default.RunRule));
+        Assert.Equal(RequestKeys.Names("uanalytics_xbar_r_chart", "$.rules"), Names(Enum.GetValues<RunRuleSet>(), AnalyticsJson.Default.RunRuleSet));
         Assert.Equal(RequestKeys.Names("uanalytics_adf_test", "$.model"), Names(Enum.GetValues<AdfModel>(), AnalyticsJson.Default.AdfModel));
         Assert.Equal(RequestKeys.Names("uanalytics_detect_changepoints", "$.cost"), Names(Enum.GetValues<PeltCost>(), AnalyticsJson.Default.PeltCost));
         Assert.Equal(RequestKeys.Names("uanalytics_correlation_matrix", "$.method"), Names(Enum.GetValues<CorrelationMethod>(), AnalyticsJson.Default.CorrelationMethod));

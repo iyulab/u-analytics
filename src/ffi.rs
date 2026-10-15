@@ -142,9 +142,9 @@ fn ffi_catch(
 struct SpcChartRequest {
     subgroups: Vec<Vec<f64>>,
     /// Which run tests to apply, as the WASM binding's optional second
-    /// argument takes them: `{ "rules": ["BeyondLimits", ...] }`. Absent means
-    /// all eight Nelson tests, which is what this entry point did before the
-    /// option existed anywhere.
+    /// argument takes them: a named set (`"rules": "western_electric"`) or the
+    /// tests spelt out (`"rules": ["BeyondLimits", ...]`). Absent means
+    /// `"shewhart"`, the 3-sigma test alone.
     #[serde(default)]
     rules: Option<serde_json::Value>,
 }
@@ -2536,13 +2536,13 @@ mod tests {
             &serde_json::json!({ "subgroups": groups }).to_string(),
         );
         assert_eq!(code, 0, "{body}");
-        let wire = crate::wire::xbar_s_dto(groups, RuleSet::nelson()).unwrap();
+        let wire = crate::wire::xbar_s_dto(groups, RuleSet::shewhart()).unwrap();
         assert_eq!(body, serde_json::to_value(&wire).unwrap());
 
         let values: Vec<f64> = (0..20).map(|i| 10.0 + 0.3 * ((i * 7) % 5) as f64).collect();
         let (code, body) = call(
             uanalytics_imr_chart,
-            &serde_json::json!({ "values": values }).to_string(),
+            &serde_json::json!({ "values": values, "rules": "nelson" }).to_string(),
         );
         assert_eq!(code, 0, "{body}");
         let wire = crate::wire::imr_dto(values.clone(), RuleSet::nelson()).unwrap();
@@ -2551,13 +2551,14 @@ mod tests {
         let limits = serde_json::json!({ "ucl": 11.0, "cl": 10.5, "lcl": 10.0 });
         let (code, body) = call(
             uanalytics_run_rules,
-            &serde_json::json!({ "values": values, "limits": limits }).to_string(),
+            &serde_json::json!({ "values": values, "limits": limits, "rules": "western_electric" })
+                .to_string(),
         );
         assert_eq!(code, 0, "{body}");
         let wire = crate::wire::run_rules_dto(
             values,
             serde_json::from_value(limits).unwrap(),
-            RuleSet::nelson(),
+            RuleSet::western_electric(),
         )
         .unwrap();
         assert_eq!(body, serde_json::to_value(&wire).unwrap());
@@ -2597,16 +2598,16 @@ mod tests {
 
     #[test]
     fn xbar_r_honours_the_rules_option_like_the_wasm_binding() {
-        // A steady upward drift trips Nelson's trend test under the default
-        // rule set. `rules: []` keeps only the limit check -- as the WASM
-        // binding documents it -- so no pattern test may fire.
+        // A steady upward drift trips Nelson's trend test. `rules: []` keeps
+        // only the limit check -- as the WASM binding documents it -- so no
+        // pattern test may fire.
         let groups: Vec<Vec<f64>> = (0..12)
             .map(|g| {
                 let base = 10.0 + 0.05 * g as f64;
                 vec![base - 0.3, base + 0.2, base - 0.1, base + 0.4]
             })
             .collect();
-        let with_nelson = serde_json::json!({ "subgroups": groups });
+        let with_nelson = serde_json::json!({ "subgroups": groups, "rules": "nelson" });
         let limits_only = serde_json::json!({ "subgroups": groups, "rules": [] });
 
         let (code, body) = call(uanalytics_xbar_r_chart, &with_nelson.to_string());

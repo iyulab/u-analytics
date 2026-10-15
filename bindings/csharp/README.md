@@ -61,7 +61,8 @@ Every method returns a record (`XbarRChartResult`, `CapabilityResult`, `TrendTes
 whose properties are the engine's result fields. A value the inputs do not define — a
 short-term index without a within-subgroup sigma, a t ratio of an exact fit — is `null`
 on a nullable property. Closed vocabularies are enums: `RunRule` (the run tests a chart
-applies and reports), `TrendDirection`, `SigmaSource`, `GageStatus`, and the options
+applies and reports), `RunRuleSet` (the named sets — `Shewhart`, the default; `WesternElectric`;
+`Nelson`), `TrendDirection`, `SigmaSource`, `GageStatus`, and the options
 `AdfModel`, `PeltCost` and `CorrelationMethod`.
 
 Input that cannot be analysed is refused rather than approximated: `AnalyticsException`

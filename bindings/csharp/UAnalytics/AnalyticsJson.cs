@@ -49,6 +49,7 @@ namespace UAnalytics;
 [JsonSerializable(typeof(ValueBody))]
 [JsonSerializable(typeof(ValuesBody))]
 [JsonSerializable(typeof(RunRule))]
+[JsonSerializable(typeof(RunRuleSet))]
 [JsonSerializable(typeof(AdfModel))]
 [JsonSerializable(typeof(PeltCost))]
 [JsonSerializable(typeof(CorrelationMethod))]

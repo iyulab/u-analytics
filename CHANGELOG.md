@@ -8,6 +8,37 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- **Run-test sets by name**: `rules` takes the name of a set as well as the tests
+  spelt out — `"shewhart"` (the 3-sigma test alone), `"western_electric"`,
+  `"nelson"` — on `xbar_r_chart`, `xbar_s_chart`, `imr_chart` and `run_rules`
+  (WebAssembly `RuleSetName`, C ABI, .NET `RunRuleSet` overloads); an unknown name
+  is `unknown_option` with the three names as `expected`. Rust: `RuleSet::shewhart`,
+  `RuleSet::named` and `RuleSet::NAMES`.
+- `EightOneSide` (`ViolationType::EightOneSide`, .NET `RunRule.EightOneSide`):
+  eight points in a row on one side of the centre line — the Western Electric run
+  rule. `ViolationType::ALL`, `name` and `from_name` give the wire vocabulary.
+
+### Changed
+
+- **Breaking:** a chart applies the 3-sigma test alone unless asked for more
+  (`rules` omitted or `null`, Rust `RuleSet::default()`); it applied all eight of
+  Nelson's tests. Each added test raises the false alarm rate of a process that is
+  in control, and in routine monitoring the supplementary tests are a choice, not
+  a default (ISO 7870-2:2023, 8.2.7). Migrate: to keep the previous behaviour pass
+  `{ rules: "nelson" }` (.NET `RunRuleSet.Nelson`, Rust `with_rules(RuleSet::nelson())`).
+
+### Fixed
+
+- The Western Electric set applied Nelson's run of **nine** points on one side;
+  the Western Electric handbook's rule is **eight** (NIST/SEMATECH e-Handbook
+  6.3.2). `RuleSet::western_electric()` and `WesternElectricRules` now apply
+  `EightOneSide` in its place, so a run of exactly eight is signalled. The .NET
+  `RunRule` documentation said the first four tests were Western Electric's; they
+  are Nelson's 1–4, and Western Electric's are Nelson's 1, 5 and 6 with the
+  eight-point run.
+
 ## [0.22.0] - 2026-10-14
 
 ### Changed

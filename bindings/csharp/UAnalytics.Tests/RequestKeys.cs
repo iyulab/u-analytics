@@ -110,7 +110,8 @@ internal static class RequestKeys
             }
             Read(variant, rest, at, places, problems);
         }
-        else if (node["items"] is JsonObject items)
+        // A place may take a name or an array of other names (a named set, or its members spelt out).
+        else if (node["items"] is JsonObject items && (value is JsonArray || node["enum"] is null))
         {
             if (value is not JsonArray a)
             {

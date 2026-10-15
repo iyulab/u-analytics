@@ -139,41 +139,19 @@ pub(crate) struct LaneyPChartDto {
     pub(crate) points: Vec<AttributeChartPointDto>,
 }
 
-pub(crate) fn violation_name(v: crate::spc::ViolationType) -> &'static str {
-    use crate::spc::ViolationType;
-    match v {
-        ViolationType::BeyondLimits => "BeyondLimits",
-        ViolationType::NineOneSide => "NineOneSide",
-        ViolationType::SixTrend => "SixTrend",
-        ViolationType::FourteenAlternating => "FourteenAlternating",
-        ViolationType::TwoOfThreeBeyond2Sigma => "TwoOfThreeBeyond2Sigma",
-        ViolationType::FourOfFiveBeyond1Sigma => "FourOfFiveBeyond1Sigma",
-        ViolationType::FifteenWithin1Sigma => "FifteenWithin1Sigma",
-        ViolationType::EightBeyond1Sigma => "EightBeyond1Sigma",
-    }
-}
-
-/// Every run-rule name `rules` accepts — the values `violations` reports.
-pub(crate) const RULE_NAMES: &[&str] = &[
-    "BeyondLimits",
-    "NineOneSide",
-    "SixTrend",
-    "FourteenAlternating",
-    "TwoOfThreeBeyond2Sigma",
-    "FourOfFiveBeyond1Sigma",
-    "FifteenWithin1Sigma",
-    "EightBeyond1Sigma",
-];
-
-/// Parse an optional `{ rules: [...] }` options object into a rule set.
+/// Parse an optional `{ rules }` options object into a rule set.
 ///
-/// Absent, `undefined`, `null` or an object without `rules` all mean "the
-/// default set", so a caller that never passes options keeps the behaviour it
-/// had. Split out from the binding so it can be exercised without a `JsValue`.
+/// `rules` is the name of a set (`"shewhart"`, `"western_electric"`,
+/// `"nelson"`) or an array of test names -- the values `violations` reports.
+/// Absent, `undefined`, `null` or an object without `rules` all mean the
+/// default set, [`RuleSet::shewhart`](crate::spc::RuleSet::shewhart). Split out
+/// from the binding so it can be exercised without a `JsValue`.
 pub(crate) fn rules_from_json(
     options: Option<serde_json::Value>,
 ) -> Result<crate::spc::RuleSet, WireError> {
     use crate::spc::{RuleSet, ViolationType};
+
+    const EXPECTED: &str = "rules: expected the name of a rule set or an array of rule names";
 
     let Some(value) = options else {
         return Ok(RuleSet::default());
@@ -187,37 +165,23 @@ pub(crate) fn rules_from_json(
     if names.is_null() {
         return Ok(RuleSet::default());
     }
-    let names = names.as_array().ok_or_else(|| {
-        WireError::new(
-            code::MALFORMED_INPUT,
-            None,
-            "rules: expected an array of rule names",
-        )
-        .about("rules")
-    })?;
+    if let Some(set) = names.as_str() {
+        return RuleSet::named(set)
+            .ok_or_else(|| WireError::unknown_option("rules", set, &RuleSet::NAMES));
+    }
+    let names = names
+        .as_array()
+        .ok_or_else(|| WireError::new(code::MALFORMED_INPUT, None, EXPECTED).about("rules"))?;
+    let rule_names: Vec<&str> = ViolationType::ALL.iter().map(|v| v.name()).collect();
 
     let mut set = RuleSet::none();
     for name in names {
-        let name = name.as_str().ok_or_else(|| {
-            WireError::new(
-                code::MALFORMED_INPUT,
-                None,
-                "rules: expected an array of rule names",
-            )
-            .about("rules")
-        })?;
-        let rule = match name {
-            "BeyondLimits" => ViolationType::BeyondLimits,
-            "NineOneSide" => ViolationType::NineOneSide,
-            "SixTrend" => ViolationType::SixTrend,
-            "FourteenAlternating" => ViolationType::FourteenAlternating,
-            "TwoOfThreeBeyond2Sigma" => ViolationType::TwoOfThreeBeyond2Sigma,
-            "FourOfFiveBeyond1Sigma" => ViolationType::FourOfFiveBeyond1Sigma,
-            "FifteenWithin1Sigma" => ViolationType::FifteenWithin1Sigma,
-            "EightBeyond1Sigma" => ViolationType::EightBeyond1Sigma,
-            // The names are the values `violations` reports.
-            other => return Err(WireError::unknown_option("rules", other, RULE_NAMES)),
-        };
+        let name = name
+            .as_str()
+            .ok_or_else(|| WireError::new(code::MALFORMED_INPUT, None, EXPECTED).about("rules"))?;
+        // The names are the values `violations` reports.
+        let rule = ViolationType::from_name(name)
+            .ok_or_else(|| WireError::unknown_option("rules", name, &rule_names))?;
         set = set.with(rule);
     }
     Ok(set)
@@ -229,11 +193,7 @@ pub(crate) fn point_dtos(points: &[crate::spc::ChartPoint]) -> Vec<ChartPointDto
         .map(|p| ChartPointDto {
             index: p.index,
             value: p.value,
-            violations: p
-                .violations
-                .iter()
-                .map(|&v| violation_name(v).to_owned())
-                .collect(),
+            violations: p.violations.iter().map(|&v| v.name().to_owned()).collect(),
         })
         .collect()
 }

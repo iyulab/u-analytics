@@ -13,7 +13,7 @@ hypothesis testing for industrial quality engineering.
 
 | Module | Description |
 |--------|-------------|
-| `spc` | Control charts (X̄-R, X̄-S, I-MR, P, NP, C, U, Laney P'/U', G, T) with selectable run tests (`RuleSet`; Nelson/WE presets), subgroups n=2..=25 |
+| `spc` | Control charts (X̄-R, X̄-S, I-MR, P, NP, C, U, Laney P'/U', G, T) with selectable run tests (`RuleSet`; Shewhart/Western Electric/Nelson sets), subgroups n=2..=25 |
 | `capability` | Process capability indices (Cp, Cpk, Pp, Ppk, Cpm), sigma level, and Box-Cox non-normal capability |
 | `weibull` | Weibull parameter estimation (MLE, MRR) and reliability analysis (R(t), MTBF, B-life) |
 | `point_process` | Event-time trend of one unit (a repairable system's failures, a service's incidents): Laplace and MIL-HDBK-189 tests against a constant rate, power-law process (Crow-AMSAA) fit |
@@ -35,7 +35,7 @@ Control charts for monitoring process stability:
 - **Attributes charts**: P, NP, C, U
 - **Overdispersion-adjusted**: Laney P' and U' (φ coefficient corrects for between-subgroup variation)
 - **Rare events**: G chart (geometric distribution) and T chart (exponential) for low-defect processes
-- **Run rules**: Nelson (8 rules), Western Electric (4 rules)
+- **Run rules**: Nelson (8 rules), Western Electric (4 rules — its run rule is eight points on one side, Nelson's nine); the 3-sigma test alone by default
 
 ```rust
 use u_analytics::spc::{XBarRChart, ControlChart};
@@ -375,47 +375,60 @@ indices that need both limits (`cp`, `pp`, `cpm`) come back `null`.
 
 ### Choosing which run tests apply
 
-All eight Nelson tests run by default. A process that is known to trip one of
-them for a benign reason -- a deliberately drifting tool, a bimodal fixture --
-otherwise has to have that signal filtered out downstream, after it has already
-been counted as out of control. `xbar_r_chart` takes an optional second
-argument naming the tests to apply:
+By default a chart applies the 3-sigma test alone (`"shewhart"`). Every added
+test raises the false alarm rate of a process that is in control, so the
+supplementary tests -- useful while a process is being brought into control --
+are asked for rather than assumed (ISO 7870-2:2023, 8.2.7). `xbar_r_chart`
+takes an optional second argument: the name of a set, or the tests spelt out.
 
 ```js
-// Western Electric only
-xbar_r_chart(subgroups, { rules: [
-  "BeyondLimits", "NineOneSide", "TwoOfThreeBeyond2Sigma", "FourOfFiveBeyond1Sigma",
-]});
+// Western Electric's four tests
+xbar_r_chart(subgroups, { rules: "western_electric" });
 
-// Control limits and nothing else
+// Nelson's eight
+xbar_r_chart(subgroups, { rules: "nelson" });
+
+// Exactly these tests
+xbar_r_chart(subgroups, { rules: ["BeyondLimits", "SixTrend"] });
+
+// Control limits and nothing else -- no test at all
 xbar_r_chart(subgroups, { rules: [] });
 ```
 
-The names are the same values each point's `violations` reports, so the set is
-written in the vocabulary the output already uses: `BeyondLimits`,
-`NineOneSide`, `SixTrend`, `FourteenAlternating`, `TwoOfThreeBeyond2Sigma`,
-`FourOfFiveBeyond1Sigma`, `FifteenWithin1Sigma`, `EightBeyond1Sigma`.
+| set | tests |
+|---|---|
+| `"shewhart"` (default) | `BeyondLimits` |
+| `"western_electric"` | `BeyondLimits`, `TwoOfThreeBeyond2Sigma`, `FourOfFiveBeyond1Sigma`, `EightOneSide` |
+| `"nelson"` | `BeyondLimits`, `NineOneSide`, `SixTrend`, `FourteenAlternating`, `TwoOfThreeBeyond2Sigma`, `FourOfFiveBeyond1Sigma`, `FifteenWithin1Sigma`, `EightBeyond1Sigma` |
+
+The two published sets differ in their run on one side of the centre line:
+eight points in the Western Electric handbook (`EightOneSide`), nine in Nelson's
+list (`NineOneSide`). The test names are the same values each point's
+`violations` reports, so a spelt-out set is written in the vocabulary the output
+already uses.
 
 Omitting the argument -- or passing `undefined`, `null`, or an object without
-`rules` -- applies all eight, so existing calls are unaffected. In Rust the same
-choice is `RuleSet`, passed to a chart with `with_rules`.
+`rules` -- means `"shewhart"`. In Rust the same choice is `RuleSet`
+(`RuleSet::western_electric()`, `RuleSet::named("nelson")`, ...), passed to a
+chart with `with_rules`.
 
 ### X-bar-S and Individual-MR charts
 
 ```ts
 type RuleName = "BeyondLimits" | "NineOneSide" | "SixTrend" | "FourteenAlternating"
               | "TwoOfThreeBeyond2Sigma" | "FourOfFiveBeyond1Sigma"
-              | "FifteenWithin1Sigma" | "EightBeyond1Sigma";
+              | "FifteenWithin1Sigma" | "EightBeyond1Sigma" | "EightOneSide";
+type RuleSetName = "shewhart" | "western_electric" | "nelson";
 type Point = { index: number, value: number, violations: RuleName[] };
 
-xbar_s_chart(subgroups: number[][], options?: { rules?: RuleName[] }): {
+xbar_s_chart(subgroups: number[][], options?: { rules?: RuleSetName | RuleName[] }): {
   xbar_cl: number, xbar_ucl: number, xbar_lcl: number,
   s_cl: number, s_ucl: number, s_lcl: number,
   sigma_hat: number | null,      // S-bar / c4
   xbar_points: Point[], s_points: Point[], in_control: boolean,
 }
 
-imr_chart(values: number[], options?: { rules?: RuleName[] }): {
+imr_chart(values: number[], options?: { rules?: RuleSetName | RuleName[] }): {
   i_cl: number, i_ucl: number, i_lcl: number,
   mr_cl: number, mr_ucl: number, mr_lcl: number,
   sigma_hat: number | null,      // MR-bar / d2(2)
@@ -438,7 +451,7 @@ since skipping it would shift the index of every point after it.
 run_rules(
   values: number[],
   limits: { ucl: number, cl: number, lcl: number },   // lcl <= cl <= ucl
-  options?: { rules?: RuleName[] },
+  options?: { rules?: RuleSetName | RuleName[] },
 ): Point[]   // one entry per value, in input order
 ```
 
@@ -500,7 +513,7 @@ chart, Montgomery §7.2.2):
 
 ```js
 const chart = p_chart(samples)
-run_rules(chart.points.map(p => p.z), { ucl: 3, cl: 0, lcl: -3 })
+run_rules(chart.points.map(p => p.z), { ucl: 3, cl: 0, lcl: -3 }, { rules: "western_electric" })
 ```
 
 These charts judge each point against its limits only; for an NP or C chart,

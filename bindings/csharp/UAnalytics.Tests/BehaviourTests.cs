@@ -69,6 +69,21 @@ public class BehaviourTests
     }
 
     [Fact]
+    public void Named_sets_are_the_engines_and_the_default_is_the_three_sigma_test()
+    {
+        // Eight points above the centre line: Western Electric's run (eight) fires at the
+        // eighth, Nelson's (nine) does not, and the default -- the 3-sigma test -- sees nothing.
+        double[] eight = [1, 1, 1, 1, 1, 1, 1, 1];
+        var we = _client.RunRules(eight, 3, 0, -3, RunRuleSet.WesternElectric);
+        Assert.Equal([RunRule.EightOneSide], we[7].Violations);
+        Assert.All(_client.RunRules(eight, 3, 0, -3, RunRuleSet.Nelson), p => Assert.Empty(p.Violations));
+        Assert.All(_client.RunRules(eight, 3, 0, -3), p => Assert.Empty(p.Violations));
+        Assert.Equal(
+            _client.RunRules(eight, 3, 0, -3, RunRuleSet.Shewhart).Select(p => p.Violations.Count),
+            _client.RunRules(eight, 3, 0, -3).Select(p => p.Violations.Count));
+    }
+
+    [Fact]
     public void Options_reach_the_engine()
     {
         double[][] variables = [[1, 2, 3, 4, 5, 6], [1, 3, 2, 5, 4, 6]];

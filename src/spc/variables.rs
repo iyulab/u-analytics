@@ -246,9 +246,9 @@ pub struct XBarRChart {
 impl XBarRChart {
     /// Apply only the given run tests when computing limits.
     ///
-    /// Defaults to [`RuleSet::nelson`], so a chart built without calling this
-    /// behaves exactly as before. Existing points are re-evaluated, so the
-    /// call may be made at any time.
+    /// Defaults to [`RuleSet::shewhart`] -- the 3-sigma test alone; the
+    /// supplementary tests raise the false alarm rate and are asked for here.
+    /// Existing points are re-evaluated, so the call may be made at any time.
     ///
     /// # Examples
     ///
@@ -256,7 +256,7 @@ impl XBarRChart {
     /// use u_analytics::spc::{XBarRChart, ControlChart, RuleSet, ViolationType};
     ///
     /// let chart = XBarRChart::new(5).expect("5 is within range")
-    ///     .with_rules(RuleSet::western_electric().without(ViolationType::NineOneSide));
+    ///     .with_rules(RuleSet::nelson().without(ViolationType::FourteenAlternating));
     /// ```
     #[must_use]
     pub fn with_rules(mut self, rules: RuleSet) -> Self {
@@ -405,13 +405,13 @@ impl XBarRChart {
             })
             .collect();
 
-        // Apply Nelson rules to X-bar chart
+        // Apply the chart's run tests to the X-bar chart
         if let Some(ref limits) = self.xbar_limits {
             let violations = self.rules.check(&self.xbar_points, limits);
             apply_violations(&mut self.xbar_points, &violations);
         }
 
-        // Apply Nelson rules to R chart
+        // Apply the chart's run tests to the R chart
         if let Some(ref limits) = self.r_limits {
             let violations = self.rules.check(&self.r_points, limits);
             apply_violations(&mut self.r_points, &violations);
@@ -505,9 +505,9 @@ pub struct XBarSChart {
 impl XBarSChart {
     /// Apply only the given run tests when computing limits.
     ///
-    /// Defaults to [`RuleSet::nelson`], so a chart built without calling this
-    /// behaves exactly as before. Existing points are re-evaluated, so the
-    /// call may be made at any time.
+    /// Defaults to [`RuleSet::shewhart`] -- the 3-sigma test alone; the
+    /// supplementary tests raise the false alarm rate and are asked for here.
+    /// Existing points are re-evaluated, so the call may be made at any time.
     ///
     /// # Examples
     ///
@@ -515,7 +515,7 @@ impl XBarSChart {
     /// use u_analytics::spc::{XBarSChart, ControlChart, RuleSet, ViolationType};
     ///
     /// let chart = XBarSChart::new(5).expect("5 is within range")
-    ///     .with_rules(RuleSet::western_electric().without(ViolationType::NineOneSide));
+    ///     .with_rules(RuleSet::nelson().without(ViolationType::FourteenAlternating));
     /// ```
     #[must_use]
     pub fn with_rules(mut self, rules: RuleSet) -> Self {
@@ -661,13 +661,13 @@ impl XBarSChart {
             })
             .collect();
 
-        // Apply Nelson rules to X-bar chart
+        // Apply the chart's run tests to the X-bar chart
         if let Some(ref limits) = self.xbar_limits {
             let violations = self.rules.check(&self.xbar_points, limits);
             apply_violations(&mut self.xbar_points, &violations);
         }
 
-        // Apply Nelson rules to S chart
+        // Apply the chart's run tests to the S chart
         if let Some(ref limits) = self.s_limits {
             let violations = self.rules.check(&self.s_points, limits);
             apply_violations(&mut self.s_points, &violations);
@@ -760,9 +760,9 @@ pub struct IndividualMRChart {
 impl IndividualMRChart {
     /// Apply only the given run tests when computing limits.
     ///
-    /// Defaults to [`RuleSet::nelson`], so a chart built without calling this
-    /// behaves exactly as before. Existing points are re-evaluated, so the
-    /// call may be made at any time.
+    /// Defaults to [`RuleSet::shewhart`] -- the 3-sigma test alone; the
+    /// supplementary tests raise the false alarm rate and are asked for here.
+    /// Existing points are re-evaluated, so the call may be made at any time.
     ///
     /// # Examples
     ///
@@ -770,7 +770,7 @@ impl IndividualMRChart {
     /// use u_analytics::spc::{IndividualMRChart, ControlChart, RuleSet, ViolationType};
     ///
     /// let chart = IndividualMRChart::new()
-    ///     .with_rules(RuleSet::western_electric().without(ViolationType::NineOneSide));
+    ///     .with_rules(RuleSet::nelson().without(ViolationType::FourteenAlternating));
     /// ```
     #[must_use]
     pub fn with_rules(mut self, rules: RuleSet) -> Self {
@@ -893,13 +893,13 @@ impl IndividualMRChart {
             })
             .collect();
 
-        // Apply Nelson rules to I chart
+        // Apply the chart's run tests to the I chart
         if let Some(ref limits) = self.i_limits {
             let violations = self.rules.check(&self.i_points, limits);
             apply_violations(&mut self.i_points, &violations);
         }
 
-        // Apply Nelson rules to MR chart
+        // Apply the chart's run tests to the MR chart
         if let Some(ref limits) = self.mr_limits {
             let violations = self.rules.check(&self.mr_points, limits);
             apply_violations(&mut self.mr_points, &violations);
