@@ -3428,6 +3428,17 @@ pub(crate) mod reliability {
         pub(crate) failure_times: Vec<f64>,
     }
 
+    /// `{ failure_times, suspension_times? }` — the C ABI request of the MLE,
+    /// which also takes right-censored units.
+    #[cfg(feature = "ffi")]
+    #[derive(Deserialize, Debug)]
+    #[serde(deny_unknown_fields)]
+    pub(crate) struct WeibullMleRequestDto {
+        pub(crate) failure_times: Vec<f64>,
+        #[serde(default)]
+        pub(crate) suspension_times: Vec<f64>,
+    }
+
     /// Weibull maximum-likelihood fit.
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
@@ -3456,9 +3467,16 @@ pub(crate) mod reliability {
         .about("failure_times")
     }
 
-    pub(crate) fn weibull_mle_dto(times: &[f64]) -> Result<WeibullMleDto, WireError> {
+    /// `suspensions` are right-censored units -- still running, or removed
+    /// unfailed, at that time; empty fits the failures alone.
+    pub(crate) fn weibull_mle_dto(
+        times: &[f64],
+        suspensions: &[f64],
+    ) -> Result<WeibullMleDto, WireError> {
         positive_values("failure_times", times, 2)?;
-        let r = crate::weibull::weibull_mle(times).ok_or_else(|| degenerate("weibull_mle"))?;
+        positive_values("suspension_times", suspensions, 0)?;
+        let r = crate::weibull::weibull_mle_censored(times, suspensions)
+            .ok_or_else(|| degenerate("weibull_mle"))?;
         Ok(WeibullMleDto {
             shape: r.shape,
             scale: r.scale,
@@ -3683,7 +3701,15 @@ pub(crate) mod reliability {
 
         #[test]
         fn weibull_fits_refuse_with_the_place() {
-            let e = weibull_mle_dto(&[10.0, -1.0]).unwrap_err();
+            let e = weibull_mle_dto(&[10.0, 20.0], &[30.0, -1.0]).unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref(), e.index),
+                ("non_positive_data", Some("suspension_times"), Some(1))
+            );
+            let fit = weibull_mle_dto(&[55.0, 187.0, 216.0], &[361.0, 373.0]).unwrap();
+            let alone = weibull_mle_dto(&[55.0, 187.0, 216.0], &[]).unwrap();
+            assert!(fit.scale > alone.scale);
+            let e = weibull_mle_dto(&[10.0, -1.0], &[]).unwrap_err();
             assert_eq!(
                 (e.code, e.index, e.parameter.as_deref()),
                 ("non_positive_data", Some(1), Some("failure_times"))
@@ -3695,7 +3721,7 @@ pub(crate) mod reliability {
                 e.details,
                 vec![("min", Detail::Num(2.0)), ("got", Detail::Num(1.0))]
             );
-            let e = weibull_mle_dto(&[5.0, 5.0, 5.0]).unwrap_err();
+            let e = weibull_mle_dto(&[5.0, 5.0, 5.0], &[]).unwrap_err();
             assert_eq!(e.code, "invalid_input");
             let ok = weibull_mrr_dto(&[150.0, 200.0, 250.0, 300.0, 350.0, 400.0]).unwrap();
             assert!(ok.shape > 0.0 && ok.r_squared > 0.9);

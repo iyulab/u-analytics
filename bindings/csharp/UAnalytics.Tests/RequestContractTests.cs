@@ -107,7 +107,7 @@ public class RequestContractTests
         ["PercentileCapability(Beta)"] = c => c.PercentileCapability([.. Series.Select(v => v / 20)], 0.55, 0.45, DistributionFamily.Beta),
         ["GageRRXbarR"] = c => c.GageRRXbarR(Gage(), tolerance: 10),
         ["GageRRAnova"] = c => c.GageRRAnova(Gage(), tolerance: 10),
-        ["WeibullMle"] = c => c.WeibullMle(Positive),
+        ["WeibullMle"] = c => c.WeibullMle(Positive, [95.0, 95.0, 100.0]),
         ["WeibullMrr"] = c => c.WeibullMrr(Positive),
         ["WeibullReliability"] = c => c.WeibullReliability(2, 100, [50, 100], [0.1]),
         ["BoxCoxCapability"] = c => c.BoxCoxCapability(Positive, 120, 5, (-2, 2)),

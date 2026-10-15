@@ -1537,12 +1537,25 @@ pub fn ppm_to_sigma(ppm: f64) -> Result<f64, JsValue> {
 
 /// Weibull maximum-likelihood fit of failure times (each finite and `> 0`,
 /// at least 2): `{ shape, scale, log_likelihood, iterations }`.
+///
+/// `suspension_times` (optional) are right-censored units -- still running, or
+/// removed unfailed, at that time. They enter the likelihood through their
+/// survival term; leaving them out of a field data set biases the scale (and
+/// every B-life and MTBF from it) low.
 #[wasm_bindgen(unchecked_return_type = "WeibullMleDto")]
 pub fn weibull_mle(
     #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] failure_times: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "number[] | Float64Array | null")]
+    suspension_times: Option<JsValue>,
 ) -> Result<JsValue, JsValue> {
     let times = read_numbers(&failure_times, "failure_times").map_err(js_err)?;
-    to_js(&weibull_mle_dto(&times).map_err(js_err)?)
+    let suspensions = match suspension_times {
+        Some(s) if !s.is_undefined() && !s.is_null() => {
+            read_numbers(&s, "suspension_times").map_err(js_err)?
+        }
+        _ => Vec::new(),
+    };
+    to_js(&weibull_mle_dto(&times, &suspensions).map_err(js_err)?)
 }
 
 /// Weibull median-rank-regression fit (Bernard's ranks): `{ shape, scale,

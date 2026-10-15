@@ -266,11 +266,14 @@ public sealed class AnalyticsClient : IDisposable
 
     /// <summary>
     /// Weibull maximum-likelihood fit of <paramref name="failureTimes"/> (each finite and &gt; 0,
-    /// at least 2). Returns <c>shape</c>, <c>scale</c>, <c>log_likelihood</c>, <c>iterations</c>.
+    /// at least 2). <paramref name="suspensionTimes"/> are right-censored units — still running,
+    /// or removed unfailed, at that time; leaving them out biases the scale low. Returns
+    /// <c>shape</c>, <c>scale</c>, <c>log_likelihood</c>, <c>iterations</c>.
     /// </summary>
-    public WeibullMleResult WeibullMle(double[] failureTimes)
+    public WeibullMleResult WeibullMle(double[] failureTimes, double[]? suspensionTimes = null)
         => Call(NativeInterop.uanalytics_weibull_mle, AnalyticsJson.Default.WeibullMleResult,
-            ("failure_times", Request.Nums("failure_times", failureTimes)));
+            ("failure_times", Request.Nums("failure_times", failureTimes)),
+            ("suspension_times", suspensionTimes is null ? null : Request.Nums("suspension_times", suspensionTimes)));
 
     /// <summary>
     /// Weibull median-rank-regression fit (Bernard's ranks). Returns <c>shape</c>,

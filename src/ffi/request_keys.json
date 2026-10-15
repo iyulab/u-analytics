@@ -415,7 +415,8 @@
     },
     "uanalytics_weibull_mle": {
       "properties": {
-        "failure_times": {}
+        "failure_times": {},
+        "suspension_times": {}
       }
     },
     "uanalytics_weibull_mrr": {

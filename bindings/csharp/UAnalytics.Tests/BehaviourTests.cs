@@ -69,6 +69,18 @@ public class BehaviourTests
     }
 
     [Fact]
+    public void Survivors_lengthen_the_weibull_scale()
+    {
+        double[] failures = [55, 187, 216, 240, 244, 335];
+        var alone = _client.WeibullMle(failures);
+        var withSurvivors = _client.WeibullMle(failures, [361, 373, 375, 386]);
+        Assert.True(withSurvivors.Scale > alone.Scale);
+        var e = Assert.Throws<AnalyticsException>(() => _client.WeibullMle(failures, [10, -1]));
+        Assert.Equal("suspension_times", e.Parameter);
+        Assert.Equal(1, e.Index);
+    }
+
+    [Fact]
     public void Capability_intervals_bracket_the_indices()
     {
         double[] data = [9.8, 10.1, 10.0, 9.9, 10.2, 10.3, 9.7, 10.0, 10.1, 9.9, 10.4, 9.6, 10.0, 10.2, 9.8];

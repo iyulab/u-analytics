@@ -2,7 +2,8 @@
 //!
 //! Uses the Newton-Raphson method to find the shape parameter beta that
 //! maximizes the Weibull log-likelihood, then derives the scale parameter
-//! analytically.
+//! analytically. Right-censored observations (units still running --
+//! suspensions) enter the likelihood through their survival term.
 
 /// Result of Weibull MLE fitting.
 #[derive(Debug, Clone)]
@@ -82,20 +83,76 @@ const TOL: f64 = 1e-10;
 /// assert!(result.log_likelihood.is_finite());
 /// ```
 pub fn weibull_mle(failure_times: &[f64]) -> Option<WeibullMleResult> {
-    let n = failure_times.len();
-    if n < 2 {
+    weibull_mle_censored(failure_times, &[])
+}
+
+/// Weibull MLE from failure times and right-censored times (suspensions).
+///
+/// A suspension is a unit removed, or still running, at time `c` without
+/// having failed: it contributes its survival probability `exp(-(c/η)^β)` to
+/// the likelihood rather than a density. Dropping suspensions -- fitting the
+/// failures alone -- biases the scale low (the survivors' running time is
+/// ignored) and with it every B-life and MTBF taken from the fit. With `r`
+/// failures and the sums over **every** unit (failures and suspensions):
+///
+/// ```text
+/// L(β, η) = r·ln(β) − r·β·ln(η) + (β−1)·Σ_fail ln(tᵢ) − Σ_all (tᵢ/η)^β
+/// η_hat   = (Σ_all tᵢ^β / r)^(1/β)
+/// f(β)    = r/β + Σ_fail ln(tᵢ) − r · S₁/S₀ = 0
+/// ```
+///
+/// with `S₀ = Σ_all tᵢ^β`, `S₁ = Σ_all tᵢ^β·ln(tᵢ)` -- the same Newton-Raphson
+/// iteration as [`weibull_mle`], which is this function with no suspensions.
+///
+/// # Reference
+/// Lawless, J.F. (2003). *Statistical Models and Methods for Lifetime Data*,
+/// 2nd ed., §4.2 (censored Weibull likelihood). Abernethy, R.B. (2006).
+/// *The New Weibull Handbook*, 5th ed., ch. 5 (suspensions).
+///
+/// # Returns
+/// `None` if there are fewer than 2 failures, any time is non-positive or
+/// non-finite, or the iteration does not converge.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::weibull::{weibull_mle, weibull_mle_censored};
+/// let failures = [120.0, 190.0, 260.0, 310.0, 400.0];
+/// let survivors = [450.0, 450.0, 450.0]; // still running at 450 h
+///
+/// let fit = weibull_mle_censored(&failures, &survivors).unwrap();
+/// let ignored = weibull_mle(&failures).unwrap();
+/// // The survivors' running time lengthens the characteristic life.
+/// assert!(fit.scale > ignored.scale);
+/// ```
+pub fn weibull_mle_censored(
+    failure_times: &[f64],
+    suspension_times: &[f64],
+) -> Option<WeibullMleResult> {
+    let r = failure_times.len();
+    if r < 2 {
         return None;
     }
 
     // Validate: all values must be positive and finite
-    if !failure_times.iter().all(|&t| t.is_finite() && t > 0.0) {
+    if !failure_times
+        .iter()
+        .chain(suspension_times)
+        .all(|&t| t.is_finite() && t > 0.0)
+    {
         return None;
     }
 
-    // Pre-compute ln(t_i)
-    let ln_t: Vec<f64> = failure_times.iter().map(|t| t.ln()).collect();
-    let sum_ln_t: f64 = ln_t.iter().sum();
-    let n_f = n as f64;
+    // Every unit's time and its log -- the sums S0..S2 run over all of them;
+    // only the failures' logs enter the density term.
+    let all: Vec<f64> = failure_times
+        .iter()
+        .chain(suspension_times)
+        .copied()
+        .collect();
+    let ln_t: Vec<f64> = all.iter().map(|t| t.ln()).collect();
+    let sum_ln_t: f64 = ln_t[..r].iter().sum();
+    let n_f = r as f64;
 
     // Newton-Raphson to solve the profile likelihood equation for beta.
     // f(beta) = n/beta + sum(ln(t_i)) - n * S1 / S0
@@ -115,7 +172,7 @@ pub fn weibull_mle(failure_times: &[f64]) -> Option<WeibullMleResult> {
         let mut s1 = 0.0_f64;
         let mut s2 = 0.0_f64;
 
-        for (i, &t) in failure_times.iter().enumerate() {
+        for (i, &t) in all.iter().enumerate() {
             let t_beta = t.powf(beta);
             let lt = ln_t[i];
             s0 += t_beta;
@@ -151,8 +208,8 @@ pub fn weibull_mle(failure_times: &[f64]) -> Option<WeibullMleResult> {
         }
     }
 
-    // Compute scale parameter: eta = (sum(t_i^beta) / n)^(1/beta)
-    let s0: f64 = failure_times.iter().map(|t| t.powf(beta)).sum();
+    // Compute scale parameter: eta = (sum over all units of t_i^beta / r)^(1/beta)
+    let s0: f64 = all.iter().map(|t| t.powf(beta)).sum();
     let eta = (s0 / n_f).powf(1.0 / beta);
 
     if !eta.is_finite() || eta <= 0.0 {
@@ -161,10 +218,7 @@ pub fn weibull_mle(failure_times: &[f64]) -> Option<WeibullMleResult> {
 
     // Compute log-likelihood at the fitted parameters
     let log_likelihood = n_f * beta.ln() - n_f * beta * eta.ln() + (beta - 1.0) * sum_ln_t
-        - failure_times
-            .iter()
-            .map(|&t| (t / eta).powf(beta))
-            .sum::<f64>();
+        - all.iter().map(|&t| (t / eta).powf(beta)).sum::<f64>();
 
     Some(WeibullMleResult {
         shape: beta,
@@ -177,6 +231,82 @@ pub fn weibull_mle(failure_times: &[f64]) -> Option<WeibullMleResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- Right censoring ------------------------------------------------
+
+    /// The censored log-likelihood, written out independently of the fit.
+    fn censored_loglik(f: &[f64], s: &[f64], beta: f64, eta: f64) -> f64 {
+        let r = f.len() as f64;
+        r * beta.ln() - r * beta * eta.ln() + (beta - 1.0) * f.iter().map(|t| t.ln()).sum::<f64>()
+            - f.iter().chain(s).map(|t| (t / eta).powf(beta)).sum::<f64>()
+    }
+
+    const FAILURES: [f64; 6] = [55.0, 187.0, 216.0, 240.0, 244.0, 335.0];
+    const SUSPENSIONS: [f64; 4] = [361.0, 373.0, 375.0, 386.0];
+
+    /// The fit is the maximum of that likelihood: every step away from it in
+    /// shape or scale lowers it, and the reported value is it.
+    #[test]
+    fn censored_fit_maximises_the_censored_likelihood() {
+        let fit = weibull_mle_censored(&FAILURES, &SUSPENSIONS).expect("converges");
+        let best = censored_loglik(&FAILURES, &SUSPENSIONS, fit.shape, fit.scale);
+        assert!((fit.log_likelihood - best).abs() < 1e-9);
+        for (db, de) in [
+            (0.01, 0.0),
+            (-0.01, 0.0),
+            (0.0, 1.0),
+            (0.0, -1.0),
+            (0.01, 1.0),
+        ] {
+            let other = censored_loglik(&FAILURES, &SUSPENSIONS, fit.shape + db, fit.scale + de);
+            assert!(other < best, "({db}, {de}): {other} >= {best}");
+        }
+    }
+
+    /// No suspensions: exactly the uncensored fit (one path, not two).
+    #[test]
+    fn no_suspensions_is_the_uncensored_fit() {
+        let a = weibull_mle_censored(&FAILURES, &[]).unwrap();
+        let b = weibull_mle(&FAILURES).unwrap();
+        assert_eq!(
+            (a.shape, a.scale, a.log_likelihood),
+            (b.shape, b.scale, b.log_likelihood)
+        );
+    }
+
+    /// Survivors lengthen the characteristic life; later survivors more so.
+    #[test]
+    fn suspensions_lengthen_the_scale() {
+        let without = weibull_mle(&FAILURES).unwrap().scale;
+        let with = weibull_mle_censored(&FAILURES, &SUSPENSIONS).unwrap().scale;
+        let later: Vec<f64> = SUSPENSIONS.iter().map(|t| t * 2.0).collect();
+        let longer = weibull_mle_censored(&FAILURES, &later).unwrap().scale;
+        assert!(without < with && with < longer, "{without} {with} {longer}");
+    }
+
+    /// Exponential check: with β fixed at 1 the censored MLE of the mean is
+    /// total time on test over failures. The fitted shape is not exactly 1,
+    /// so compare the score at β = 1 instead: zero exactly when η = TTT / r.
+    #[test]
+    fn exponential_special_case_is_time_on_test_over_failures() {
+        let ttt: f64 = FAILURES.iter().chain(&SUSPENSIONS).sum();
+        let eta = ttt / FAILURES.len() as f64;
+        // d/dη of the log-likelihood at β = 1: −r/η + Σ t / η² = 0 at η = TTT / r.
+        let score = -(FAILURES.len() as f64) / eta + ttt / (eta * eta);
+        assert!(score.abs() < 1e-12);
+        let h = 1e-6;
+        let numeric = (censored_loglik(&FAILURES, &SUSPENSIONS, 1.0, eta + h)
+            - censored_loglik(&FAILURES, &SUSPENSIONS, 1.0, eta - h))
+            / (2.0 * h);
+        assert!(numeric.abs() < 1e-6, "{numeric}");
+    }
+
+    #[test]
+    fn censored_input_is_checked() {
+        assert!(weibull_mle_censored(&[10.0], &[20.0, 30.0]).is_none()); // one failure
+        assert!(weibull_mle_censored(&[10.0, 20.0], &[0.0]).is_none());
+        assert!(weibull_mle_censored(&[10.0, 20.0], &[f64::NAN]).is_none());
+    }
 
     #[test]
     fn test_mle_uniform_spacing() {

@@ -25,6 +25,13 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   into Cp/Cpk intervals without the caller tabulating them. David's (1951)
   approximation for R̄/d2 and S̄/c4, Wheeler's `0.62 (n − 1)` for the moving range.
 
+- **Right-censored Weibull MLE**: `weibull_mle` takes `suspension_times` — units
+  still running, or removed unfailed, at that time — which enter the likelihood
+  through their survival term (WebAssembly second argument, C ABI
+  `suspension_times`, .NET `WeibullMle(failureTimes, suspensionTimes)`, Rust
+  `weibull_mle_censored`). Field life data almost always has survivors; fitting
+  the failures alone biases the scale, and every B-life and MTBF from it, low.
+
 ### Fixed
 
 - The README declared the charts' `sigma_hat` as `number | null`; it is always a

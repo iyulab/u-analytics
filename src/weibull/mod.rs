@@ -5,7 +5,8 @@
 //!
 //! # Modules
 //!
-//! - [`weibull_mle`] — Newton-Raphson MLE for shape and scale parameters
+//! - [`weibull_mle`] — Newton-Raphson MLE for shape and scale parameters;
+//!   [`weibull_mle_censored`] with right-censored units (suspensions)
 //! - [`weibull_mrr`] — Median Rank Regression via Benard's approximation
 //! - [`ReliabilityAnalysis`] — R(t), hazard rate, MTBF, B-life from fitted parameters
 //!
@@ -18,6 +19,6 @@ mod mle;
 mod mrr;
 mod reliability;
 
-pub use mle::{weibull_mle, WeibullMleResult};
+pub use mle::{weibull_mle, weibull_mle_censored, WeibullMleResult};
 pub use mrr::{weibull_mrr, WeibullMrrResult};
 pub use reliability::ReliabilityAnalysis;

@@ -873,11 +873,12 @@ struct PpmRequest {
 }
 
 wire_export!(
-    /// Weibull maximum-likelihood fit: `{failure_times}` → `{shape, scale,
-    /// log_likelihood, iterations}`.
+    /// Weibull maximum-likelihood fit: `{failure_times, suspension_times?}` →
+    /// `{shape, scale, log_likelihood, iterations}`; suspensions are
+    /// right-censored units.
     uanalytics_weibull_mle,
-    crate::wire::reliability::FailureTimesDto,
-    |r| crate::wire::reliability::weibull_mle_dto(&r.failure_times)
+    crate::wire::reliability::WeibullMleRequestDto,
+    |r| crate::wire::reliability::weibull_mle_dto(&r.failure_times, &r.suspension_times)
 );
 
 wire_export!(
