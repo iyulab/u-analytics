@@ -75,6 +75,8 @@ public class BehaviourTests
         var alone = _client.WeibullMle(failures);
         var withSurvivors = _client.WeibullMle(failures, [361, 373, 375, 386]);
         Assert.True(withSurvivors.Scale > alone.Scale);
+        Assert.InRange(withSurvivors.Shape, withSurvivors.Intervals.Shape.Lower, withSurvivors.Intervals.Shape.Upper);
+        Assert.Equal(0.95, withSurvivors.Intervals.Confidence);
         var e = Assert.Throws<AnalyticsException>(() => _client.WeibullMle(failures, [10, -1]));
         Assert.Equal("suspension_times", e.Parameter);
         Assert.Equal(1, e.Index);

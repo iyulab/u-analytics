@@ -5,6 +5,8 @@
 //! analytically. Right-censored observations (units still running --
 //! suspensions) enter the likelihood through their survival term.
 
+use u_numflow::special::inverse_normal_cdf;
+
 /// Result of Weibull MLE fitting.
 #[derive(Debug, Clone)]
 pub struct WeibullMleResult {
@@ -16,6 +18,94 @@ pub struct WeibullMleResult {
     pub log_likelihood: f64,
     /// Number of Newton-Raphson iterations used.
     pub iterations: usize,
+    /// Asymptotic covariance of `(shape, scale)`: the inverse of the observed
+    /// Fisher information at the fit, censored units included. Row and column
+    /// order is shape, scale.
+    pub covariance: [[f64; 2]; 2],
+}
+
+/// A two-sided confidence interval.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WeibullInterval {
+    /// Lower confidence limit.
+    pub lower: f64,
+    /// Upper confidence limit.
+    pub upper: f64,
+}
+
+impl WeibullMleResult {
+    /// Two-sided interval for the shape at `confidence` (in (0, 1)), normal
+    /// on the log scale: `β̂ · exp(∓ z · se(β̂) / β̂)` -- the usual Weibull
+    /// practice, which keeps the limits positive. `None` outside (0, 1).
+    pub fn shape_interval(&self, confidence: f64) -> Option<WeibullInterval> {
+        log_normal_interval(self.shape, self.covariance[0][0], confidence)
+    }
+
+    /// Two-sided interval for the scale (characteristic life) at
+    /// `confidence`, normal on the log scale. `None` outside (0, 1).
+    pub fn scale_interval(&self, confidence: f64) -> Option<WeibullInterval> {
+        log_normal_interval(self.scale, self.covariance[1][1], confidence)
+    }
+
+    /// The B-life -- the time by which `fraction_failed` of the population
+    /// has failed (0.1 → B10) -- with its two-sided interval at `confidence`,
+    /// by the delta method on `ln t_p = ln η + ln(−ln(1 − p)) / β`.
+    ///
+    /// Returns `(estimate, interval)`, or `None` when `fraction_failed` or
+    /// `confidence` is outside (0, 1).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::weibull::weibull_mle_censored;
+    ///
+    /// let fit = weibull_mle_censored(
+    ///     &[55.0, 187.0, 216.0, 240.0, 244.0, 335.0],
+    ///     &[361.0, 373.0, 375.0, 386.0],
+    /// )
+    /// .unwrap();
+    /// let (b10, ci) = fit.b_life_interval(0.10, 0.90).unwrap();
+    /// assert!(ci.lower < b10 && b10 < ci.upper);
+    /// ```
+    pub fn b_life_interval(
+        &self,
+        fraction_failed: f64,
+        confidence: f64,
+    ) -> Option<(f64, WeibullInterval)> {
+        if !(fraction_failed > 0.0 && fraction_failed < 1.0) {
+            return None;
+        }
+        let z = two_sided_z(confidence)?;
+        let (beta, eta) = (self.shape, self.scale);
+        let w = (-(1.0 - fraction_failed).ln()).ln();
+        let t_p = eta * (w / beta).exp();
+        // Gradient of ln t_p in (beta, eta).
+        let g = [-w / (beta * beta), 1.0 / eta];
+        let c = &self.covariance;
+        let var = g[0] * g[0] * c[0][0] + 2.0 * g[0] * g[1] * c[0][1] + g[1] * g[1] * c[1][1];
+        let half = z * var.max(0.0).sqrt();
+        Some((
+            t_p,
+            WeibullInterval {
+                lower: t_p * (-half).exp(),
+                upper: t_p * half.exp(),
+            },
+        ))
+    }
+}
+
+fn two_sided_z(confidence: f64) -> Option<f64> {
+    (confidence > 0.0 && confidence < 1.0)
+        .then(|| inverse_normal_cdf(1.0 - (1.0 - confidence) / 2.0))
+}
+
+fn log_normal_interval(estimate: f64, variance: f64, confidence: f64) -> Option<WeibullInterval> {
+    let z = two_sided_z(confidence)?;
+    let half = z * variance.max(0.0).sqrt() / estimate;
+    Some(WeibullInterval {
+        lower: estimate * (-half).exp(),
+        upper: estimate * half.exp(),
+    })
 }
 
 /// Maximum Newton-Raphson iterations.
@@ -220,17 +310,129 @@ pub fn weibull_mle_censored(
     let log_likelihood = n_f * beta.ln() - n_f * beta * eta.ln() + (beta - 1.0) * sum_ln_t
         - all.iter().map(|&t| (t / eta).powf(beta)).sum::<f64>();
 
+    let covariance = observed_covariance(&all, r, beta, eta)?;
+
     Some(WeibullMleResult {
         shape: beta,
         scale: eta,
         log_likelihood,
         iterations,
+        covariance,
     })
+}
+
+/// Inverse of the observed Fisher information of the censored Weibull
+/// log-likelihood at `(beta, eta)`. With `z = (t/η)^β` and `y = ln(t/η)` over
+/// every unit, and `r` failures:
+///
+/// ```text
+/// −∂²ℓ/∂β²   = r/β² + Σ z·y²
+/// −∂²ℓ/∂η²   = −rβ/η² + β(β+1)/η² · Σ z
+/// −∂²ℓ/∂β∂η  = r/η − Σ z/η − (β/η) · Σ z·y
+/// ```
+///
+/// `None` when the information is not positive definite (no curvature to
+/// invert -- a fit on a likelihood ridge).
+fn observed_covariance(all: &[f64], r: usize, beta: f64, eta: f64) -> Option<[[f64; 2]; 2]> {
+    let r = r as f64;
+    let (mut sz, mut szy, mut szy2) = (0.0, 0.0, 0.0);
+    for &t in all {
+        let y = (t / eta).ln();
+        let z = (beta * y).exp();
+        sz += z;
+        szy += z * y;
+        szy2 += z * y * y;
+    }
+    let i_bb = r / (beta * beta) + szy2;
+    let i_ee = -r * beta / (eta * eta) + beta * (beta + 1.0) / (eta * eta) * sz;
+    let i_be = r / eta - sz / eta - beta / eta * szy;
+    let det = i_bb * i_ee - i_be * i_be;
+    if !(det > 0.0 && i_bb > 0.0 && det.is_finite()) {
+        return None;
+    }
+    Some([[i_ee / det, -i_be / det], [-i_be / det, i_bb / det]])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- Intervals -------------------------------------------------------
+
+    /// A complete sample at the Weibull quantiles: the observed information
+    /// approaches the expected one, whose inverse is known in closed form --
+    /// n·Var(β̂)/β² → 6/π² = 0.6079 and n·Var(η̂)·β²/η² → 1 + 6(1 − γ)²/π²
+    /// = 1.1087 (Cohen 1965; γ Euler's constant).
+    #[test]
+    fn covariance_approaches_the_asymptotic_weibull_variances() {
+        let (beta, eta, n) = (2.0_f64, 100.0_f64, 2000usize);
+        let data: Vec<f64> = (1..=n)
+            .map(|i| {
+                let p = (i as f64 - 0.5) / n as f64;
+                eta * (-(1.0 - p).ln()).powf(1.0 / beta)
+            })
+            .collect();
+        let fit = weibull_mle(&data).unwrap();
+        let nf = n as f64;
+        let vb = nf * fit.covariance[0][0] / (fit.shape * fit.shape);
+        let ve = nf * fit.covariance[1][1] * fit.shape * fit.shape / (fit.scale * fit.scale);
+        let gamma = 0.577_215_664_901_532_9_f64;
+        let pi2 = std::f64::consts::PI.powi(2);
+        assert!((vb - 6.0 / pi2).abs() < 0.02, "{vb}");
+        assert!(
+            (ve - (1.0 + 6.0 * (1.0 - gamma).powi(2) / pi2)).abs() < 0.03,
+            "{ve}"
+        );
+    }
+
+    /// The covariance is the inverse of the negated Hessian of the likelihood
+    /// written out independently, by finite differences.
+    #[test]
+    fn covariance_is_the_inverse_observed_information() {
+        let fit = weibull_mle_censored(&FAILURES, &SUSPENSIONS).unwrap();
+        let (b, e) = (fit.shape, fit.scale);
+        let l = |b: f64, e: f64| censored_loglik(&FAILURES, &SUSPENSIONS, b, e);
+        let (hb, he) = (1e-4, 1e-2);
+        let d_bb = (l(b + hb, e) - 2.0 * l(b, e) + l(b - hb, e)) / (hb * hb);
+        let d_ee = (l(b, e + he) - 2.0 * l(b, e) + l(b, e - he)) / (he * he);
+        let d_be = (l(b + hb, e + he) - l(b + hb, e - he) - l(b - hb, e + he) + l(b - hb, e - he))
+            / (4.0 * hb * he);
+        let (i_bb, i_ee, i_be) = (-d_bb, -d_ee, -d_be);
+        let det = i_bb * i_ee - i_be * i_be;
+        let want = [[i_ee / det, -i_be / det], [-i_be / det, i_bb / det]];
+        for (row, wrow) in fit.covariance.iter().zip(&want) {
+            for (got, w) in row.iter().zip(wrow) {
+                assert!(
+                    (got - w).abs() <= 1e-3 * w.abs().max(1e-6),
+                    "{:?} vs {want:?}",
+                    fit.covariance
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn intervals_bracket_and_widen() {
+        let fit = weibull_mle_censored(&FAILURES, &SUSPENSIONS).unwrap();
+        let (s90, s99) = (
+            fit.shape_interval(0.90).unwrap(),
+            fit.shape_interval(0.99).unwrap(),
+        );
+        assert!(
+            s99.lower < s90.lower
+                && s90.lower < fit.shape
+                && fit.shape < s90.upper
+                && s90.upper < s99.upper
+        );
+        let c = fit.scale_interval(0.95).unwrap();
+        assert!(c.lower < fit.scale && fit.scale < c.upper && c.lower > 0.0);
+        let (b10, ci) = fit.b_life_interval(0.10, 0.95).unwrap();
+        assert!(ci.lower < b10 && b10 < ci.upper);
+        // B10 is the 10 % quantile of the fitted distribution.
+        let want = fit.scale * (-(0.9_f64).ln()).powf(1.0 / fit.shape);
+        assert!((b10 - want).abs() < 1e-9 * want);
+        assert!(fit.shape_interval(1.0).is_none() && fit.b_life_interval(0.0, 0.9).is_none());
+    }
 
     // --- Right censoring ------------------------------------------------
 

@@ -31,6 +31,13 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   `suspension_times`, .NET `WeibullMle(failureTimes, suspensionTimes)`, Rust
   `weibull_mle_censored`). Field life data almost always has survivors; fitting
   the failures alone biases the scale, and every B-life and MTBF from it, low.
+- **Weibull MLE confidence intervals**: `weibull_mle` returns `intervals` —
+  two-sided shape and scale limits at `confidence` (default 0.95), normal on the
+  log scale from the observed Fisher information, censored units included
+  (WebAssembly third argument `{ confidence }`, C ABI `confidence`, .NET
+  `WeibullMle(…, confidence)` / `WeibullMleResult.Intervals`). Rust:
+  `WeibullMleResult::covariance`, `shape_interval`, `scale_interval` and
+  `b_life_interval` (delta method).
 
 ### Fixed
 

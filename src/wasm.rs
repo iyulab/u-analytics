@@ -1542,11 +1542,18 @@ pub fn ppm_to_sigma(ppm: f64) -> Result<f64, JsValue> {
 /// removed unfailed, at that time. They enter the likelihood through their
 /// survival term; leaving them out of a field data set biases the scale (and
 /// every B-life and MTBF from it) low.
+///
+/// `options.confidence` (in (0, 1), default 0.95) sets `intervals`: two-sided
+/// `{ lower, upper }` for `shape` and `scale`, normal on the log scale from
+/// the observed Fisher information (censored units included).
 #[wasm_bindgen(unchecked_return_type = "WeibullMleDto")]
 pub fn weibull_mle(
     #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] failure_times: JsValue,
     #[wasm_bindgen(unchecked_optional_param_type = "number[] | Float64Array | null")]
     suspension_times: Option<JsValue>,
+    #[wasm_bindgen(unchecked_optional_param_type = "WeibullMleOptions | null")] options: Option<
+        JsValue,
+    >,
 ) -> Result<JsValue, JsValue> {
     let times = read_numbers(&failure_times, "failure_times").map_err(js_err)?;
     let suspensions = match suspension_times {
@@ -1555,8 +1562,30 @@ pub fn weibull_mle(
         }
         _ => Vec::new(),
     };
-    to_js(&weibull_mle_dto(&times, &suspensions).map_err(js_err)?)
+    let confidence = match options {
+        Some(o) if !o.is_undefined() && !o.is_null() => {
+            from_js::<WeibullMleOptions>(o, "options")?.confidence
+        }
+        _ => None,
+    };
+    to_js(&weibull_mle_dto(&times, &suspensions, confidence).map_err(js_err)?)
 }
+
+/// The optional third argument of [`weibull_mle`].
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WeibullMleOptions {
+    #[serde(default)]
+    confidence: Option<f64>,
+}
+
+#[wasm_bindgen(typescript_custom_section)]
+const WEIBULL_OPTIONS_TS: &'static str = r#"
+/** Confidence level of `intervals`, in (0, 1). Omitted or `null`: 0.95. */
+export interface WeibullMleOptions {
+    confidence?: number | null;
+}
+"#;
 
 /// Weibull median-rank-regression fit (Bernard's ranks): `{ shape, scale,
 /// r_squared }`. Same input as [`weibull_mle`].

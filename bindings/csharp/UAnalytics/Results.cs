@@ -256,7 +256,14 @@ public sealed record GageRRAnovaResult(
 // ── Reliability ──
 
 /// <summary>Weibull maximum-likelihood fit.</summary>
-public sealed record WeibullMleResult(double Shape, double Scale, double LogLikelihood, int Iterations);
+public sealed record WeibullMleResult(double Shape, double Scale, double LogLikelihood, int Iterations,
+    WeibullIntervals Intervals);
+
+/// <summary>
+/// Two-sided intervals of a Weibull MLE at <see cref="Confidence"/>, normal on the log scale from
+/// the observed Fisher information.
+/// </summary>
+public sealed record WeibullIntervals(double Confidence, ConfidenceInterval Shape, ConfidenceInterval Scale);
 
 /// <summary>Weibull median-rank-regression fit.</summary>
 public sealed record WeibullMrrResult(double Shape, double Scale, double RSquared);

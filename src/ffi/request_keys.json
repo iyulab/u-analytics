@@ -415,6 +415,7 @@
     },
     "uanalytics_weibull_mle": {
       "properties": {
+        "confidence": {},
         "failure_times": {},
         "suspension_times": {}
       }

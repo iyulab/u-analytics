@@ -19,6 +19,6 @@ mod mle;
 mod mrr;
 mod reliability;
 
-pub use mle::{weibull_mle, weibull_mle_censored, WeibullMleResult};
+pub use mle::{weibull_mle, weibull_mle_censored, WeibullInterval, WeibullMleResult};
 pub use mrr::{weibull_mrr, WeibullMrrResult};
 pub use reliability::ReliabilityAnalysis;

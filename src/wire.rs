@@ -3437,6 +3437,19 @@ pub(crate) mod reliability {
         pub(crate) failure_times: Vec<f64>,
         #[serde(default)]
         pub(crate) suspension_times: Vec<f64>,
+        #[serde(default)]
+        pub(crate) confidence: Option<f64>,
+    }
+
+    /// Two-sided intervals of the Weibull MLE at `confidence`, normal on the
+    /// log scale from the observed Fisher information.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct WeibullIntervalsDto {
+        pub(crate) confidence: f64,
+        pub(crate) shape: crate::wire::IntervalDto,
+        pub(crate) scale: crate::wire::IntervalDto,
     }
 
     /// Weibull maximum-likelihood fit.
@@ -3448,6 +3461,7 @@ pub(crate) mod reliability {
         pub(crate) scale: f64,
         pub(crate) log_likelihood: f64,
         pub(crate) iterations: usize,
+        pub(crate) intervals: WeibullIntervalsDto,
     }
 
     /// Weibull median-rank-regression fit.
@@ -3472,16 +3486,40 @@ pub(crate) mod reliability {
     pub(crate) fn weibull_mle_dto(
         times: &[f64],
         suspensions: &[f64],
+        confidence: Option<f64>,
     ) -> Result<WeibullMleDto, WireError> {
         positive_values("failure_times", times, 2)?;
         positive_values("suspension_times", suspensions, 0)?;
+        let confidence = confidence.unwrap_or(0.95);
+        if !(confidence > 0.0 && confidence < 1.0) {
+            return Err(WireError::out_of_range(
+                "confidence",
+                Bound::Open(0.0),
+                Bound::Open(1.0),
+                confidence,
+                format!("confidence must be strictly between 0 and 1, got {confidence}"),
+            ));
+        }
         let r = crate::weibull::weibull_mle_censored(times, suspensions)
             .ok_or_else(|| degenerate("weibull_mle"))?;
+        let interval = |i: Option<crate::weibull::WeibullInterval>| {
+            let i = i.expect("confidence was checked above");
+            crate::wire::IntervalDto {
+                lower: i.lower,
+                upper: i.upper,
+            }
+        };
+        let intervals = WeibullIntervalsDto {
+            confidence,
+            shape: interval(r.shape_interval(confidence)),
+            scale: interval(r.scale_interval(confidence)),
+        };
         Ok(WeibullMleDto {
             shape: r.shape,
             scale: r.scale,
             log_likelihood: r.log_likelihood,
             iterations: r.iterations,
+            intervals,
         })
     }
 
@@ -3701,15 +3739,23 @@ pub(crate) mod reliability {
 
         #[test]
         fn weibull_fits_refuse_with_the_place() {
-            let e = weibull_mle_dto(&[10.0, 20.0], &[30.0, -1.0]).unwrap_err();
+            let e = weibull_mle_dto(&[10.0, 20.0], &[30.0, -1.0], None).unwrap_err();
             assert_eq!(
                 (e.code, e.parameter.as_deref(), e.index),
                 ("non_positive_data", Some("suspension_times"), Some(1))
             );
-            let fit = weibull_mle_dto(&[55.0, 187.0, 216.0], &[361.0, 373.0]).unwrap();
-            let alone = weibull_mle_dto(&[55.0, 187.0, 216.0], &[]).unwrap();
+            let fit = weibull_mle_dto(&[55.0, 187.0, 216.0], &[361.0, 373.0], None).unwrap();
+            let alone = weibull_mle_dto(&[55.0, 187.0, 216.0], &[], None).unwrap();
             assert!(fit.scale > alone.scale);
-            let e = weibull_mle_dto(&[10.0, -1.0], &[]).unwrap_err();
+            assert_eq!(fit.intervals.confidence, 0.95);
+            assert!(fit.intervals.shape.lower < fit.shape && fit.shape < fit.intervals.shape.upper);
+            assert!(fit.intervals.scale.lower < fit.scale && fit.scale < fit.intervals.scale.upper);
+            let e = weibull_mle_dto(&[55.0, 187.0, 216.0], &[], Some(1.0)).unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some("confidence"))
+            );
+            let e = weibull_mle_dto(&[10.0, -1.0], &[], None).unwrap_err();
             assert_eq!(
                 (e.code, e.index, e.parameter.as_deref()),
                 ("non_positive_data", Some(1), Some("failure_times"))
@@ -3721,7 +3767,7 @@ pub(crate) mod reliability {
                 e.details,
                 vec![("min", Detail::Num(2.0)), ("got", Detail::Num(1.0))]
             );
-            let e = weibull_mle_dto(&[5.0, 5.0, 5.0], &[]).unwrap_err();
+            let e = weibull_mle_dto(&[5.0, 5.0, 5.0], &[], None).unwrap_err();
             assert_eq!(e.code, "invalid_input");
             let ok = weibull_mrr_dto(&[150.0, 200.0, 250.0, 300.0, 350.0, 400.0]).unwrap();
             assert!(ok.shape > 0.0 && ok.r_squared > 0.9);

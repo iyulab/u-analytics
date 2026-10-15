@@ -636,8 +636,11 @@ Weibull — fits of failure times (each finite and `> 0`, at least 2) and the
 reliability metrics of a fitted or known Weibull:
 
 ```ts
-weibull_mle(failure_times, suspension_times?): { shape, scale, log_likelihood, iterations }
+weibull_mle(failure_times, suspension_times?, { confidence? }?):
+  { shape, scale, log_likelihood, iterations,
+    intervals: { confidence, shape: { lower, upper }, scale: { lower, upper } } }
   // suspension_times: right-censored units (still running / removed unfailed at that time)
+  // intervals: log-normal from the observed Fisher information; confidence default 0.95
 weibull_mrr(failure_times): { shape, scale, r_squared }        // median-rank regression (Bernard)
 weibull_reliability({ shape, scale, times?: number[], fractions_failed?: number[] }):
   { mtbf, reliability: number[], hazard_rate: number[], b_life: number[] }
