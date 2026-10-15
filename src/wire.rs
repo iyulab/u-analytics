@@ -233,8 +233,12 @@ pub(crate) fn subgroup_size(subgroups: &[Vec<f64>]) -> Result<usize, WireError> 
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct WireError {
-    /// Stable, machine-readable reason (see the constants below).
+    /// Stable, machine-readable reason: the name of [`Self::reason`].
     pub(crate) code: &'static str,
+    /// The reason as the table names it -- the refusal's declared fields.
+    #[serde(skip)]
+    #[cfg_attr(feature = "wasm", tsify(skip))]
+    pub(crate) reason: Code,
     /// Position of the offending element in its input array, when there is one.
     pub(crate) index: Option<usize>,
     /// Name of the offending *option*, when the refusal is about one.
@@ -439,16 +443,131 @@ pub(crate) fn failure_site(
     (name, index)
 }
 
-/// Error codes. Kept as constants so the transports and their tests name the
-/// same strings.
+/// Every reason the crate's transports refuse with: the stable `code` a
+/// refusal carries, and the fields that can stand beside it. A [`WireError`]
+/// holds one of these (named through [`code`]), so the published list
+/// ([`Code::ALL`]) is the list the crate refuses from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Code {
+    InvalidInput,
+    MalformedInput,
+    CountNotWhole,
+    SampleSizeNotWhole,
+    DefectivesExceedSample,
+    UnitsNotPositive,
+    ValueNotFinite,
+    InsufficientData,
+    ParameterOutOfRange,
+    EmptyInput,
+    NonPositiveData,
+    NoSpecification,
+    InvalidOption,
+    DimensionMismatch,
+    UnknownOption,
+    EventsUnordered,
+    EventAfterEnd,
+}
+
+impl Code {
+    #[cfg_attr(not(feature = "wasm"), allow(dead_code))]
+    pub(crate) const ALL: [Code; 17] = [
+        Code::InvalidInput,
+        Code::MalformedInput,
+        Code::CountNotWhole,
+        Code::SampleSizeNotWhole,
+        Code::DefectivesExceedSample,
+        Code::UnitsNotPositive,
+        Code::ValueNotFinite,
+        Code::InsufficientData,
+        Code::ParameterOutOfRange,
+        Code::EmptyInput,
+        Code::NonPositiveData,
+        Code::NoSpecification,
+        Code::InvalidOption,
+        Code::DimensionMismatch,
+        Code::UnknownOption,
+        Code::EventsUnordered,
+        Code::EventAfterEnd,
+    ];
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Code::InvalidInput => "invalid_input",
+            Code::MalformedInput => "malformed_input",
+            Code::CountNotWhole => "count_not_whole",
+            Code::SampleSizeNotWhole => "sample_size_not_whole",
+            Code::DefectivesExceedSample => "defectives_exceed_sample",
+            Code::UnitsNotPositive => "units_not_positive",
+            Code::ValueNotFinite => "value_not_finite",
+            Code::InsufficientData => "insufficient_data",
+            Code::ParameterOutOfRange => "parameter_out_of_range",
+            Code::EmptyInput => "empty_input",
+            Code::NonPositiveData => "non_positive_data",
+            Code::NoSpecification => "no_specification",
+            Code::InvalidOption => "invalid_option",
+            Code::DimensionMismatch => "dimension_mismatch",
+            Code::UnknownOption => "unknown_option",
+            Code::EventsUnordered => "events_unordered",
+            Code::EventAfterEnd => "event_after_end",
+        }
+    }
+
+    /// The fields a refusal with this code can carry besides `code` and
+    /// `message` (`index` and `parameter` are always there, `null` when they
+    /// do not apply).
+    pub(crate) fn fields(self) -> &'static [&'static str] {
+        match self {
+            Code::InvalidInput => &["index", "parameter"],
+            Code::MalformedInput => &["index", "parameter"],
+            Code::CountNotWhole => &["index", "parameter"],
+            Code::SampleSizeNotWhole => &["index", "parameter"],
+            Code::DefectivesExceedSample => &["index", "parameter"],
+            Code::UnitsNotPositive => &["index", "parameter"],
+            Code::ValueNotFinite => &["index", "parameter"],
+            Code::InsufficientData => &["index", "parameter", "min", "got"],
+            Code::ParameterOutOfRange => &[
+                "index",
+                "parameter",
+                "min",
+                "max",
+                "exclusive_min",
+                "exclusive_max",
+                "got",
+            ],
+            Code::EmptyInput => &["index", "parameter"],
+            Code::NonPositiveData => &["index", "parameter", "got"],
+            Code::NoSpecification => &["index", "parameter", "expected"],
+            Code::InvalidOption => &["index", "parameter"],
+            Code::DimensionMismatch => &["index", "parameter", "expected", "got"],
+            Code::UnknownOption => &["index", "parameter", "got", "expected"],
+            Code::EventsUnordered => &["index", "parameter"],
+            Code::EventAfterEnd => &["index", "parameter"],
+        }
+    }
+}
+
+impl PartialEq<&str> for Code {
+    fn eq(&self, other: &&str) -> bool {
+        self.name() == *other
+    }
+}
+
+impl PartialEq<Code> for &str {
+    fn eq(&self, other: &Code) -> bool {
+        *self == other.name()
+    }
+}
+
+/// The codes by their constant names, as the transports and their tests name
+/// them.
 pub(crate) mod code {
     /// Any refusal without a more specific code.
-    pub(crate) const INVALID_INPUT: &str = "invalid_input";
+    pub(crate) const INVALID_INPUT: super::Code = super::Code::InvalidInput;
     /// The input is not the shape the function takes (not an array, a pair
     /// with the wrong arity, a value of the wrong type).
-    pub(crate) const MALFORMED_INPUT: &str = "malformed_input";
+    pub(crate) const MALFORMED_INPUT: super::Code = super::Code::MalformedInput;
     /// A count that is not a whole number >= 0.
-    pub(crate) const COUNT_NOT_WHOLE: &str = "count_not_whole";
+    pub(crate) const COUNT_NOT_WHOLE: super::Code = super::Code::CountNotWhole;
     /// A sample size that is not a whole number >= 1.
     ///
     /// One code for the whole field, not one per way of being wrong: a size of
@@ -456,47 +575,44 @@ pub(crate) mod code {
     /// and splitting them made `code` insufficient on its own -- the consumer
     /// had to read `message` to learn whether a `count_not_whole` was about the
     /// defectives or the size beside them.
-    pub(crate) const SAMPLE_SIZE_NOT_WHOLE: &str = "sample_size_not_whole";
+    pub(crate) const SAMPLE_SIZE_NOT_WHOLE: super::Code = super::Code::SampleSizeNotWhole;
     /// More defectives than the sample has items.
-    pub(crate) const DEFECTIVES_EXCEED_SAMPLE: &str = "defectives_exceed_sample";
+    pub(crate) const DEFECTIVES_EXCEED_SAMPLE: super::Code = super::Code::DefectivesExceedSample;
     /// Units inspected that are not a positive, finite number.
-    pub(crate) const UNITS_NOT_POSITIVE: &str = "units_not_positive";
+    pub(crate) const UNITS_NOT_POSITIVE: super::Code = super::Code::UnitsNotPositive;
     /// A NaN or an infinity where a measurement belongs.
-    pub(crate) const VALUE_NOT_FINITE: &str = "value_not_finite";
+    pub(crate) const VALUE_NOT_FINITE: super::Code = super::Code::ValueNotFinite;
     /// Fewer samples than the chart needs.
-    pub(crate) const INSUFFICIENT_DATA: &str = "insufficient_data";
+    pub(crate) const INSUFFICIENT_DATA: super::Code = super::Code::InsufficientData;
     /// A value outside its domain -- an option, a Phase I standard, a subgroup
     /// size the factor tables do not cover, an array element. `parameter`
     /// names which, `min` / `max` / `exclusive_*` the domain, `got` the value.
-    pub(crate) const PARAMETER_OUT_OF_RANGE: &str = "parameter_out_of_range";
+    pub(crate) const PARAMETER_OUT_OF_RANGE: super::Code = super::Code::ParameterOutOfRange;
     /// An argument with nothing in it.
-    pub(crate) const EMPTY_INPUT: &str = "empty_input";
+    pub(crate) const EMPTY_INPUT: super::Code = super::Code::EmptyInput;
     /// A value that must be `> 0` is not (Box-Cox data, failure times).
-    pub(crate) const NON_POSITIVE_DATA: &str = "non_positive_data";
+    pub(crate) const NON_POSITIVE_DATA: super::Code = super::Code::NonPositiveData;
     /// A capability index with neither specification limit: there is nothing
     /// to measure the spread against. `expected` lists the two options.
-    pub(crate) const NO_SPECIFICATION: &str = "no_specification";
+    pub(crate) const NO_SPECIFICATION: super::Code = super::Code::NoSpecification;
     /// A setting refused for a reason a range cannot state (`[lo, hi]` with
     /// `lo >= hi`).
-    pub(crate) const INVALID_OPTION: &str = "invalid_option";
+    pub(crate) const INVALID_OPTION: super::Code = super::Code::InvalidOption;
     /// Arrays that must have the same length do not.
-    pub(crate) const DIMENSION_MISMATCH: &str = "dimension_mismatch";
+    pub(crate) const DIMENSION_MISMATCH: super::Code = super::Code::DimensionMismatch;
     /// An option given a name the function does not know. `parameter` names it.
-    pub(crate) const UNKNOWN_OPTION: &str = "unknown_option";
+    pub(crate) const UNKNOWN_OPTION: super::Code = super::Code::UnknownOption;
     /// Event times that go backwards.
-    pub(crate) const EVENTS_UNORDERED: &str = "events_unordered";
+    pub(crate) const EVENTS_UNORDERED: super::Code = super::Code::EventsUnordered;
     /// An event time after the end of observation.
-    pub(crate) const EVENT_AFTER_END: &str = "event_after_end";
+    pub(crate) const EVENT_AFTER_END: super::Code = super::Code::EventAfterEnd;
 }
 
 impl WireError {
-    pub(crate) fn new(
-        code: &'static str,
-        index: Option<usize>,
-        message: impl Into<String>,
-    ) -> Self {
+    pub(crate) fn new(code: Code, index: Option<usize>, message: impl Into<String>) -> Self {
         WireError {
-            code,
+            code: code.name(),
+            reason: code,
             index,
             parameter: None,
             message: message.into(),
@@ -506,6 +622,11 @@ impl WireError {
 
     /// Adds one of the values behind the reason.
     pub(crate) fn with(mut self, key: &'static str, value: Detail) -> Self {
+        debug_assert!(
+            self.reason.fields().contains(&key),
+            "{} refusal with an undeclared field: {key}",
+            self.code
+        );
         self.details.push((key, value));
         self
     }
@@ -691,7 +812,7 @@ impl From<&str> for WireError {
     }
 }
 
-pub(crate) fn chart_error_code(error: &crate::spc::ControlChartError) -> &'static str {
+pub(crate) fn chart_error_code(error: &crate::spc::ControlChartError) -> Code {
     use crate::spc::ControlChartError as E;
     match error {
         E::SampleLengthMismatch { .. } => code::DIMENSION_MISMATCH,
@@ -733,7 +854,7 @@ const MAX_EXACT_COUNT: f64 = 9_007_199_254_740_992.0;
 struct CountDomain {
     min: u64,
     noun: &'static str,
-    code: &'static str,
+    code: Code,
 }
 
 /// A count of things observed: a whole number >= 0.
@@ -4336,13 +4457,13 @@ mod input_error_tests {
     fn a_count_that_is_not_a_whole_number_is_refused_with_its_row() {
         for bad in [json!(1.5), json!(-1), json!("3"), json!(null), json!(1e300)] {
             let (c, i, m) = err(count_rows(&json!([2, 0, bad]), "defects"));
-            assert_eq!((c, i), (code::COUNT_NOT_WHOLE, Some(2)), "{m}");
+            assert_eq!((c, i), (code::COUNT_NOT_WHOLE.name(), Some(2)), "{m}");
             assert!(m.starts_with("defects[2]"), "{m}");
         }
         let (c, i, _) = err(count_pairs(&json!([[1, 10], [2.5, 10]]), "samples"));
-        assert_eq!((c, i), (code::COUNT_NOT_WHOLE, Some(1)));
+        assert_eq!((c, i), (code::COUNT_NOT_WHOLE.name(), Some(1)));
         let (c, i, _) = err(rate_pairs(&json!([[1, 1.0], [0.5, 2.0]]), "samples"));
-        assert_eq!((c, i), (code::COUNT_NOT_WHOLE, Some(1)));
+        assert_eq!((c, i), (code::COUNT_NOT_WHOLE.name(), Some(1)));
     }
 
     /// The other half of a `[defectives, sample_size]` pair has its own domain,
@@ -4359,18 +4480,18 @@ mod input_error_tests {
             json!(1e300),
         ] {
             let (c, i, m) = err(count_pairs(&json!([[1, 10], [1, bad]]), "samples"));
-            assert_eq!((c, i), (code::SAMPLE_SIZE_NOT_WHOLE, Some(1)), "{m}");
+            assert_eq!((c, i), (code::SAMPLE_SIZE_NOT_WHOLE.name(), Some(1)), "{m}");
             assert!(m.contains("sample size"), "{m}");
             assert!(m.contains("at least 1"), "{m}");
         }
         // Defectives are checked first, and keep the count code.
         let (c, i, m) = err(count_pairs(&json!([[1, 10], [1.5, 0]]), "samples"));
-        assert_eq!((c, i), (code::COUNT_NOT_WHOLE, Some(1)), "{m}");
+        assert_eq!((c, i), (code::COUNT_NOT_WHOLE.name(), Some(1)), "{m}");
         assert!(m.contains("defectives"), "{m}");
         // An NP chart's single size is not an element, so it carries no position.
         for bad in [json!(0), json!(-3), json!(10.5)] {
             let (c, i, _) = err(sample_size_value(&bad, "sample_size"));
-            assert_eq!((c, i), (code::SAMPLE_SIZE_NOT_WHOLE, None));
+            assert_eq!((c, i), (code::SAMPLE_SIZE_NOT_WHOLE.name(), None));
         }
     }
 
@@ -4391,13 +4512,13 @@ mod input_error_tests {
     #[test]
     fn a_row_that_is_not_a_pair_is_malformed_at_its_row() {
         let (c, i, _) = err(count_pairs(&json!([[1, 10], [1, 2, 3]]), "samples"));
-        assert_eq!((c, i), (code::MALFORMED_INPUT, Some(1)));
+        assert_eq!((c, i), (code::MALFORMED_INPUT.name(), Some(1)));
         let (c, i, _) = err(rate_pairs(&json!([[1, 1.0], 4]), "samples"));
-        assert_eq!((c, i), (code::MALFORMED_INPUT, Some(1)));
+        assert_eq!((c, i), (code::MALFORMED_INPUT.name(), Some(1)));
         let (c, i, _) = err(count_pairs(&json!({ "samples": [] }), "samples"));
-        assert_eq!((c, i), (code::MALFORMED_INPUT, None));
+        assert_eq!((c, i), (code::MALFORMED_INPUT.name(), None));
         let (c, i, _) = err(rate_pairs(&json!([[1, 1.0], [2, "x"]]), "samples"));
-        assert_eq!((c, i), (code::UNITS_NOT_POSITIVE, Some(1)));
+        assert_eq!((c, i), (code::UNITS_NOT_POSITIVE.name(), Some(1)));
     }
 
     /// The code and `parameter` together tell every chart refusal apart. The
@@ -4456,7 +4577,7 @@ mod input_error_tests {
                 &size["got"]
             ),
             (
-                code::PARAMETER_OUT_OF_RANGE,
+                code::PARAMETER_OUT_OF_RANGE.name(),
                 Some("subgroups"),
                 &num(2.0),
                 &num(25.0),
@@ -4632,7 +4753,7 @@ mod input_error_tests {
         .expect_err("refused");
         assert_eq!(
             (e.code, e.index, e.parameter),
-            (code::VALUE_NOT_FINITE, Some(7), None)
+            (code::VALUE_NOT_FINITE.name(), Some(7), None)
         );
 
         let input: SpectralResidualInputDto =
@@ -4693,7 +4814,7 @@ mod input_error_tests {
         assert!(m.contains("phi"), "{m}");
         // Outside its domain.
         let (c, i, _) = err(p_chart_dto(&samples, &standard(json!({ "p_bar": 1.5 }))));
-        assert_eq!((c, i), (code::PARAMETER_OUT_OF_RANGE, None));
+        assert_eq!((c, i), (code::PARAMETER_OUT_OF_RANGE.name(), None));
         let (c, _, _) = err(laney_p_dto(
             &samples,
             &standard(json!({ "p_bar": 0.05, "phi": -2.0 })),

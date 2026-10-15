@@ -52,6 +52,63 @@ use crate::wire::{
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// A refusal reason: the `code` an `Error` carries and the fields that can
+/// stand beside it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(deny_unknown_fields)]
+struct RefusalCode {
+    code: String,
+    fields: Vec<String>,
+}
+
+/// A violation a checker reports. This package has no checker; the type is
+/// here so every engine's [`Codes`] has one shape.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(deny_unknown_fields)]
+struct ViolationCode {
+    code: String,
+    fields: Vec<String>,
+    checkers: Vec<String>,
+}
+
+/// What this package can answer with besides a result: every refusal
+/// `code`, and no violations -- it has no checker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize, tsify::Tsify)]
+#[serde(deny_unknown_fields)]
+struct Codes {
+    refusals: Vec<RefusalCode>,
+    violations: Vec<ViolationCode>,
+}
+
+fn code_catalog() -> Codes {
+    Codes {
+        refusals: crate::wire::Code::ALL
+            .into_iter()
+            .map(|c| RefusalCode {
+                code: c.name().to_string(),
+                fields: c.fields().iter().map(|f| f.to_string()).collect(),
+            })
+            .collect(),
+        violations: vec![],
+    }
+}
+
+/// Every refusal `code` the functions of this package throw, with the fields
+/// that can come with it: `{ refusals: [{ code, fields }], violations: [] }`.
+///
+/// It is built from the table the refusals come from, so a caller that
+/// translates codes can check its list against the package's.
+#[wasm_bindgen(unchecked_return_type = "Codes")]
+pub fn codes() -> Result<JsValue, JsValue> {
+    serde_wasm_bindgen::to_value(&code_catalog()).map_err(|e| {
+        js_err(WireError::new(
+            crate::wire::code::INVALID_INPUT,
+            None,
+            format!("internal: {e}"),
+        ))
+    })
+}
+
 /// Every refusal crosses into JavaScript as an `Error` carrying `code` (a
 /// stable reason), `index` (the offending array position, or `null`) and
 /// `parameter` (the option the refusal is about, or `null`), with
@@ -317,7 +374,7 @@ fn read_numbers(value: &JsValue, param: &'static str) -> Result<Vec<f64>, WireEr
 fn at_row(e: WireError, param: &'static str, row: usize) -> WireError {
     let path = format!("{param}[{row}]");
     let message = e.message.replacen(param, &path, 1);
-    WireError::new(e.code, e.index, message).about(path)
+    WireError { message, ..e }.about(path)
 }
 
 /// Reads a `number[][]` argument as sent -- each row as [`read_numbers`] does
@@ -1725,7 +1782,7 @@ mod binding_contract_tests {
         let e = one_way_anova_dto(&[vec![1.0, 2.0], vec![3.0]]).unwrap_err();
         assert_eq!(
             (e.code, e.index),
-            (crate::wire::code::INSUFFICIENT_DATA, Some(1))
+            (crate::wire::code::INSUFFICIENT_DATA.name(), Some(1))
         );
 
         let e = chi_squared_independence_dto(&[vec![1.0, 2.0], vec![3.0]]).unwrap_err();
@@ -1734,13 +1791,13 @@ mod binding_contract_tests {
         let e = one_sample_t_dto(&[2.0, 2.0, 2.0], 1.0).unwrap_err();
         assert_eq!(
             (e.code, e.parameter.as_deref()),
-            (crate::wire::code::INVALID_INPUT, Some("data"))
+            (crate::wire::code::INVALID_INPUT.name(), Some("data"))
         );
 
         let e = chi_squared_gof_dto(&[3.0, 4.0], &[3.5, 0.0]).unwrap_err();
         assert_eq!(
             (e.code, e.index),
-            (crate::wire::code::PARAMETER_OUT_OF_RANGE, Some(1))
+            (crate::wire::code::PARAMETER_OUT_OF_RANGE.name(), Some(1))
         );
     }
 
@@ -1751,7 +1808,7 @@ mod binding_contract_tests {
         let e = fisher_exact_dto(&serde_json::json!([[3, 1.5], [1, 3]])).unwrap_err();
         assert_eq!(
             (e.code, e.index),
-            (crate::wire::code::COUNT_NOT_WHOLE, Some(1))
+            (crate::wire::code::COUNT_NOT_WHOLE.name(), Some(1))
         );
         let e = fisher_exact_dto(&serde_json::json!([[3, 1, 2], [1, 3, 0]])).unwrap_err();
         assert_eq!(e.code, "dimension_mismatch");
@@ -2267,7 +2324,7 @@ mod binding_contract_tests {
             assert_eq!(
                 (e.code, e.index, e.parameter.as_deref()),
                 (
-                    crate::wire::code::DIMENSION_MISMATCH,
+                    crate::wire::code::DIMENSION_MISMATCH.name(),
                     Some(7),
                     Some("subgroups")
                 )
@@ -2421,11 +2478,17 @@ mod binding_contract_tests {
         use crate::wire::code;
         let e = np_chart_dto(&[5, 101, 3], 100).expect_err("more defectives than inspected");
         assert!(e.message.contains("defectives[1]"), "{e}");
-        assert_eq!((e.code, e.index), (code::DEFECTIVES_EXCEED_SAMPLE, Some(1)));
+        assert_eq!(
+            (e.code, e.index),
+            (code::DEFECTIVES_EXCEED_SAMPLE.name(), Some(1))
+        );
         // A zero sample size is a value, not a panic that would trap the module.
         let e = np_chart_dto(&[0, 0], 0).expect_err("nothing inspected");
         assert!(e.message.contains("sample size"), "{e}");
-        assert_eq!((e.code, e.index), (code::SAMPLE_SIZE_NOT_WHOLE, None));
+        assert_eq!(
+            (e.code, e.index),
+            (code::SAMPLE_SIZE_NOT_WHOLE.name(), None)
+        );
     }
 
     #[test]
@@ -2459,7 +2522,7 @@ mod binding_contract_tests {
         assert!(e.message.contains("samples[1]"), "{e}");
         assert_eq!(
             (e.code, e.index),
-            (crate::wire::code::UNITS_NOT_POSITIVE, Some(1))
+            (crate::wire::code::UNITS_NOT_POSITIVE.name(), Some(1))
         );
     }
 
@@ -2472,14 +2535,14 @@ mod binding_contract_tests {
         let e = laney_u_dto(&samples[..2], &Default::default()).expect_err("fewer than 3 samples");
         assert_eq!(
             (e.code, e.index),
-            (crate::wire::code::INSUFFICIENT_DATA, None)
+            (crate::wire::code::INSUFFICIENT_DATA.name(), None)
         );
         let e = laney_u_dto(&[(3, 1.0), (5, -1.0), (2, 0.8)], &Default::default())
             .expect_err("negative units");
         assert!(e.message.contains("samples[1]"), "{e}");
         assert_eq!(
             (e.code, e.index),
-            (crate::wire::code::UNITS_NOT_POSITIVE, Some(1))
+            (crate::wire::code::UNITS_NOT_POSITIVE.name(), Some(1))
         );
     }
 
@@ -2491,10 +2554,16 @@ mod binding_contract_tests {
         let e = p_chart_dto(&[(3, 100), (12, 10), (4, 100)], &Default::default())
             .expect_err("12 of 10");
         assert!(e.message.contains("samples[1]"), "{e}");
-        assert_eq!((e.code, e.index), (code::DEFECTIVES_EXCEED_SAMPLE, Some(1)));
+        assert_eq!(
+            (e.code, e.index),
+            (code::DEFECTIVES_EXCEED_SAMPLE.name(), Some(1))
+        );
         let e = p_chart_dto(&[(3, 100), (0, 0)], &Default::default()).expect_err("0 of 0");
         assert!(e.message.contains("samples[1]"), "{e}");
-        assert_eq!((e.code, e.index), (code::SAMPLE_SIZE_NOT_WHOLE, Some(1)));
+        assert_eq!(
+            (e.code, e.index),
+            (code::SAMPLE_SIZE_NOT_WHOLE.name(), Some(1))
+        );
         let ok = p_chart_dto(&[(3, 100), (5, 120), (2, 80)], &Default::default()).expect("valid");
         assert_eq!(ok.points.len(), 3);
     }
@@ -2897,5 +2966,43 @@ mod binding_contract_tests {
         let e = laney_p_dto(&[(3, 100), (5, 120)], &Default::default())
             .expect_err("fewer than 3 samples");
         assert_eq!(e.code, crate::wire::code::INSUFFICIENT_DATA);
+    }
+}
+
+#[cfg(test)]
+mod code_catalog_tests {
+    use super::*;
+
+    /// The README's code tables list exactly the published vocabulary, so the
+    /// tables and `codes()` cannot drift apart.
+    #[test]
+    fn the_readme_documents_every_code_and_no_other() {
+        let readme = include_str!("../README.md");
+        let mut documented = std::collections::BTreeSet::new();
+        let mut in_table = false;
+        for line in readme.lines() {
+            if line.starts_with("| `code` |") {
+                in_table = true;
+                continue;
+            }
+            if !line.starts_with('|') {
+                in_table = false;
+                continue;
+            }
+            if in_table && !line.starts_with("|---") {
+                let first = line.split('|').nth(1).expect("a cell");
+                for code in first.split('·') {
+                    documented.insert(code.trim().trim_matches('`').to_string());
+                }
+            }
+        }
+        let catalog = code_catalog();
+        let published: std::collections::BTreeSet<String> = catalog
+            .refusals
+            .iter()
+            .map(|r| r.code.clone())
+            .chain(catalog.violations.iter().map(|v| v.code.clone()))
+            .collect();
+        assert_eq!(documented, published);
     }
 }

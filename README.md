@@ -280,6 +280,11 @@ interface AnalyticsError extends Error {
 //                                                min null, exclusive_min 0, max null, got 0
 ```
 
+`codes()` returns every `code` below, with the fields that can come with it —
+`{ refusals: [{ code, fields }], violations: [] }` — built from the table the
+refusals come from, so a caller that translates codes can check its list against
+the package's.
+
 | `code` | Meaning |
 |---|---|
 | `count_not_whole` | a defect or defective count is not a whole number ≥ 0 |
@@ -298,6 +303,7 @@ interface AnalyticsError extends Error {
 | `unknown_option` | an option given a name the function does not know — `parameter` names it (`rules`, `cost`, `penalty`, `observation.truncation`), `got` the name and `expected` the names it knows |
 | `events_unordered` | an event time earlier than the one before it (`index`) |
 | `event_after_end` | an event time after the end of observation (`index`) |
+| `invalid_input` | any other refusal of the input, without a more specific reason (`index`, `parameter`) |
 | `invalid_input` | any other refusal; the message says what |
 
 `message` is written for people and may change between releases; `code` does not.
