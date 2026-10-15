@@ -20,6 +20,9 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 - The README lists `invalid_input`, which the package throws; a test keeps the
   table and `codes()` equal.
+- A refusal of one row of a row-shaped argument (`data[1]`) keeps the values
+  behind it -- `min`, `max`, `got`, `expected` -- where it used to carry only
+  its `parameter` and `index`.
 
 ## [0.24.0] - 2026-10-15
 
