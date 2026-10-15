@@ -589,6 +589,10 @@ caller is what the native library returns:
   `n` takes. The crate held these and kept them to itself. A size outside the
   tables is `subgroup_size_out_of_range`, not an approximation: falling back to
   another size's factors draws limits that look right and are not.
+- C# `UAnalytics` **0.8.0** (binding only; the crate is unchanged):
+  `AnalyticsClient.PChart(samples, pBar)` and
+  `LaneyPChart(samples, pBar, phi)` send the Phase II standard the C FFI has
+  accepted since 0.12.0, which 0.7.0's client had no way to pass.
 
 ### Changed (breaking)
 
@@ -633,13 +637,6 @@ caller is what the native library returns:
   likelihood is monotone across the range, and the estimate now lands on the
   end of the range with `lambda_at_bound: true` instead of stopping just inside
   it and reporting `false`. Requires `u-numflow` 0.6.1. No API change here.
-
-### Added
-
-- C# `UAnalytics` **0.8.0** (binding only; the crate is unchanged):
-  `AnalyticsClient.PChart(samples, pBar)` and
-  `LaneyPChart(samples, pBar, phi)` send the Phase II standard the C FFI has
-  accepted since 0.12.0, which 0.7.0's client had no way to pass.
 
 ## [0.12.0] - 2026-09-15
 
