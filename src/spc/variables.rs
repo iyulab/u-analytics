@@ -175,6 +175,20 @@ const C4: [f64; 24] = [
     0.9810, 0.9823, 0.9835, 0.9845, 0.9854, 0.9862, 0.9869, 0.9876, 0.9882, 0.9887, 0.9892, 0.9896,
 ];
 
+/// Degrees of freedom of a scaled-chi estimate of sigma whose squared
+/// coefficient of variation is `cv2` -- David's (1951) approximation,
+/// `1/A - 3A/16 + 3A^2/64 + 1/4` with `A = 2 cv2`.
+///
+/// A sample standard deviation on `v` degrees of freedom has
+/// `cv2 = 1/(2v) + 1/(8v^2) + ...`, so `1/A + 1/4` recovers `v`; the series
+/// carries that inversion to the next terms. Applied to R-bar/d2 and S-bar/c4,
+/// it is the "equivalent degrees of freedom" the capability intervals need
+/// (one range of five values: 3.83, Patnaik's tabulated 3.8).
+fn equivalent_df(cv2: f64) -> f64 {
+    let a = 2.0 * cv2;
+    1.0 / a - 3.0 * a / 16.0 + 3.0 * a * a / 64.0 + 0.25
+}
+
 /// E2 factor for Individual chart UCL/LCL.
 ///
 /// UCL = X-bar + E2 * MR-bar, LCL = X-bar - E2 * MR-bar.
@@ -322,6 +336,36 @@ impl XBarRChart {
         let r_bar = self.r_limits.as_ref()?.cl;
         let d2 = D2[self.subgroup_size - 2];
         (d2 > 0.0).then(|| r_bar / d2)
+    }
+
+    /// Degrees of freedom of [`sigma_hat`](Self::sigma_hat) -- what
+    /// [`CapabilityIndices::intervals`](crate::capability::CapabilityIndices::intervals)
+    /// takes as `within_df` for Cp/Cpk intervals.
+    ///
+    /// R-bar of `m` subgroups of `n` has squared coefficient of variation
+    /// `(d3/d2)^2 / m`; David's (1951) approximation turns it into the degrees
+    /// of freedom of a sample standard deviation with the same precision --
+    /// fewer than the `m (n - 1)` a pooled standard deviation would have, the
+    /// price of using the range. `d3/d2` is `(D4 - 1) / 3`.
+    ///
+    /// Returns `None` if there is not enough data for control limits.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::spc::{ControlChart, XBarRChart};
+    ///
+    /// let mut chart = XBarRChart::new(5).expect("subgroup size is in range");
+    /// for g in [[9.9, 10.1, 10.0, 9.8, 10.2], [10.3, 9.7, 10.0, 10.1, 9.9]] {
+    ///     chart.add_sample(&g).unwrap();
+    /// }
+    /// let df = chart.sigma_hat_df().expect("limits available");
+    /// assert!(df > 7.0 && df < 8.0); // two ranges of five: fewer than 2 x 4
+    /// ```
+    pub fn sigma_hat_df(&self) -> Option<f64> {
+        self.r_limits.as_ref()?;
+        let cv = (D4[self.subgroup_size - 2] - 1.0) / 3.0;
+        Some(equivalent_df(cv * cv / self.subgroups.len() as f64))
     }
 
     /// Get the R chart control limits, or `None` if insufficient data.
@@ -579,6 +623,21 @@ impl XBarSChart {
         (c4 > 0.0).then(|| s_bar / c4)
     }
 
+    /// Degrees of freedom of [`sigma_hat`](Self::sigma_hat), for Cp/Cpk
+    /// intervals: S-bar of `m` subgroups has squared coefficient of variation
+    /// `(1 - c4^2) / (m c4^2)`, turned into degrees of freedom by David's
+    /// approximation -- a little under the `m (n - 1)` of a pooled standard
+    /// deviation.
+    ///
+    /// Returns `None` if there is not enough data for control limits.
+    pub fn sigma_hat_df(&self) -> Option<f64> {
+        self.s_limits.as_ref()?;
+        let c4 = C4[self.subgroup_size - 2];
+        Some(equivalent_df(
+            (1.0 - c4 * c4) / (c4 * c4 * self.subgroups.len() as f64),
+        ))
+    }
+
     /// Get the S chart control limits, or `None` if insufficient data.
     pub fn s_limits(&self) -> Option<ControlLimits> {
         self.s_limits.clone()
@@ -818,6 +877,18 @@ impl IndividualMRChart {
     pub fn sigma_hat(&self) -> Option<f64> {
         let mr_bar = self.mr_limits.as_ref()?.cl;
         Some(mr_bar / D2[0])
+    }
+
+    /// Degrees of freedom of [`sigma_hat`](Self::sigma_hat), for Cp/Cpk
+    /// intervals: `0.62 (N - 1)` for `N` observations. Successive moving
+    /// ranges share a value, so they are not independent and no
+    /// range-distribution formula applies; the factor is Wheeler's empirical
+    /// one (as JMP uses it).
+    ///
+    /// Returns `None` if there is not enough data for control limits.
+    pub fn sigma_hat_df(&self) -> Option<f64> {
+        self.mr_limits.as_ref()?;
+        Some(0.62 * (self.observations.len() - 1) as f64)
     }
 
     /// Get the MR chart control limits, or `None` if insufficient data.
@@ -1470,6 +1541,70 @@ mod tests {
     fn sigma_hat_is_none_without_limits() {
         assert!(XBarRChart::new(5).unwrap().sigma_hat().is_none());
         assert!(XBarSChart::new(5).unwrap().sigma_hat().is_none());
+        assert!(XBarRChart::new(5).unwrap().sigma_hat_df().is_none());
+        assert!(XBarSChart::new(5).unwrap().sigma_hat_df().is_none());
+        assert!(IndividualMRChart::new().sigma_hat_df().is_none());
+    }
+
+    /// David's approximation inverts the precision of a sample standard
+    /// deviation: from the exact c4 of `v + 1` values (one subgroup) it gives
+    /// back `v`.
+    #[test]
+    fn equivalent_df_recovers_a_standard_deviations_df() {
+        for (i, c4) in C4.iter().enumerate() {
+            let v = (i + 1) as f64; // subgroup of i + 2 values
+            let df = equivalent_df((1.0 - c4 * c4) / (c4 * c4));
+            // c4 is printed to four places; the inversion is good to a few hundredths.
+            assert!(
+                (df - v).abs() < 0.05 + 0.01 * v,
+                "n = {}: {df} vs {v}",
+                i + 2
+            );
+        }
+    }
+
+    /// One range of n values: Patnaik's (1950) equivalent degrees of freedom
+    /// (as tabulated in Duncan): 1.0, 2.0, 2.9, 3.8, 4.7 for n = 2..=6.
+    #[test]
+    fn single_range_df_matches_patnaiks_table() {
+        for (n, want) in [(2, 1.0), (3, 2.0), (4, 2.9), (5, 3.8), (6, 4.7)] {
+            let cv = (D4[n - 2] - 1.0) / 3.0;
+            let df = equivalent_df(cv * cv);
+            assert!((df - want).abs() < 0.06, "n = {n}: {df} vs {want}");
+        }
+    }
+
+    /// More subgroups, more degrees of freedom; the range spends some of what
+    /// a pooled standard deviation would have, the S chart less.
+    #[test]
+    fn chart_df_grow_with_subgroups_and_stay_under_pooled() {
+        let mut r = XBarRChart::new(5).unwrap();
+        let mut s = XBarSChart::new(5).unwrap();
+        let mut last = 0.0;
+        for k in 0..20 {
+            let g = [
+                10.0 + 0.1 * (k % 3) as f64,
+                10.2,
+                9.9,
+                10.1,
+                9.8 + 0.05 * k as f64,
+            ];
+            r.add_sample(&g).unwrap();
+            s.add_sample(&g).unwrap();
+            if let (Some(dr), Some(ds)) = (r.sigma_hat_df(), s.sigma_hat_df()) {
+                let pooled = ((k + 1) * 4) as f64;
+                assert!(
+                    dr > last && dr < pooled && ds < pooled + 0.5 && ds > dr,
+                    "k={k}: {dr} {ds}"
+                );
+                last = dr;
+            }
+        }
+        let mut i = IndividualMRChart::new();
+        for x in [1.0, 3.0, 2.0, 4.0, 3.5] {
+            i.add_sample(&[x]).unwrap();
+        }
+        assert!((i.sigma_hat_df().unwrap() - 0.62 * 4.0).abs() < 1e-12);
     }
 
     #[test]

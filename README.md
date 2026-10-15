@@ -367,16 +367,24 @@ target -- `min(T - LSL, USL - T) / (3 * sqrt(sum((x - T)^2) / (n - 1)))` -- so i
 uses neither sigma and is reported with or without `sigma_within`. Without a
 `target` it is `null`; pass the specification midpoint if that is the target.
 
-`xbar_r_chart` returns `sigma_hat` (`R-bar / d2`) for exactly this purpose, so
-the two compose:
+`xbar_r_chart` returns `sigma_hat` (`R-bar / d2`) for exactly this purpose, and
+`sigma_hat_df`, its degrees of freedom, for the Cp/Cpk intervals -- so the two
+compose:
 
 ```js
 const chart = xbar_r_chart(subgroups);
 const cap = process_capability({
-  data: subgroups.flat(), usl: 11, lsl: 9, sigma_within: chart.sigma_hat,
+  data: subgroups.flat(), usl: 11, lsl: 9,
+  sigma_within: chart.sigma_hat, sigma_within_df: chart.sigma_hat_df,
 });
-// cap.sigma_source === "within", cap.cp !== cap.pp
+// cap.sigma_source === "within", cap.cp !== cap.pp, cap.intervals.cpk !== null
 ```
+
+`sigma_hat_df` is the precision of the chart's sigma expressed as the degrees of
+freedom of a sample standard deviation: David's (1951) approximation for
+R-bar/d2 and S-bar/c4 (one range of five values is worth 3.8, a little under
+the four of a standard deviation), and Wheeler's `0.62 (n - 1)` for the moving
+range of an I-MR chart.
 
 One-sided specifications are supported: pass only `usl` or only `lsl`. The
 indices that need both limits (`cp`, `pp`, `cpm`) come back `null`.
@@ -449,14 +457,16 @@ type Point = { index: number, value: number, violations: RuleName[] };
 xbar_s_chart(subgroups: number[][], options?: { rules?: RuleSetName | RuleName[] }): {
   xbar_cl: number, xbar_ucl: number, xbar_lcl: number,
   s_cl: number, s_ucl: number, s_lcl: number,
-  sigma_hat: number | null,      // S-bar / c4
+  sigma_hat: number,             // S-bar / c4
+  sigma_hat_df: number,          // its degrees of freedom (David's approximation)
   xbar_points: Point[], s_points: Point[], in_control: boolean,
 }
 
 imr_chart(values: number[], options?: { rules?: RuleSetName | RuleName[] }): {
   i_cl: number, i_ucl: number, i_lcl: number,
   mr_cl: number, mr_ucl: number, mr_lcl: number,
-  sigma_hat: number | null,      // MR-bar / d2(2)
+  sigma_hat: number,             // MR-bar / d2(2)
+  sigma_hat_df: number,          // 0.62 (n - 1)
   i_points: Point[],
   mr_points: Point[],            // starts at index 1: the first value has no moving range
   in_control: boolean,
@@ -899,8 +909,9 @@ function's arguments as one JSON object, the response is the same JSON.
 
 The composition documented for JavaScript holds here too: `imr_chart` (or
 `xbar_s_chart`) returns `sigma_hat`, which is what `process_capability` needs as
-`sigma_within` to report the short-term indices — the FFI does not guess a
-within sigma from a flat vector any more than the WASM binding does.
+`sigma_within` to report the short-term indices, and `sigma_hat_df` for its
+`sigma_within_df` — the FFI does not guess a within sigma from a flat vector any
+more than the WASM binding does.
 
 The event-time trend functions take `{ "times": [...], "observation": { "truncation": "time", "end": T } }`
 (or `{ "truncation": "failure" }`) and return the same objects as over WASM:

@@ -81,6 +81,13 @@ public class BehaviourTests
         Assert.Equal(0.90, within.Intervals.Confidence);
         Assert.InRange(within.Cpk!.Value, within.Intervals.Cpk!.Lower, within.Intervals.Cpk.Upper);
 
+        double[][] groups = [[9.8, 10.1, 10.0, 9.9, 10.2], [10.3, 9.7, 10.0, 10.1, 9.9], [10.4, 9.6, 10.0, 10.2, 9.8]];
+        var chart = _client.XbarRChart(groups);
+        Assert.InRange(chart.SigmaHatDf, 0.1, 3 * 4);
+        var composed = _client.ProcessCapability([.. groups.SelectMany(g => g)], 11, 9,
+            sigmaWithin: chart.SigmaHat, sigmaWithinDf: chart.SigmaHatDf);
+        Assert.NotNull(composed.Intervals.Cp);
+
         var e = Assert.Throws<AnalyticsException>(() => _client.ProcessCapability(data, 11, 9, sigmaWithinDf: 12));
         Assert.Equal("invalid_option", e.ErrorCode);
         Assert.Equal("sigma_within_df", e.Parameter);

@@ -19,6 +19,16 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   it was estimated, so without them those two intervals are `null`. WebAssembly,
   C ABI and .NET (`CapabilityResult.Intervals`, `sigmaWithinDf`, `confidence`);
   Rust `CapabilityIndices::intervals` and `CapabilityIndices::n`.
+- `sigma_hat_df` on the X̄-R, X̄-S and I-MR chart results (Rust `sigma_hat_df()`,
+  .NET `SigmaHatDf`): the degrees of freedom of `sigma_hat`, which
+  `process_capability` takes as `sigma_within_df` — so a chart's sigma composes
+  into Cp/Cpk intervals without the caller tabulating them. David's (1951)
+  approximation for R̄/d2 and S̄/c4, Wheeler's `0.62 (n − 1)` for the moving range.
+
+### Fixed
+
+- The README declared the charts' `sigma_hat` as `number | null`; it is always a
+  number (0.22.0).
 
 ## [0.23.0] - 2026-10-15
 

@@ -59,29 +59,35 @@ public enum RunRuleSet
 /// <summary>A point on a variables chart and the run tests it fails.</summary>
 public sealed record ChartPoint(int Index, double Value, IReadOnlyList<RunRule> Violations);
 
-/// <summary>X̄-R chart. <see cref="SigmaHat"/> is R̄ / d2.</summary>
+/// <summary>
+/// X̄-R chart. <see cref="SigmaHat"/> is R̄ / d2; <see cref="SigmaHatDf"/> its degrees of freedom
+/// (David's approximation) — pass both to <see cref="AnalyticsClient.ProcessCapability"/> for Cp/Cpk intervals.
+/// </summary>
 public sealed record XbarRChartResult(
     double XbarCl, double XbarUcl, double XbarLcl,
     double RCl, double RUcl, double RLcl,
     double SigmaHat,
+    double SigmaHatDf,
     IReadOnlyList<ChartPoint> XbarPoints,
     IReadOnlyList<ChartPoint> RPoints,
     bool InControl);
 
-/// <summary>X̄-S chart. <see cref="SigmaHat"/> is S̄ / c4.</summary>
+/// <summary>X̄-S chart. <see cref="SigmaHat"/> is S̄ / c4; <see cref="SigmaHatDf"/> its degrees of freedom.</summary>
 public sealed record XbarSChartResult(
     double XbarCl, double XbarUcl, double XbarLcl,
     double SCl, double SUcl, double SLcl,
     double SigmaHat,
+    double SigmaHatDf,
     IReadOnlyList<ChartPoint> XbarPoints,
     IReadOnlyList<ChartPoint> SPoints,
     bool InControl);
 
-/// <summary>Individual / moving-range chart. <see cref="SigmaHat"/> is MR̄ / d2(2).</summary>
+/// <summary>Individual / moving-range chart. <see cref="SigmaHat"/> is MR̄ / d2(2); <see cref="SigmaHatDf"/> is 0.62 (n − 1).</summary>
 public sealed record ImrChartResult(
     double ICl, double IUcl, double ILcl,
     double MrCl, double MrUcl, double MrLcl,
     double SigmaHat,
+    double SigmaHatDf,
     IReadOnlyList<ChartPoint> IPoints,
     IReadOnlyList<ChartPoint> MrPoints,
     bool InControl);

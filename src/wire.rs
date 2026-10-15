@@ -36,6 +36,9 @@ pub(crate) struct XbarRChartDto {
     /// capability study needs and the one a flat measurement vector cannot
     /// carry.
     pub(crate) sigma_hat: f64,
+    /// Degrees of freedom of `sigma_hat` -- `process_capability`'s
+    /// `sigma_within_df`, for Cp/Cpk confidence intervals.
+    pub(crate) sigma_hat_df: f64,
     pub(crate) xbar_points: Vec<ChartPointDto>,
     pub(crate) r_points: Vec<ChartPointDto>,
     pub(crate) in_control: bool,
@@ -948,6 +951,7 @@ pub(crate) fn xbar_r_dto(
         r_lcl: r.lcl,
         // Present whenever the limits are: it is their centre line over d2 / c4.
         sigma_hat: chart.sigma_hat().ok_or_else(too_few)?,
+        sigma_hat_df: chart.sigma_hat_df().ok_or_else(too_few)?,
         xbar_points: point_dtos(chart.points()),
         r_points: point_dtos(chart.r_points()),
         in_control: chart.is_in_control(),
@@ -2980,6 +2984,8 @@ pub(crate) struct XbarSChartDto {
     /// Short-term sigma implied by this chart (`S-bar / c4`), for
     /// `process_capability`'s `sigma_within`.
     pub(crate) sigma_hat: f64,
+    /// Degrees of freedom of `sigma_hat`, for `sigma_within_df`.
+    pub(crate) sigma_hat_df: f64,
     pub(crate) xbar_points: Vec<ChartPointDto>,
     pub(crate) s_points: Vec<ChartPointDto>,
     pub(crate) in_control: bool,
@@ -2997,6 +3003,8 @@ pub(crate) struct ImrChartDto {
     pub(crate) mr_lcl: f64,
     /// Short-term sigma implied by this chart (`MR-bar / d2(2)`).
     pub(crate) sigma_hat: f64,
+    /// Degrees of freedom of `sigma_hat` (`0.62 (n - 1)`), for `sigma_within_df`.
+    pub(crate) sigma_hat_df: f64,
     pub(crate) i_points: Vec<ChartPointDto>,
     /// Starts at index 1: the first value has no moving range.
     pub(crate) mr_points: Vec<ChartPointDto>,
@@ -3044,6 +3052,7 @@ pub(crate) fn xbar_s_dto(
         s_lcl: s.lcl,
         // Present whenever the limits are: it is their centre line over d2 / c4.
         sigma_hat: chart.sigma_hat().ok_or_else(too_few)?,
+        sigma_hat_df: chart.sigma_hat_df().ok_or_else(too_few)?,
         xbar_points: point_dtos(chart.points()),
         s_points: point_dtos(chart.s_points()),
         in_control: chart.is_in_control(),
@@ -3080,6 +3089,7 @@ pub(crate) fn imr_dto(
         mr_lcl: mr.lcl,
         // Present whenever the limits are: it is their centre line over d2 / c4.
         sigma_hat: chart.sigma_hat().ok_or_else(too_few)?,
+        sigma_hat_df: chart.sigma_hat_df().ok_or_else(too_few)?,
         i_points: point_dtos(chart.points()),
         mr_points: point_dtos(chart.mr_points()),
         in_control: chart.is_in_control(),

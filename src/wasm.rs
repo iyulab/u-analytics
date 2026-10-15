@@ -2096,6 +2096,30 @@ mod binding_contract_tests {
         );
     }
 
+    /// The chart hands over both halves of what the short-term intervals need.
+    #[test]
+    fn chart_sigma_and_its_df_compose_into_cp_cpk_intervals() {
+        let chart = xbar_r_dto(
+            SUBGROUPS.iter().map(|g| g.to_vec()).collect(),
+            crate::spc::RuleSet::default(),
+        )
+        .expect("valid");
+        let cap = dto(json!({
+            "data": flat(), "usl": 11.0, "lsl": 9.0,
+            "sigma_within": chart.sigma_hat, "sigma_within_df": chart.sigma_hat_df
+        }))
+        .unwrap();
+        let (cp, cpk) = (
+            cap.intervals.cp.as_ref().unwrap(),
+            cap.intervals.cpk.as_ref().unwrap(),
+        );
+        assert!(cp.lower < cap.cp.unwrap() && cap.cp.unwrap() < cp.upper);
+        assert!(cpk.lower < cap.cpk.unwrap() && cap.cpk.unwrap() < cpk.upper);
+        // The range spends degrees of freedom: fewer than m (n - 1).
+        let pooled = (SUBGROUPS.len() * (SUBGROUPS[0].len() - 1)) as f64;
+        assert!(chart.sigma_hat_df > 0.0 && chart.sigma_hat_df < pooled);
+    }
+
     #[test]
     fn capability_interval_options_are_checked() {
         for bad in [0.0, 1.0, -0.1, 1.5] {
