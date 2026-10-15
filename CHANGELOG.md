@@ -8,6 +8,18 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- **Confidence intervals for the capability indices**: `process_capability`
+  returns `intervals` — two-sided `{ lower, upper }` for Cp, Cpk, Pp and Ppk at
+  `confidence` (default 0.95; a one-sided 95 % lower bound is the `lower` at
+  0.90). Cp/Pp from the chi-square distribution of the variance, Cpk/Ppk by
+  Bissell's (1990) approximation; Pp/Ppk with `n − 1` degrees of freedom, Cp/Cpk
+  with `sigma_within_df` — the within sigma's degrees of freedom depend on how
+  it was estimated, so without them those two intervals are `null`. WebAssembly,
+  C ABI and .NET (`CapabilityResult.Intervals`, `sigmaWithinDf`, `confidence`);
+  Rust `CapabilityIndices::intervals` and `CapabilityIndices::n`.
+
 ## [0.23.0] - 2026-10-15
 
 ### Added

@@ -12,7 +12,12 @@
 //!   18(1), pp. 41--52.
 //! - Chan, Cheng & Spiring (1988), "A New Measure of Process Capability: Cpm",
 //!   *Journal of Quality Technology* 20(3), pp. 162--175.
+//! - Bissell, A.F. (1990), "How Reliable is Your Capability Index?",
+//!   *Applied Statistics* 39(3), pp. 331--340 -- the Cpk interval.
+//! - Pearn, W.L. & Kotz, S. (2006), *Encyclopedia and Handbook of Process
+//!   Capability Indices*, World Scientific -- the Cp and Cpk intervals.
 
+use u_numflow::special::{chi_squared_quantile, inverse_normal_cdf};
 use u_numflow::stats;
 
 /// Input specification for process capability analysis.
@@ -98,6 +103,139 @@ pub struct CapabilityIndices {
     pub std_dev_within: Option<f64>,
     /// Long-term (overall) standard deviation.
     pub std_dev_overall: f64,
+    /// Number of observations the indices were computed from.
+    pub n: usize,
+}
+
+/// A two-sided confidence interval.
+///
+/// The lower limit of a two-sided interval at confidence `1 - 2a` is the
+/// one-sided lower bound at `1 - a`: a customer requirement "Cpk lower bound at
+/// 95 % >= 1.33" is the `lower` of the interval at `confidence = 0.90`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ConfidenceInterval {
+    /// Lower confidence limit.
+    pub lower: f64,
+    /// Upper confidence limit.
+    pub upper: f64,
+}
+
+/// Confidence intervals for the capability indices -- see
+/// [`CapabilityIndices::intervals`].
+///
+/// An index's interval is `None` when the index is, and the short-term pair
+/// (`cp`, `cpk`) is `None` unless the degrees of freedom of the within sigma
+/// were given: they depend on how that sigma was estimated, which the indices
+/// do not record.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CapabilityIntervals {
+    /// Confidence level of every interval, in (0, 1).
+    pub confidence: f64,
+    /// Cp, from the chi-square distribution of the within variance.
+    pub cp: Option<ConfidenceInterval>,
+    /// Cpk, by Bissell's normal approximation.
+    pub cpk: Option<ConfidenceInterval>,
+    /// Pp, from the chi-square distribution of the sample variance (n - 1 df).
+    pub pp: Option<ConfidenceInterval>,
+    /// Ppk, by Bissell's normal approximation (n - 1 df).
+    pub ppk: Option<ConfidenceInterval>,
+}
+
+/// Why [`CapabilityIndices::intervals`] refused its arguments.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum IntervalError {
+    /// `confidence` is not strictly between 0 and 1.
+    ConfidenceOutOfRange,
+    /// The within degrees of freedom are not a positive, finite number.
+    WithinDfOutOfRange,
+    /// Within degrees of freedom were given, but the indices have no within sigma.
+    WithinDfWithoutWithinSigma,
+}
+
+impl CapabilityIndices {
+    /// Two-sided confidence intervals for Cp, Cpk, Pp and Ppk at `confidence`.
+    ///
+    /// For a ratio of the specification width to `k` sigma estimated with `df`
+    /// degrees of freedom (Cp, Pp):
+    ///
+    /// ```text
+    /// C * sqrt(chi2(a/2; df) / df)  <=  C  <=  C * sqrt(chi2(1 - a/2; df) / df)
+    /// ```
+    ///
+    /// For the nearer-limit index (Cpk, Ppk), Bissell's (1990) approximation:
+    ///
+    /// ```text
+    /// Ck -/+ z(1 - a/2) * sqrt(1 / (9 n) + Ck^2 / (2 df))
+    /// ```
+    ///
+    /// with `a = 1 - confidence`, `n` the number of observations (the mean's
+    /// share) and `df` the degrees of freedom of the sigma (its share). The
+    /// overall sigma is the sample standard deviation, so Pp/Ppk use
+    /// `n - 1`. The within sigma's degrees of freedom depend on how it was
+    /// estimated -- `n - m` for a pooled standard deviation of `m` subgroups,
+    /// fewer for R-bar/d2 or a moving range (about `0.62 (n - 1)` for MR-bar/d2,
+    /// Wheeler 2004) -- so Cp/Cpk intervals are given only when `within_df` is.
+    ///
+    /// # Errors
+    ///
+    /// [`IntervalError`] when `confidence` is not in (0, 1), `within_df` is
+    /// not positive and finite, or `within_df` is given for indices computed
+    /// without a within sigma.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::capability::ProcessCapability;
+    ///
+    /// let spec = ProcessCapability::new(Some(11.0), Some(9.0)).unwrap();
+    /// let data = [9.5, 10.0, 10.2, 9.8, 10.1, 10.3, 9.9, 10.0, 10.4, 9.7];
+    /// let indices = spec.compute_overall(&data).unwrap();
+    ///
+    /// // A one-sided 95 % lower bound is the lower limit of the 90 % interval.
+    /// let ci = indices.intervals(0.90, None).unwrap();
+    /// let ppk = ci.ppk.unwrap();
+    /// assert!(ppk.lower < indices.ppk.unwrap() && indices.ppk.unwrap() < ppk.upper);
+    /// assert!(ci.cpk.is_none()); // no within sigma
+    /// ```
+    pub fn intervals(
+        &self,
+        confidence: f64,
+        within_df: Option<f64>,
+    ) -> Result<CapabilityIntervals, IntervalError> {
+        if !(confidence > 0.0 && confidence < 1.0) {
+            return Err(IntervalError::ConfidenceOutOfRange);
+        }
+        if let Some(df) = within_df {
+            if !(df.is_finite() && df > 0.0) {
+                return Err(IntervalError::WithinDfOutOfRange);
+            }
+            if self.std_dev_within.is_none() {
+                return Err(IntervalError::WithinDfWithoutWithinSigma);
+            }
+        }
+        let alpha = 1.0 - confidence;
+        let n = self.n as f64;
+        let overall_df = n - 1.0;
+        let ratio = |c: f64, df: f64| ConfidenceInterval {
+            lower: c * (chi_squared_quantile(alpha / 2.0, df) / df).sqrt(),
+            upper: c * (chi_squared_quantile(1.0 - alpha / 2.0, df) / df).sqrt(),
+        };
+        let z = inverse_normal_cdf(1.0 - alpha / 2.0);
+        let nearer = |c: f64, df: f64| {
+            let half = z * (1.0 / (9.0 * n) + c * c / (2.0 * df)).sqrt();
+            ConfidenceInterval {
+                lower: c - half,
+                upper: c + half,
+            }
+        };
+        Ok(CapabilityIntervals {
+            confidence,
+            cp: within_df.and_then(|df| self.cp.map(|c| ratio(c, df))),
+            cpk: within_df.and_then(|df| self.cpk.map(|c| nearer(c, df))),
+            pp: self.pp.map(|c| ratio(c, overall_df)),
+            ppk: self.ppk.map(|c| nearer(c, overall_df)),
+        })
+    }
 }
 
 impl ProcessCapability {
@@ -312,6 +450,7 @@ impl ProcessCapability {
             mean: x_bar,
             std_dev_within: sigma_within,
             std_dev_overall: sigma_overall,
+            n: data.len(),
         }
     }
 
@@ -339,6 +478,105 @@ impl ProcessCapability {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -----------------------------------------------------------------------
+    // Confidence intervals
+    // -----------------------------------------------------------------------
+
+    /// Indices with chosen values, for checking the interval arithmetic
+    /// against hand-worked table values.
+    fn indices(n: usize, c: f64, within: bool) -> CapabilityIndices {
+        CapabilityIndices {
+            cp: within.then_some(c),
+            cpk: within.then_some(c),
+            cpu: None,
+            cpl: None,
+            pp: Some(c),
+            ppk: Some(c),
+            ppu: None,
+            ppl: None,
+            cpm: None,
+            mean: 0.0,
+            std_dev_within: within.then_some(1.0),
+            std_dev_overall: 1.0,
+            n,
+        }
+    }
+
+    /// n = 30, an index of 1.33, 95 %: chi-square table values for 29 df
+    /// (16.047, 45.722) and z = 1.960 give the published-arithmetic limits.
+    #[test]
+    fn intervals_match_hand_worked_values() {
+        let ci = indices(30, 1.33, false).intervals(0.95, None).unwrap();
+        let pp = ci.pp.unwrap();
+        assert!(
+            (pp.lower - 1.33 * (16.047_f64 / 29.0).sqrt()).abs() < 1e-3,
+            "{pp:?}"
+        );
+        assert!(
+            (pp.upper - 1.33 * (45.722_f64 / 29.0).sqrt()).abs() < 1e-3,
+            "{pp:?}"
+        );
+        let ppk = ci.ppk.unwrap();
+        let half = 1.959964 * (1.0 / 270.0 + 1.33_f64.powi(2) / 58.0).sqrt();
+        assert!((ppk.lower - (1.33 - half)).abs() < 1e-6, "{ppk:?}");
+        assert!((ppk.upper - (1.33 + half)).abs() < 1e-6, "{ppk:?}");
+        assert!((ppk.lower - 0.9675).abs() < 1e-3, "{ppk:?}");
+    }
+
+    /// The short-term pair needs the within degrees of freedom; given them, it
+    /// uses them in place of n - 1.
+    #[test]
+    fn short_term_intervals_need_the_within_df() {
+        let i = indices(50, 1.5, true);
+        let without = i.intervals(0.95, None).unwrap();
+        assert!(without.cp.is_none() && without.cpk.is_none());
+        assert!(without.pp.is_some() && without.ppk.is_some());
+
+        let with = i.intervals(0.95, Some(30.0)).unwrap();
+        let (cp, pp) = (with.cp.unwrap(), with.pp.unwrap());
+        // Fewer degrees of freedom: a wider interval about the same value.
+        assert!(cp.upper - cp.lower > pp.upper - pp.lower);
+        assert!((cp.lower - 1.5 * (chi_squared_quantile(0.025, 30.0) / 30.0).sqrt()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn interval_arguments_are_checked() {
+        let overall = indices(20, 1.2, false);
+        for c in [0.0, 1.0, -0.5, 1.5, f64::NAN] {
+            assert_eq!(
+                overall.intervals(c, None),
+                Err(IntervalError::ConfidenceOutOfRange)
+            );
+        }
+        assert_eq!(
+            overall.intervals(0.95, Some(10.0)),
+            Err(IntervalError::WithinDfWithoutWithinSigma)
+        );
+        let within = indices(20, 1.2, true);
+        for df in [0.0, -1.0, f64::INFINITY, f64::NAN] {
+            assert_eq!(
+                within.intervals(0.95, Some(df)),
+                Err(IntervalError::WithinDfOutOfRange)
+            );
+        }
+    }
+
+    /// Higher confidence, wider interval; more data, narrower.
+    #[test]
+    fn intervals_widen_with_confidence_and_narrow_with_n() {
+        let width = |n: usize, conf: f64| {
+            let ppk = indices(n, 1.33, false)
+                .intervals(conf, None)
+                .unwrap()
+                .ppk
+                .unwrap();
+            ppk.upper - ppk.lower
+        };
+        assert!(width(30, 0.99) > width(30, 0.95));
+        assert!(width(30, 0.95) > width(30, 0.90));
+        assert!(width(100, 0.95) < width(30, 0.95));
+    }
 
     // -----------------------------------------------------------------------
     // Construction tests

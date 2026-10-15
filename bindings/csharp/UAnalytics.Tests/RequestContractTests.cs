@@ -97,7 +97,7 @@ public class RequestContractTests
         ["LaneyUChart"] = c => c.LaneyUChart([[3, 1.0], [5, 1.5], [2, 1.0]], uBar: 2.5, phi: 1.2),
         ["GChart"] = c => c.GChart([10, 20, 15, 30, 5]),
         ["TChart"] = c => c.TChart([1.5, 2.0, 0.5, 3.0]),
-        ["ProcessCapability"] = c => c.ProcessCapability(Series, 11, 9, target: 10, sigmaWithin: 0.25),
+        ["ProcessCapability"] = c => c.ProcessCapability(Series, 11, 9, target: 10, sigmaWithin: 0.25, sigmaWithinDf: 15, confidence: 0.9),
         ["PercentileCapability"] = c => c.PercentileCapability(Series, 11, 9),
         ["PercentileCapability(Normal)"] = c => c.PercentileCapability(Series, 11, 9, DistributionFamily.Normal),
         ["PercentileCapability(LogNormal)"] = c => c.PercentileCapability(Series, 11, 9, DistributionFamily.LogNormal),

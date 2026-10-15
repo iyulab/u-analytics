@@ -214,14 +214,19 @@ public sealed class AnalyticsClient : IDisposable
     /// the short-term indices (<c>cp</c>, <c>cpk</c>, <c>cpu</c>, <c>cpl</c>) are <c>null</c> and
     /// <c>sigma_source</c> is <c>"overall"</c> -- a flat vector carries no subgroup structure to
     /// estimate one from, and this client no longer guesses one from the moving range.
+    /// <see cref="CapabilityResult.Intervals"/> are two-sided at <paramref name="confidence"/>
+    /// (default 0.95); the Cp/Cpk intervals need <paramref name="sigmaWithinDf"/>, the degrees of
+    /// freedom of <paramref name="sigmaWithin"/>, which depend on how it was estimated.
     /// Same JSON as the WASM binding.
     /// </summary>
     public CapabilityResult ProcessCapability(double[] data, double? usl, double? lsl, double? target = null,
-        double? sigmaWithin = null)
+        double? sigmaWithin = null, double? sigmaWithinDf = null, double? confidence = null)
         => Call(NativeInterop.uanalytics_process_capability, AnalyticsJson.Default.CapabilityResult,
             ("data", Request.Nums("data", data)), ("usl", Request.Num("usl", usl)),
             ("lsl", Request.Num("lsl", lsl)), ("target", Request.Num("target", target)),
-            ("sigma_within", Request.Num("sigma_within", sigmaWithin)));
+            ("sigma_within", Request.Num("sigma_within", sigmaWithin)),
+            ("sigma_within_df", Request.Num("sigma_within_df", sigmaWithinDf)),
+            ("confidence", Request.Num("confidence", confidence)));
 
     /// <summary>
     /// Percentile capability (ISO 22514-2) for non-normal data: the 0.135 % and 99.865 %

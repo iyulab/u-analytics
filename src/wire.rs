@@ -1793,6 +1793,38 @@ pub(crate) struct CapabilityInputDto {
     #[cfg_attr(feature = "wasm", tsify(optional))]
     #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
     pub(crate) target: Option<f64>,
+    /// Degrees of freedom of `sigma_within` -- they depend on how it was
+    /// estimated, so the short-term intervals are given only with them.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
+    pub(crate) sigma_within_df: Option<f64>,
+    /// Confidence level of `intervals`, in (0, 1). Omitted: 0.95.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
+    pub(crate) confidence: Option<f64>,
+}
+
+/// A two-sided confidence interval.
+#[derive(Serialize, Debug, PartialEq)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+pub(crate) struct IntervalDto {
+    pub(crate) lower: f64,
+    pub(crate) upper: f64,
+}
+
+/// Confidence intervals of the capability indices; `null` where the index is,
+/// and for `cp` / `cpk` unless `sigma_within_df` was given.
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct CapabilityIntervalsDto {
+    pub(crate) confidence: f64,
+    pub(crate) cp: Option<IntervalDto>,
+    pub(crate) cpk: Option<IntervalDto>,
+    pub(crate) pp: Option<IntervalDto>,
+    pub(crate) ppk: Option<IntervalDto>,
 }
 
 #[derive(Serialize, Debug)]
@@ -1816,6 +1848,7 @@ pub(crate) struct CapabilityDto {
     pub(crate) ppu: Option<f64>,
     pub(crate) ppl: Option<f64>,
     pub(crate) cpm: Option<f64>,
+    pub(crate) intervals: CapabilityIntervalsDto,
 }
 
 /// Pure core of [`process_capability`]: the specification, sigma-source and
@@ -1845,6 +1878,35 @@ pub(crate) fn capability_dto(input: CapabilityInputDto) -> Result<CapabilityDto,
         spec = spec.with_target(target);
     }
     let data = at_least(input.data, 2, "data")?;
+    let confidence = input.confidence.unwrap_or(0.95);
+    if !(confidence > 0.0 && confidence < 1.0) {
+        return Err(WireError::out_of_range(
+            "confidence",
+            Bound::Open(0.0),
+            Bound::Open(1.0),
+            confidence,
+            format!("confidence must be strictly between 0 and 1, got {confidence}"),
+        ));
+    }
+    if let Some(df) = input.sigma_within_df {
+        if !(df.is_finite() && df > 0.0) {
+            return Err(WireError::out_of_range(
+                "sigma_within_df",
+                Bound::Open(0.0),
+                Bound::Unbounded,
+                df,
+                format!("sigma_within_df must be a positive, finite number, got {df}"),
+            ));
+        }
+        if input.sigma_within.is_none() {
+            return Err(WireError::new(
+                code::INVALID_OPTION,
+                None,
+                "sigma_within_df is the degrees of freedom of sigma_within; give sigma_within with it",
+            )
+            .about("sigma_within_df"));
+        }
+    }
 
     // The crate decides what a missing within sigma means: `compute_overall`
     // reports the long-term indices only, so the short-term quartet and
@@ -1872,6 +1934,15 @@ pub(crate) fn capability_dto(input: CapabilityInputDto) -> Result<CapabilityDto,
             .about("data")
     })?;
 
+    let ci = indices
+        .intervals(confidence, input.sigma_within_df)
+        .expect("confidence and sigma_within_df were checked above");
+    let interval = |i: Option<crate::capability::ConfidenceInterval>| {
+        i.map(|i| IntervalDto {
+            lower: i.lower,
+            upper: i.upper,
+        })
+    };
     let dto = CapabilityDto {
         mean: indices.mean,
         sigma_source: if indices.std_dev_within.is_some() {
@@ -1892,6 +1963,13 @@ pub(crate) fn capability_dto(input: CapabilityInputDto) -> Result<CapabilityDto,
         // Not a short-term index: Cpm is the spread about the target, the
         // same whichever sigma the caller could supply.
         cpm: indices.cpm,
+        intervals: CapabilityIntervalsDto {
+            confidence: ci.confidence,
+            cp: interval(ci.cp),
+            cpk: interval(ci.cpk),
+            pp: interval(ci.pp),
+            ppk: interval(ci.ppk),
+        },
     };
     Ok(dto)
 }

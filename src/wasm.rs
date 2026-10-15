@@ -574,7 +574,8 @@ pub fn p_chart(
 ///
 /// ```text
 /// { data: number[], usl?: number, lsl?: number,
-///   sigma_within?: number, target?: number }
+///   sigma_within?: number, target?: number,
+///   sigma_within_df?: number, confidence?: number }
 /// ```
 ///
 /// At least one of `usl`/`lsl` is required; supplying one gives a one-sided
@@ -595,8 +596,17 @@ pub fn p_chart(
 ///
 /// Object with fields: `mean`, `sigma_source`, `std_dev_within`,
 /// `std_dev_overall`, `cp`, `cpk`, `cpu`, `cpl`, `pp`, `ppk`, `ppu`, `ppl`,
-/// `cpm`. Indices that the specification does not support are `null`
-/// (a one-sided specification has no `cp`, `pp` or `cpm`).
+/// `cpm`, `intervals`. Indices that the specification does not support are
+/// `null` (a one-sided specification has no `cp`, `pp` or `cpm`).
+///
+/// `intervals` is `{ confidence, cp, cpk, pp, ppk }`, each a two-sided
+/// `{ lower, upper }` at `confidence` (default 0.95) or `null` where the index
+/// is: Cp/Pp from the chi-square distribution of the variance, Cpk/Ppk by
+/// Bissell's (1990) approximation. Pp/Ppk use `n - 1` degrees of freedom; the
+/// within sigma's depend on how it was estimated, so `cp` / `cpk` intervals
+/// need `sigma_within_df` (`n - m` for a pooled standard deviation of `m`
+/// subgroups). A one-sided lower bound at 95 % is the `lower` at
+/// `confidence: 0.90`.
 ///
 /// `sigma_source` is `"within"` when `sigma_within` was supplied and
 /// `"overall"` otherwise. In the `"overall"` case `std_dev_within`, `cp`,
@@ -2035,6 +2045,8 @@ mod binding_contract_tests {
                 lsl: Some(9.0),
                 sigma_within: Some(bad),
                 target: None,
+                sigma_within_df: None,
+                confidence: None,
             };
             let e = capability_dto(input).expect_err("non-finite sigma must be refused");
             assert_eq!(
@@ -2043,6 +2055,88 @@ mod binding_contract_tests {
                 "{bad} -> {e}"
             );
         }
+    }
+
+    /// `intervals` brackets each index; Pp/Ppk always (n - 1 df), Cp/Cpk only
+    /// with the within sigma's degrees of freedom; the default level is 95 %.
+    #[test]
+    fn capability_intervals_on_the_wire() {
+        let sigma = sigma_within_from_chart();
+        let overall = dto(json!({ "data": flat(), "usl": 11.0, "lsl": 9.0 })).unwrap();
+        let ci = &overall.intervals;
+        assert_eq!(ci.confidence, 0.95);
+        let (pp, ppk) = (ci.pp.as_ref().unwrap(), ci.ppk.as_ref().unwrap());
+        assert!(pp.lower < overall.pp.unwrap() && overall.pp.unwrap() < pp.upper);
+        assert!(ppk.lower < overall.ppk.unwrap() && overall.ppk.unwrap() < ppk.upper);
+        assert!(ci.cp.is_none() && ci.cpk.is_none());
+
+        let n = flat().len() as f64;
+        let within = dto(json!({
+            "data": flat(), "usl": 11.0, "lsl": 9.0,
+            "sigma_within": sigma, "sigma_within_df": n - 5.0, "confidence": 0.90
+        }))
+        .unwrap();
+        let ci = &within.intervals;
+        assert_eq!(ci.confidence, 0.90);
+        let cpk = ci.cpk.as_ref().unwrap();
+        assert!(cpk.lower < within.cpk.unwrap() && within.cpk.unwrap() < cpk.upper);
+        // The wire carries exactly the core's numbers.
+        let core = crate::capability::ProcessCapability::new(Some(11.0), Some(9.0))
+            .unwrap()
+            .compute(&flat(), sigma)
+            .unwrap()
+            .intervals(0.90, Some(n - 5.0))
+            .unwrap();
+        let core_cpk = core.cpk.unwrap();
+        assert_eq!((cpk.lower, cpk.upper), (core_cpk.lower, core_cpk.upper));
+        // A narrower level, a narrower interval.
+        assert!(
+            within.intervals.ppk.as_ref().unwrap().upper
+                < overall.intervals.ppk.as_ref().unwrap().upper
+        );
+    }
+
+    #[test]
+    fn capability_interval_options_are_checked() {
+        for bad in [0.0, 1.0, -0.1, 1.5] {
+            let e = capability_dto(
+                from_json::<CapabilityInputDto>(
+                    json!({ "data": flat(), "usl": 11.0, "confidence": bad }),
+                    "input",
+                )
+                .unwrap(),
+            )
+            .expect_err("confidence outside (0, 1)");
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some("confidence")),
+                "{bad}"
+            );
+        }
+        let e = capability_dto(
+            from_json::<CapabilityInputDto>(
+                json!({ "data": flat(), "usl": 11.0, "sigma_within": 0.2, "sigma_within_df": 0.0 }),
+                "input",
+            )
+            .unwrap(),
+        )
+        .expect_err("df must be positive");
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("parameter_out_of_range", Some("sigma_within_df"))
+        );
+        let e = capability_dto(
+            from_json::<CapabilityInputDto>(
+                json!({ "data": flat(), "usl": 11.0, "sigma_within_df": 20.0 }),
+                "input",
+            )
+            .unwrap(),
+        )
+        .expect_err("df without the sigma it belongs to");
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("invalid_option", Some("sigma_within_df"))
+        );
     }
 
     #[test]

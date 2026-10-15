@@ -334,6 +334,8 @@ process_capability({
   lsl?: number,
   sigma_within?: number, // short-term sigma, e.g. R-bar / d2
   target?: number,       // Cpm target; without it `cpm` is null
+  sigma_within_df?: number, // degrees of freedom of sigma_within -> cp / cpk intervals
+  confidence?: number,   // of `intervals`, in (0, 1); default 0.95
 }): {
   mean: number,
   sigma_source: "within" | "overall",
@@ -342,7 +344,13 @@ process_capability({
   cp: number | null, cpk: number | null, cpu: number | null, cpl: number | null,
   pp: number | null, ppk: number | null, ppu: number | null, ppl: number | null,
   cpm: number | null,
+  intervals: {
+    confidence: number,
+    cp: Interval | null, cpk: Interval | null,   // need sigma_within_df
+    pp: Interval | null, ppk: Interval | null,   // n - 1 degrees of freedom
+  },
 }
+type Interval = { lower: number, upper: number }  // two-sided at `confidence`
 ```
 
 **Short-term sigma has to be supplied.** Cp/Cpk are defined against the
@@ -372,6 +380,23 @@ const cap = process_capability({
 
 One-sided specifications are supported: pass only `usl` or only `lsl`. The
 indices that need both limits (`cp`, `pp`, `cpm`) come back `null`.
+
+**Confidence intervals.** An index from a sample is an estimate, and a
+capability requirement is usually stated on its lower confidence bound
+("Cpk lower bound at 95 % ≥ 1.33"). `intervals` gives two-sided intervals at
+`confidence`: Cp/Pp from the chi-square distribution of the variance,
+Cpk/Ppk by Bissell's (1990) approximation
+`Ĉpk ± z·sqrt(1/(9n) + Ĉpk²/(2ν))`. Pp/Ppk use ν = n − 1. The within sigma's
+degrees of freedom depend on how it was estimated -- `n − m` for a pooled
+standard deviation of `m` subgroups, about `0.62 (n − 1)` for a moving range
+(Wheeler) -- so `cp` / `cpk` intervals are `null` unless you pass
+`sigma_within_df`. A one-sided 95 % lower bound is the `lower` of the interval
+at `confidence: 0.90`:
+
+```js
+const cap = process_capability({ data, usl: 11, lsl: 9, confidence: 0.90 });
+cap.intervals.ppk.lower   // Ppk lower bound at 95 %
+```
 
 ### Choosing which run tests apply
 

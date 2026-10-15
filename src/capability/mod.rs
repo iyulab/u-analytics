@@ -24,7 +24,9 @@ mod nonnormal;
 mod percentile;
 mod sigma_level;
 
-pub use indices::{CapabilityIndices, ProcessCapability};
+pub use indices::{
+    CapabilityIndices, CapabilityIntervals, ConfidenceInterval, IntervalError, ProcessCapability,
+};
 pub use nonnormal::{
     boxcox_capability, NonNormalCapabilityError, NonNormalCapabilityResult, DEFAULT_LAMBDA_RANGE,
 };

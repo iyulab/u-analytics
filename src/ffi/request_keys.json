@@ -328,9 +328,11 @@
     },
     "uanalytics_process_capability": {
       "properties": {
+        "confidence": {},
         "data": {},
         "lsl": {},
         "sigma_within": {},
+        "sigma_within_df": {},
         "target": {},
         "usl": {}
       }

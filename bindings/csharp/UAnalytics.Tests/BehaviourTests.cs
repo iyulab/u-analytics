@@ -69,6 +69,24 @@ public class BehaviourTests
     }
 
     [Fact]
+    public void Capability_intervals_bracket_the_indices()
+    {
+        double[] data = [9.8, 10.1, 10.0, 9.9, 10.2, 10.3, 9.7, 10.0, 10.1, 9.9, 10.4, 9.6, 10.0, 10.2, 9.8];
+        var overall = _client.ProcessCapability(data, 11, 9);
+        Assert.Equal(0.95, overall.Intervals.Confidence);
+        Assert.InRange(overall.Ppk!.Value, overall.Intervals.Ppk!.Lower, overall.Intervals.Ppk.Upper);
+        Assert.Null(overall.Intervals.Cpk);
+
+        var within = _client.ProcessCapability(data, 11, 9, sigmaWithin: 0.2, sigmaWithinDf: 12, confidence: 0.90);
+        Assert.Equal(0.90, within.Intervals.Confidence);
+        Assert.InRange(within.Cpk!.Value, within.Intervals.Cpk!.Lower, within.Intervals.Cpk.Upper);
+
+        var e = Assert.Throws<AnalyticsException>(() => _client.ProcessCapability(data, 11, 9, sigmaWithinDf: 12));
+        Assert.Equal("invalid_option", e.ErrorCode);
+        Assert.Equal("sigma_within_df", e.Parameter);
+    }
+
+    [Fact]
     public void Named_sets_are_the_engines_and_the_default_is_the_three_sigma_test()
     {
         // Eight points above the centre line: Western Electric's run (eight) fires at the

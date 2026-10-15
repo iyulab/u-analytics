@@ -146,7 +146,22 @@ public sealed record CapabilityResult(
     double StdDevOverall,
     double? Cp, double? Cpk, double? Cpu, double? Cpl,
     double? Pp, double? Ppk, double? Ppu, double? Ppl,
-    double? Cpm);
+    double? Cpm,
+    CapabilityIntervals Intervals);
+
+/// <summary>A two-sided confidence interval.</summary>
+public sealed record ConfidenceInterval(double Lower, double Upper);
+
+/// <summary>
+/// Confidence intervals of the capability indices at <see cref="Confidence"/>: Cp/Pp from the
+/// chi-square distribution of the variance, Cpk/Ppk by Bissell's approximation. <c>null</c> where
+/// the index is, and for <see cref="Cp"/>/<see cref="Cpk"/> unless the within sigma's degrees of
+/// freedom were given. A one-sided 95 % lower bound is the <c>Lower</c> at confidence 0.90.
+/// </summary>
+public sealed record CapabilityIntervals(
+    double Confidence,
+    ConfidenceInterval? Cp, ConfidenceInterval? Cpk,
+    ConfidenceInterval? Pp, ConfidenceInterval? Ppk);
 
 /// <summary>Percentile (ISO 22514-2) capability for non-normal data.</summary>
 public sealed record PercentileCapabilityResult(
