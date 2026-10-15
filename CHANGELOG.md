@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-16
+
+Depends on u-numflow 0.13. The .NET client is `UAnalytics` 0.20.0.
+
 ### Added
 
 - **Increments of a cumulative counter**, each classified rather than assumed:
