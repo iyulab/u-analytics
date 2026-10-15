@@ -452,6 +452,12 @@
       "properties": {
         "confidence": {},
         "failure_times": {},
+        "method": {
+          "enum": [
+            "wald",
+            "likelihood_ratio"
+          ]
+        },
         "suspension_times": {}
       }
     },

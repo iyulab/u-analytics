@@ -293,13 +293,18 @@ public sealed class AnalyticsClient : IDisposable
     /// at least 2). <paramref name="suspensionTimes"/> are right-censored units — still running,
     /// or removed unfailed, at that time; leaving them out biases the scale low. Returns
     /// <c>shape</c>, <c>scale</c>, <c>log_likelihood</c>, <c>iterations</c> and the shape and
-    /// scale <see cref="WeibullMleResult.Intervals"/> at <paramref name="confidence"/> (default 0.95).
+    /// scale <see cref="WeibullMleResult.Intervals"/> at <paramref name="confidence"/> (default 0.95)
+    /// by <paramref name="method"/>: <see cref="WeibullIntervalMethod.Wald"/>, or
+    /// <see cref="WeibullIntervalMethod.LikelihoodRatio"/> — the profile-likelihood interval,
+    /// nearer its level with few failures.
     /// </summary>
-    public WeibullMleResult WeibullMle(double[] failureTimes, double[]? suspensionTimes = null, double? confidence = null)
+    public WeibullMleResult WeibullMle(double[] failureTimes, double[]? suspensionTimes = null, double? confidence = null,
+        WeibullIntervalMethod method = WeibullIntervalMethod.Wald)
         => Call(NativeInterop.uanalytics_weibull_mle, AnalyticsJson.Default.WeibullMleResult,
             ("failure_times", Request.Nums("failure_times", failureTimes)),
             ("suspension_times", suspensionTimes is null ? null : Request.Nums("suspension_times", suspensionTimes)),
-            ("confidence", Request.Num("confidence", confidence)));
+            ("confidence", Request.Num("confidence", confidence)),
+            ("method", Request.Option(method, AnalyticsJson.Default.WeibullIntervalMethod)));
 
     /// <summary>
     /// Weibull median-rank-regression fit (Bernard's ranks). <paramref name="suspensionTimes"/>

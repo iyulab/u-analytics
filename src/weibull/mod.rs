@@ -17,8 +17,10 @@
 
 mod mle;
 mod mrr;
+mod profile;
 mod reliability;
 
 pub use mle::{weibull_mle, weibull_mle_censored, WeibullInterval, WeibullMleResult};
 pub use mrr::{weibull_mrr, weibull_mrr_censored, WeibullMrrResult};
+pub use profile::{weibull_likelihood_interval, WeibullQuantity};
 pub use reliability::ReliabilityAnalysis;

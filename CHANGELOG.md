@@ -22,6 +22,15 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   `WeibullReliability(WeibullMleResult fit, ...)` → `WeibullReliabilityResult.Intervals`.
   Rust: `ReliabilityAnalysis::with_covariance`, `b_life_interval`,
   `reliability_interval`; `from_mle` carries the fit's covariance.
+- **Likelihood-ratio intervals**: `weibull_mle` takes `method:
+  "likelihood_ratio"` (default `"wald"`, echoed as `intervals.method`) for the
+  profile-likelihood intervals of shape and scale — every value whose profile
+  log-likelihood is within χ²₁/2 of the maximum, suspensions included. With
+  few failures they cover markedly nearer their level than the Wald intervals
+  (eight failures, 90 % B10: 0.86 against 0.81 by simulation). Rust:
+  `weibull_likelihood_interval` with `WeibullQuantity::{Shape, Scale, BLife}`.
+  .NET: `WeibullMle(..., method: WeibullIntervalMethod.LikelihoodRatio)`,
+  `WeibullIntervals.Method`.
 - **Median-rank regression with suspensions**: `weibull_mrr` takes
   `suspension_times`, which move the ranks of the failures after them
   (Johnson's adjusted ranks, then Benard's median rank) — dropping survivors

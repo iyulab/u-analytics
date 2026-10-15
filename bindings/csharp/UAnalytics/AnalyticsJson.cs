@@ -12,6 +12,7 @@ namespace UAnalytics;
     RespectNullableAnnotations = true,
     RespectRequiredConstructorParameters = true)]
 [JsonSerializable(typeof(Codes))]
+[JsonSerializable(typeof(WeibullIntervalMethod))]
 [JsonSerializable(typeof(XbarRChartResult))]
 [JsonSerializable(typeof(XbarSChartResult))]
 [JsonSerializable(typeof(ImrChartResult))]

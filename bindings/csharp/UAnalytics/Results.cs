@@ -266,11 +266,21 @@ public sealed record GageRRAnovaResult(
 public sealed record WeibullMleResult(double Shape, double Scale, double LogLikelihood, int Iterations,
     WeibullIntervals Intervals, IReadOnlyList<IReadOnlyList<double>> Covariance);
 
+/// <summary>How the intervals of a Weibull MLE are made.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<WeibullIntervalMethod>))]
+public enum WeibullIntervalMethod
+{
+    /// <summary>Normal on the log scale from the observed Fisher information.</summary>
+    [JsonStringEnumMemberName("wald")] Wald,
+    /// <summary>The profile-likelihood interval: every value within χ²₁/2 of the maximum.</summary>
+    [JsonStringEnumMemberName("likelihood_ratio")] LikelihoodRatio,
+}
+
 /// <summary>
-/// Two-sided intervals of a Weibull MLE at <see cref="Confidence"/>, normal on the log scale from
-/// the observed Fisher information.
+/// Two-sided intervals of a Weibull MLE at <see cref="Confidence"/>, made by <see cref="Method"/>.
 /// </summary>
-public sealed record WeibullIntervals(double Confidence, ConfidenceInterval Shape, ConfidenceInterval Scale);
+public sealed record WeibullIntervals(double Confidence, WeibullIntervalMethod Method, ConfidenceInterval Shape,
+    ConfidenceInterval Scale);
 
 /// <summary>Weibull median-rank-regression fit.</summary>
 public sealed record WeibullMrrResult(double Shape, double Scale, double RSquared);

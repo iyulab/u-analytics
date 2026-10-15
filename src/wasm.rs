@@ -1630,28 +1630,38 @@ pub fn weibull_mle(
         }
         _ => Vec::new(),
     };
-    let confidence = match options {
-        Some(o) if !o.is_undefined() && !o.is_null() => {
-            from_js::<WeibullMleOptions>(o, "options")?.confidence
-        }
-        _ => None,
+    let options = match options {
+        Some(o) if !o.is_undefined() && !o.is_null() => from_js::<WeibullMleOptions>(o, "options")?,
+        _ => WeibullMleOptions::default(),
     };
-    to_js(&weibull_mle_dto(&times, &suspensions, confidence).map_err(js_err)?)
+    to_js(
+        &weibull_mle_dto(
+            &times,
+            &suspensions,
+            options.confidence,
+            options.method.as_deref(),
+        )
+        .map_err(js_err)?,
+    )
 }
 
 /// The optional third argument of [`weibull_mle`].
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct WeibullMleOptions {
     #[serde(default)]
     confidence: Option<f64>,
+    #[serde(default)]
+    method: Option<String>,
 }
 
 #[wasm_bindgen(typescript_custom_section)]
 const WEIBULL_OPTIONS_TS: &'static str = r#"
-/** Confidence level of `intervals`, in (0, 1). Omitted or `null`: 0.95. */
 export interface WeibullMleOptions {
+    /** Confidence level of `intervals`, in (0, 1). Omitted or `null`: 0.95. */
     confidence?: number | null;
+    /** `"wald"` (default) or `"likelihood_ratio"` -- the profile-likelihood interval. */
+    method?: "wald" | "likelihood_ratio" | null;
 }
 "#;
 

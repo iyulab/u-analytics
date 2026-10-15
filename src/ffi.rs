@@ -878,7 +878,12 @@ wire_export!(
     /// suspensions are right-censored units.
     uanalytics_weibull_mle,
     crate::wire::reliability::WeibullMleRequestDto,
-    |r| crate::wire::reliability::weibull_mle_dto(&r.failure_times, &r.suspension_times, r.confidence)
+    |r| crate::wire::reliability::weibull_mle_dto(
+        &r.failure_times,
+        &r.suspension_times,
+        r.confidence,
+        r.method.as_deref()
+    )
 );
 
 wire_export!(
