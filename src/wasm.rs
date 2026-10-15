@@ -1091,6 +1091,58 @@ fn read_observation(value: JsValue) -> Result<ObservationDto, JsValue> {
     from_js(value, "observation")
 }
 
+/// The optional settings argument of the counter functions.
+fn read_counter_options(
+    options: Option<JsValue>,
+) -> Result<crate::wire::counter::CounterOptionsDto, JsValue> {
+    match options {
+        Some(o) if !o.is_undefined() && !o.is_null() => from_js(o, "options"),
+        _ => Ok(Default::default()),
+    }
+}
+
+/// How much a cumulative counter advanced between each pair of neighbouring
+/// readings, and what explains it: `[{ start, end, increase, kind }]` with
+/// `kind` `"normal"` (did not fall), `"declared"` (a declared reset or
+/// replacement), `"wrap"` (fell, explained by `options.modulus`) or
+/// `"unexplained"` (fell, nothing explains it -- `increase` is `null`).
+///
+/// `times` must increase strictly. `options`: `{ modulus?, max_rate?,
+/// discontinuities?: [{ time, start, last? }] }`.
+#[wasm_bindgen(unchecked_return_type = "CounterIncrementDto[]")]
+pub fn counter_increments(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] times: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] values: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "CounterOptionsDto | null")] options: Option<
+        JsValue,
+    >,
+) -> Result<JsValue, JsValue> {
+    let times = read_numbers(&times, "times").map_err(js_err)?;
+    let values = read_numbers(&values, "values").map_err(js_err)?;
+    let options = read_counter_options(options)?;
+    to_js(&crate::wire::counter::increments_dto(&times, &values, &options).map_err(js_err)?)
+}
+
+/// A cumulative counter's increments summed over the intervals
+/// `[edges[j], edges[j+1])`: `[{ start, end, increase, pairs, unexplained }]`.
+/// A pair counts in the interval its later reading falls in; `unexplained`
+/// is how many of the interval's pairs have no known increase.
+#[wasm_bindgen(unchecked_return_type = "CounterTotalDto[]")]
+pub fn counter_totals(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] times: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] values: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] edges: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "CounterOptionsDto | null")] options: Option<
+        JsValue,
+    >,
+) -> Result<JsValue, JsValue> {
+    let times = read_numbers(&times, "times").map_err(js_err)?;
+    let values = read_numbers(&values, "values").map_err(js_err)?;
+    let edges = read_numbers(&edges, "edges").map_err(js_err)?;
+    let options = read_counter_options(options)?;
+    to_js(&crate::wire::counter::totals_dto(&times, &values, &edges, &options).map_err(js_err)?)
+}
+
 /// Laplace trend test of event times against a constant rate.
 ///
 /// `observation` is `{ truncation: "time", end }` (watched until `end`) or

@@ -571,6 +571,20 @@ fn entry_points() -> Vec<(&'static str, Entry, Value)> {
             json!({ "p_values": [0.01, 0.04, 0.03] }),
         ),
         ep(
+            "uanalytics_counter_increments",
+            uanalytics_counter_increments,
+            json!({ "times": [0.0, 1.0, 2.0], "values": [1.0, 2.0, 0.5],
+                    "modulus": 10.0, "max_rate": 100.0,
+                    "discontinuities": [{ "time": 1.5, "start": 0.0, "last": 2.5 }] }),
+        ),
+        ep(
+            "uanalytics_counter_totals",
+            uanalytics_counter_totals,
+            json!({ "times": [0.0, 1.0, 2.0], "values": [1.0, 2.0, 3.0],
+                    "edges": [0.0, 2.0, 4.0], "modulus": 10.0, "max_rate": 100.0,
+                    "discontinuities": [{ "time": 1.5, "start": 0.0, "last": 2.5 }] }),
+        ),
+        ep(
             "uanalytics_laplace_trend_test",
             uanalytics_laplace_trend_test,
             json!({ "times": events, "observation": observed }),

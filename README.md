@@ -17,6 +17,7 @@ hypothesis testing for industrial quality engineering.
 | `capability` | Process capability indices (Cp, Cpk, Pp, Ppk, Cpm), sigma level, and Box-Cox non-normal capability |
 | `weibull` | Weibull parameter estimation (MLE, MRR) and reliability analysis (R(t), MTBF, B-life) |
 | `point_process` | Event-time trend of one unit (a repairable system's failures, a service's incidents): Laplace and MIL-HDBK-189 tests against a constant rate, power-law process (Crow-AMSAA) fit |
+| `counter` | Increments of a cumulative counter (a meter's register, an hour meter, a production or byte counter), each classified — normal, declared reset or replacement, wrap through a known modulus, or unexplained — and summed over intervals |
 | `detection` | Change-point detection (CUSUM, EWMA, PELT) and one-shot anomaly scoring by spectral residual saliency (Ren et al. 2019) |
 | `smoothing` | Time series smoothing (SES, Holt linear trend, Holt-Winters seasonal) |
 | `seasonality` | Periodogram (zero-padded FFT) and dominant-period estimation — AutoPeriod: permutation-thresholded peaks refined on the ACF |
@@ -154,6 +155,39 @@ assert!((fit.beta - 1.2509).abs() < 1e-4);
 
 Times must be ascending and `> 0`; an unordered, non-positive or late event is
 refused with its position.
+
+### Cumulative counters — how much did it advance, and is every step explained?
+
+A meter, an hour meter or a production counter is read as a running total; the
+quantity wanted is how much it advanced between readings. A reading below the
+one before it has several explanations — the register passed its maximum and
+started again from 0, it was reset or replaced, or the reading is wrong — and
+none of them is assumed. Each pair of neighbouring readings is classified:
+`Normal` (did not fall), `Declared` (a reset or replacement the caller declares,
+counted from the new start value), `Wrap` (fell, and the register's `modulus`
+explains it — with `max_rate`, only if the counter could advance that much in
+the time) or `Unexplained` (fell, nothing given explains it: the increase is
+`None`). Monitoring systems usually read every fall as a restart from 0
+(Prometheus `increase()`); that is right for process counters and wrong for a
+meter whose readings settle a bill.
+
+```rust
+use u_analytics::counter::{counter_increments, counter_totals, CounterOptions, IncrementKind};
+
+// A six-digit register read every 6 hours; it passes 999 999 on the second day.
+let times = [0.0, 6.0, 12.0, 18.0, 24.0, 30.0, 36.0];
+let values = [999_900.0, 999_930.0, 999_950.0, 999_990.0, 20.0, 60.0, 90.0];
+let options = CounterOptions { modulus: Some(1_000_000.0), ..Default::default() };
+let steps = counter_increments(&times, &values, &options).unwrap();
+assert_eq!(steps[3].kind, IncrementKind::Wrap);
+assert_eq!(steps[3].increase, Some(30.0));
+let days = counter_totals(&steps, &[0.0, 24.0, 48.0]).unwrap();
+assert_eq!((days[0].increase, days[1].increase), (90.0, 100.0));
+```
+
+A pair belongs to the interval its later reading falls in (its increase is not
+split across a boundary it straddles); each interval says how many of its pairs
+were left unexplained.
 
 ### Change-Point Detection
 
@@ -763,6 +797,29 @@ console.log(r.statistic.toFixed(2), r.df, r.direction); // 9.59 12 increasing
 if (r.df !== 12 || r.direction !== "increasing") throw new Error("unexpected");
 ```
 
+Increments of a cumulative counter — `times` strictly ascending; `options` is
+`{ modulus?, max_rate?, discontinuities?: [{ time, start, last? }] }`:
+
+```ts
+counter_increments(times, values, options?): CounterIncrementDto[]
+  // [{ start, end, increase /* null when unexplained */,
+  //    kind: "normal" | "declared" | "wrap" | "unexplained" }]
+counter_totals(times, values, edges, options?): CounterTotalDto[]
+  // [{ start, end, increase, pairs, unexplained }] over [edges[j], edges[j+1])
+```
+
+A declared discontinuity is a reset or replacement between two readings: `start`
+is the register's value right after it, `last` (when read) the old register's
+final value — without it, what the counter advanced before the change is unknown
+and not counted.
+
+```js
+const { counter_increments } = require("@iyulab/u-analytics");
+const steps = counter_increments([0, 1, 2], [990, 995, 4], { modulus: 1000 });
+console.log(steps.map((s) => `${s.kind}:${s.increase}`).join(" ")); // normal:5 wrap:9
+if (steps[1].kind !== "wrap" || steps[1].increase !== 9) throw new Error("unexpected");
+```
+
 ```js
 import { two_sample_t_test, one_way_anova } from "@iyulab/u-analytics";
 
@@ -927,6 +984,11 @@ The event-time trend functions take `{ "times": [...], "observation": { "truncat
 (or `{ "truncation": "failure" }`) and return the same objects as over WASM:
 `uanalytics_laplace_trend_test`, `uanalytics_mil_hdbk_189_test`,
 `uanalytics_power_law_process_fit`.
+
+The counter functions take the readings and the options flat in one object —
+`{ "times": [...], "values": [...], "modulus"?, "max_rate"?, "discontinuities"? }`,
+plus `"edges"` for the totals — and return the WASM arrays:
+`uanalytics_counter_increments`, `uanalytics_counter_totals`.
 
 The reliability and non-normal capability functions take the WASM argument as the
 request (`uanalytics_boxcox_capability`, `uanalytics_weibull_reliability`), wrap a

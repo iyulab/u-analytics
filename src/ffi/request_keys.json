@@ -70,6 +70,41 @@
         "variables": {}
       }
     },
+    "uanalytics_counter_increments": {
+      "properties": {
+        "discontinuities": {
+          "items": {
+            "properties": {
+              "last": {},
+              "start": {},
+              "time": {}
+            }
+          }
+        },
+        "max_rate": {},
+        "modulus": {},
+        "times": {},
+        "values": {}
+      }
+    },
+    "uanalytics_counter_totals": {
+      "properties": {
+        "discontinuities": {
+          "items": {
+            "properties": {
+              "last": {},
+              "start": {},
+              "time": {}
+            }
+          }
+        },
+        "edges": {},
+        "max_rate": {},
+        "modulus": {},
+        "times": {},
+        "values": {}
+      }
+    },
     "uanalytics_cusum": {
       "properties": {
         "data": {},

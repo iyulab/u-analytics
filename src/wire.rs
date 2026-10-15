@@ -3995,6 +3995,323 @@ pub(crate) mod reliability {
     }
 }
 
+/// Increments of a cumulative counter (`crate::counter`).
+pub(crate) mod counter {
+    use super::*;
+    use crate::counter::{
+        counter_increments, counter_totals, CounterError, CounterIncrement, CounterOptions,
+        Discontinuity, IncrementKind,
+    };
+
+    /// A reset or replacement the caller declares: when, the register's value
+    /// right after it, and (when read) the old register's last value.
+    #[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[serde(deny_unknown_fields)]
+    pub(crate) struct DiscontinuityDto {
+        pub(crate) time: f64,
+        pub(crate) start: f64,
+        #[serde(default)]
+        #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+        pub(crate) last: Option<f64>,
+    }
+
+    /// The settings of a counter's increments; every one may be left out.
+    #[derive(Deserialize, Debug, Clone, Default, PartialEq)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[serde(deny_unknown_fields)]
+    pub(crate) struct CounterOptionsDto {
+        /// The value at which the register returns to 0.
+        #[serde(default)]
+        #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+        pub(crate) modulus: Option<f64>,
+        /// The most the counter can advance per unit of time.
+        #[serde(default)]
+        #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+        pub(crate) max_rate: Option<f64>,
+        /// Resets and replacements, in time order.
+        #[serde(default)]
+        #[cfg_attr(feature = "wasm", tsify(optional))]
+        pub(crate) discontinuities: Vec<DiscontinuityDto>,
+    }
+
+    impl From<&CounterOptionsDto> for CounterOptions {
+        fn from(o: &CounterOptionsDto) -> Self {
+            CounterOptions {
+                modulus: o.modulus,
+                max_rate: o.max_rate,
+                discontinuities: o
+                    .discontinuities
+                    .iter()
+                    .map(|d| Discontinuity {
+                        time: d.time,
+                        start: d.start,
+                        last: d.last,
+                    })
+                    .collect(),
+            }
+        }
+    }
+
+    /// How much the counter advanced between two neighbouring readings.
+    #[derive(Serialize, Debug, PartialEq)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct CounterIncrementDto {
+        pub(crate) start: f64,
+        pub(crate) end: f64,
+        /// `null` when `kind` is `"unexplained"`.
+        pub(crate) increase: Option<f64>,
+        #[cfg_attr(
+            feature = "wasm",
+            tsify(type = "\"normal\" | \"declared\" | \"wrap\" | \"unexplained\"")
+        )]
+        pub(crate) kind: &'static str,
+    }
+
+    impl From<CounterIncrement> for CounterIncrementDto {
+        fn from(i: CounterIncrement) -> Self {
+            CounterIncrementDto {
+                start: i.start,
+                end: i.end,
+                increase: i.increase,
+                kind: match i.kind {
+                    IncrementKind::Normal => "normal",
+                    IncrementKind::Declared => "declared",
+                    IncrementKind::Wrap => "wrap",
+                    IncrementKind::Unexplained => "unexplained",
+                },
+            }
+        }
+    }
+
+    /// The increments that end in one interval `[start, end)`.
+    #[derive(Serialize, Debug, PartialEq)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    pub(crate) struct CounterTotalDto {
+        pub(crate) start: f64,
+        pub(crate) end: f64,
+        pub(crate) increase: f64,
+        pub(crate) pairs: usize,
+        pub(crate) unexplained: usize,
+    }
+
+    fn refusal(e: CounterError) -> WireError {
+        let message = e.to_string();
+        match e {
+            CounterError::LengthMismatch { times, values } => {
+                WireError::new(code::DIMENSION_MISMATCH, None, message)
+                    .about("values")
+                    .with("expected", Detail::Num(times as f64))
+                    .with("got", Detail::Num(values as f64))
+            }
+            CounterError::TooFewReadings { got } => {
+                // Readings, or interval edges: both need two.
+                WireError::too_few("times", 2, got, message)
+            }
+            CounterError::NotFinite { parameter, index } => {
+                WireError::new(code::VALUE_NOT_FINITE, index, message).about(parameter)
+            }
+            CounterError::Unordered { parameter, index } => {
+                WireError::new(code::EVENTS_UNORDERED, Some(index), message).about(parameter)
+            }
+            CounterError::NotPositive { parameter, got } => {
+                WireError::out_of_range(parameter, Bound::Open(0.0), Bound::Unbounded, got, message)
+            }
+            CounterError::OutsideModulus {
+                parameter,
+                index,
+                got,
+                modulus,
+            } => {
+                let mut e = WireError::out_of_range(
+                    parameter,
+                    Bound::Closed(0.0),
+                    Bound::Open(modulus),
+                    got,
+                    message,
+                );
+                e.index = Some(index);
+                e
+            }
+            CounterError::OutsideReadings {
+                index,
+                got,
+                first,
+                last,
+            } => {
+                let mut e = WireError::out_of_range(
+                    "discontinuities.time",
+                    Bound::Open(first),
+                    Bound::Closed(last),
+                    got,
+                    message,
+                );
+                e.index = Some(index);
+                e
+            }
+            CounterError::TwoInOnePair { index } => {
+                WireError::new(code::INVALID_OPTION, Some(index), message).about("discontinuities")
+            }
+        }
+    }
+
+    /// The C ABI's request for the increments: the readings and, flat beside
+    /// them, the settings.
+    #[cfg(feature = "ffi")]
+    #[derive(Deserialize, Debug)]
+    #[serde(deny_unknown_fields)]
+    pub(crate) struct CounterRequestDto {
+        pub(crate) times: Vec<f64>,
+        pub(crate) values: Vec<f64>,
+        #[serde(default)]
+        pub(crate) modulus: Option<f64>,
+        #[serde(default)]
+        pub(crate) max_rate: Option<f64>,
+        #[serde(default)]
+        pub(crate) discontinuities: Vec<DiscontinuityDto>,
+    }
+
+    /// The C ABI's request for the totals: the increments' request and the
+    /// interval `edges`.
+    #[cfg(feature = "ffi")]
+    #[derive(Deserialize, Debug)]
+    #[serde(deny_unknown_fields)]
+    pub(crate) struct CounterTotalsRequestDto {
+        pub(crate) times: Vec<f64>,
+        pub(crate) values: Vec<f64>,
+        pub(crate) edges: Vec<f64>,
+        #[serde(default)]
+        pub(crate) modulus: Option<f64>,
+        #[serde(default)]
+        pub(crate) max_rate: Option<f64>,
+        #[serde(default)]
+        pub(crate) discontinuities: Vec<DiscontinuityDto>,
+    }
+
+    #[cfg(feature = "ffi")]
+    pub(crate) fn options_of(
+        modulus: Option<f64>,
+        max_rate: Option<f64>,
+        discontinuities: &[DiscontinuityDto],
+    ) -> CounterOptionsDto {
+        CounterOptionsDto {
+            modulus,
+            max_rate,
+            discontinuities: discontinuities.to_vec(),
+        }
+    }
+
+    pub(crate) fn increments_dto(
+        times: &[f64],
+        values: &[f64],
+        options: &CounterOptionsDto,
+    ) -> Result<Vec<CounterIncrementDto>, WireError> {
+        counter_increments(times, values, &options.into())
+            .map(|v| v.into_iter().map(Into::into).collect())
+            .map_err(refusal)
+    }
+
+    pub(crate) fn totals_dto(
+        times: &[f64],
+        values: &[f64],
+        edges: &[f64],
+        options: &CounterOptionsDto,
+    ) -> Result<Vec<CounterTotalDto>, WireError> {
+        let increments = counter_increments(times, values, &options.into()).map_err(refusal)?;
+        let totals = counter_totals(&increments, edges).map_err(|e| match e {
+            CounterError::TooFewReadings { got } => WireError::too_few(
+                "edges",
+                2,
+                got,
+                format!("at least 2 edges are needed for one interval, got {got}"),
+            ),
+            other => refusal(other),
+        })?;
+        Ok(totals
+            .into_iter()
+            .map(|t| CounterTotalDto {
+                start: t.start,
+                end: t.end,
+                increase: t.increase,
+                pairs: t.pairs,
+                unexplained: t.unexplained,
+            })
+            .collect())
+    }
+}
+
+#[cfg(test)]
+mod counter_wire_tests {
+    use super::counter::*;
+
+    #[test]
+    fn increments_carry_their_kind_on_the_wire() {
+        let o = CounterOptionsDto {
+            modulus: Some(1000.0),
+            ..Default::default()
+        };
+        let out = increments_dto(&[0.0, 1.0, 2.0], &[990.0, 995.0, 4.0], &o).unwrap();
+        assert_eq!(out[0].kind, "normal");
+        assert_eq!((out[1].kind, out[1].increase), ("wrap", Some(9.0)));
+        let out = increments_dto(&[0.0, 1.0], &[5.0, 4.0], &CounterOptionsDto::default()).unwrap();
+        assert_eq!((out[0].kind, out[0].increase), ("unexplained", None));
+    }
+
+    #[test]
+    fn counter_refusals_use_the_shared_reasons() {
+        let none = CounterOptionsDto::default();
+        let e = increments_dto(&[0.0, 1.0], &[1.0], &none).unwrap_err();
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("dimension_mismatch", Some("values"))
+        );
+        let e = increments_dto(&[1.0, 1.0], &[1.0, 2.0], &none).unwrap_err();
+        assert_eq!((e.code, e.index), ("events_unordered", Some(1)));
+        let o = CounterOptionsDto {
+            modulus: Some(10.0),
+            ..Default::default()
+        };
+        let e = increments_dto(&[0.0, 1.0], &[1.0, 12.0], &o).unwrap_err();
+        assert_eq!((e.code, e.index), ("parameter_out_of_range", Some(1)));
+        let o = CounterOptionsDto {
+            discontinuities: vec![DiscontinuityDto {
+                time: 5.0,
+                start: 0.0,
+                last: None,
+            }],
+            ..Default::default()
+        };
+        let e = increments_dto(&[0.0, 1.0], &[1.0, 2.0], &o).unwrap_err();
+        assert_eq!(
+            (e.code, e.parameter.as_deref(), e.index),
+            (
+                "parameter_out_of_range",
+                Some("discontinuities.time"),
+                Some(0)
+            )
+        );
+        let e = totals_dto(&[0.0, 1.0], &[1.0, 2.0], &[0.0], &none).unwrap_err();
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("insufficient_data", Some("edges"))
+        );
+    }
+
+    #[test]
+    fn totals_sum_the_pairs_ending_in_each_interval() {
+        let t = totals_dto(
+            &[0.0, 6.0, 12.0, 24.0, 30.0],
+            &[0.0, 1.0, 3.0, 4.0, 2.0],
+            &[0.0, 24.0, 48.0],
+            &CounterOptionsDto::default(),
+        )
+        .unwrap();
+        assert_eq!((t[0].increase, t[0].pairs, t[0].unexplained), (3.0, 2, 0));
+        assert_eq!((t[1].increase, t[1].pairs, t[1].unexplained), (1.0, 2, 1));
+    }
+}
+
 /// Trend tests and the power-law fit on event times (`crate::point_process`).
 pub(crate) mod point_process {
     use super::*;

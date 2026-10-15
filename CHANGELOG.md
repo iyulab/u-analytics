@@ -10,6 +10,17 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Added
 
+- **Increments of a cumulative counter**, each classified rather than assumed:
+  `counter_increments(times, values, options)` gives each pair of neighbouring
+  readings `{ start, end, increase, kind }` -- `normal` (did not fall),
+  `declared` (a reset or replacement the caller declares, counted from the new
+  start value, plus the old register's last advance when its final value is
+  given), `wrap` (fell, explained by the register's `modulus`; with `max_rate`
+  only when the counter could advance that much in the time) or `unexplained`
+  (fell, nothing explains it -- `increase` is `null`). `counter_totals` sums them
+  over intervals with the number of unexplained pairs in each. WebAssembly, C
+  ABI (`uanalytics_counter_increments`, `uanalytics_counter_totals`) and Rust
+  (`counter` module).
 - `codes()` (WebAssembly): every refusal `code` the package throws, with the
   fields that can come with it -- `{ refusals: [{ code, fields }], violations:
   [] }`, the shape every engine package shares -- built from the table the

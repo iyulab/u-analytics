@@ -882,6 +882,33 @@ wire_export!(
 );
 
 wire_export!(
+    /// Increments of a cumulative counter: `{times, values, modulus?, max_rate?,
+    /// discontinuities?}` → `[{start, end, increase, kind}]`, `kind` one of
+    /// `normal`, `declared`, `wrap`, `unexplained` (`increase` null).
+    uanalytics_counter_increments,
+    crate::wire::counter::CounterRequestDto,
+    |r| crate::wire::counter::increments_dto(
+        &r.times,
+        &r.values,
+        &crate::wire::counter::options_of(r.modulus, r.max_rate, &r.discontinuities)
+    )
+);
+
+wire_export!(
+    /// A cumulative counter's increments summed over intervals: `{times, values,
+    /// edges, modulus?, max_rate?, discontinuities?}` → `[{start, end, increase,
+    /// pairs, unexplained}]`.
+    uanalytics_counter_totals,
+    crate::wire::counter::CounterTotalsRequestDto,
+    |r| crate::wire::counter::totals_dto(
+        &r.times,
+        &r.values,
+        &r.edges,
+        &crate::wire::counter::options_of(r.modulus, r.max_rate, &r.discontinuities)
+    )
+);
+
+wire_export!(
     /// Weibull median-rank-regression fit: `{failure_times}` → `{shape, scale,
     /// r_squared}`.
     uanalytics_weibull_mrr,

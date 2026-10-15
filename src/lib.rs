@@ -29,6 +29,7 @@
 
 pub mod capability;
 pub mod correlation;
+pub mod counter;
 pub mod detection;
 pub mod distribution;
 pub mod msa;
