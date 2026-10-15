@@ -8,6 +8,8 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-15
+
 ### Added
 
 - **Confidence intervals for the capability indices**: `process_capability`
@@ -38,6 +40,13 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   `WeibullMle(…, confidence)` / `WeibullMleResult.Intervals`). Rust:
   `WeibullMleResult::covariance`, `shape_interval`, `scale_interval` and
   `b_life_interval` (delta method).
+
+### Changed
+
+- Rust: `CapabilityIndices` gains the field `n`, and `WeibullMleResult` gains
+  `covariance`; code that builds these structs with a literal adds the
+  fields. The WebAssembly `weibull_mle` takes two optional arguments after the
+  failure times.
 
 ### Fixed
 
