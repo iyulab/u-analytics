@@ -888,7 +888,8 @@ wire_export!(
         &r.failure_times,
         &r.suspension_times,
         r.confidence,
-        r.method.as_deref()
+        r.method.as_deref(),
+        &r.fractions_failed
     )
 );
 

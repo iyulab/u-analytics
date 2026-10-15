@@ -452,6 +452,7 @@
       "properties": {
         "confidence": {},
         "failure_times": {},
+        "fractions_failed": {},
         "method": {
           "enum": [
             "wald",

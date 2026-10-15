@@ -1641,6 +1641,7 @@ pub fn weibull_mle(
             &suspensions,
             options.confidence,
             options.method.as_deref(),
+            &options.fractions_failed,
         )
         .map_err(js_err)?,
     )
@@ -1654,6 +1655,8 @@ struct WeibullMleOptions {
     confidence: Option<f64>,
     #[serde(default)]
     method: Option<String>,
+    #[serde(default)]
+    fractions_failed: Vec<f64>,
 }
 
 #[wasm_bindgen(typescript_custom_section)]
@@ -1663,6 +1666,8 @@ export interface WeibullMleOptions {
     confidence?: number | null;
     /** `"wald"` (default) or `"likelihood_ratio"` -- the profile-likelihood interval. */
     method?: "wald" | "likelihood_ratio" | null;
+    /** Fractions failed (each in (0, 1)) whose B-life and interval to report; 0.1 is B10. */
+    fractions_failed?: number[];
 }
 "#;
 

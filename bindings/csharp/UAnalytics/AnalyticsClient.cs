@@ -296,15 +296,17 @@ public sealed class AnalyticsClient : IDisposable
     /// scale <see cref="WeibullMleResult.Intervals"/> at <paramref name="confidence"/> (default 0.95)
     /// by <paramref name="method"/>: <see cref="WeibullIntervalMethod.Wald"/>, or
     /// <see cref="WeibullIntervalMethod.LikelihoodRatio"/> — the profile-likelihood interval,
-    /// nearer its level with few failures.
+    /// nearer its level with few failures. <paramref name="fractionsFailed"/> (each in (0, 1);
+    /// 0.1 is B10) adds <see cref="WeibullMleResult.BLife"/> and their intervals by the same method.
     /// </summary>
     public WeibullMleResult WeibullMle(double[] failureTimes, double[]? suspensionTimes = null, double? confidence = null,
-        WeibullIntervalMethod method = WeibullIntervalMethod.Wald)
+        WeibullIntervalMethod method = WeibullIntervalMethod.Wald, double[]? fractionsFailed = null)
         => Call(NativeInterop.uanalytics_weibull_mle, AnalyticsJson.Default.WeibullMleResult,
             ("failure_times", Request.Nums("failure_times", failureTimes)),
             ("suspension_times", suspensionTimes is null ? null : Request.Nums("suspension_times", suspensionTimes)),
             ("confidence", Request.Num("confidence", confidence)),
-            ("method", Request.Option(method, AnalyticsJson.Default.WeibullIntervalMethod)));
+            ("method", Request.Option(method, AnalyticsJson.Default.WeibullIntervalMethod)),
+            ("fractions_failed", fractionsFailed is null ? null : Request.Nums("fractions_failed", fractionsFailed)));
 
     /// <summary>
     /// Weibull median-rank-regression fit (Bernard's ranks). <paramref name="suspensionTimes"/>

@@ -678,10 +678,14 @@ Weibull — fits of failure times (each finite and `> 0`, at least 2) and the
 reliability metrics of a fitted or known Weibull:
 
 ```ts
-weibull_mle(failure_times, suspension_times?, { confidence?, method? }?):
-  { shape, scale, log_likelihood, iterations,
-    intervals: { confidence, method, shape: { lower, upper }, scale: { lower, upper } },
+weibull_mle(failure_times, suspension_times?, { confidence?, method?, fractions_failed? }?):
+  { shape, scale, log_likelihood, iterations, b_life: number[],
+    intervals: { confidence, method, shape: { lower, upper }, scale: { lower, upper },
+                 b_life: { lower, upper }[] },
     covariance: [[var_shape, cov], [cov, var_scale]] }
+  // b_life / intervals.b_life: aligned with fractions_failed (each in (0, 1); 0.1 → B10),
+  //   by the same method -- the only place a likelihood-ratio B-life interval is given,
+  //   since it needs the data (weibull_reliability composes Wald ones from covariance)
   // suspension_times: right-censored units (still running / removed unfailed at that time)
   // intervals at confidence (default 0.95) by method: "wald" (default) -- log-normal from
   //   the observed Fisher information -- or "likelihood_ratio" -- the profile-likelihood

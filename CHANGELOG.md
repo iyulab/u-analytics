@@ -31,6 +31,11 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   `weibull_likelihood_interval` with `WeibullQuantity::{Shape, Scale, BLife}`.
   .NET: `WeibullMle(..., method: WeibullIntervalMethod.LikelihoodRatio)`,
   `WeibullIntervals.Method`.
+- `weibull_mle` takes `fractions_failed` and returns `b_life` with
+  `intervals.b_life`, by the chosen `method` — the likelihood-ratio B-life
+  interval needs the data, so this is where it is given. .NET:
+  `WeibullMle(..., fractionsFailed)` → `WeibullMleResult.BLife`,
+  `WeibullIntervals.BLife`.
 - **Median-rank regression with suspensions**: `weibull_mrr` takes
   `suspension_times`, which move the ranks of the failures after them
   (Johnson's adjusted ranks, then Benard's median rank) — dropping survivors

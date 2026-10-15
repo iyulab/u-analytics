@@ -260,11 +260,12 @@ public sealed record GageRRAnovaResult(
 /// <param name="Scale">Scale η (characteristic life).</param>
 /// <param name="LogLikelihood">Log-likelihood at the fit.</param>
 /// <param name="Iterations">Newton-Raphson iterations.</param>
-/// <param name="Intervals">Shape and scale intervals.</param>
+/// <param name="BLife">The B-life at each requested fraction failed.</param>
+/// <param name="Intervals">Shape, scale and B-life intervals.</param>
 /// <param name="Covariance">Asymptotic covariance of (shape, scale) — rows and columns shape,
 /// scale; the inverse observed Fisher information. Reliability intervals are made from it.</param>
 public sealed record WeibullMleResult(double Shape, double Scale, double LogLikelihood, int Iterations,
-    WeibullIntervals Intervals, IReadOnlyList<IReadOnlyList<double>> Covariance);
+    IReadOnlyList<double> BLife, WeibullIntervals Intervals, IReadOnlyList<IReadOnlyList<double>> Covariance);
 
 /// <summary>How the intervals of a Weibull MLE are made.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<WeibullIntervalMethod>))]
@@ -280,7 +281,7 @@ public enum WeibullIntervalMethod
 /// Two-sided intervals of a Weibull MLE at <see cref="Confidence"/>, made by <see cref="Method"/>.
 /// </summary>
 public sealed record WeibullIntervals(double Confidence, WeibullIntervalMethod Method, ConfidenceInterval Shape,
-    ConfidenceInterval Scale);
+    ConfidenceInterval Scale, IReadOnlyList<ConfidenceInterval> BLife);
 
 /// <summary>Weibull median-rank-regression fit.</summary>
 public sealed record WeibullMrrResult(double Shape, double Scale, double RSquared);
