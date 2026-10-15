@@ -115,6 +115,8 @@ public class ContractTests
         ["BenjaminiHochberg"] = c => Out(new ValuesBody(c.BenjaminiHochberg([0.01, 0.04, 0.03])), AnalyticsJson.Default.ValuesBody),
         ["SigmaToPpm"] = c => Out(new ValueBody(c.SigmaToPpm(6)), AnalyticsJson.Default.ValueBody),
         ["PpmToSigma"] = c => Out(new ValueBody(c.PpmToSigma(3.4)), AnalyticsJson.Default.ValueBody),
+        ["CounterIncrements"] = c => Out(c.CounterIncrements([0, 1, 2, 3], [990, 995, 4, 2], modulus: 1000), AnalyticsJson.Default.IReadOnlyListCounterIncrement),
+        ["CounterTotals"] = c => Out(c.CounterTotals([0, 1, 2, 3], [990, 995, 4, 2], [0, 2, 4], modulus: 1000), AnalyticsJson.Default.IReadOnlyListCounterTotal),
         ["LaplaceTrendTest"] = c => Out(c.LaplaceTrendTest(Events, 42), AnalyticsJson.Default.TrendTestResult),
         ["MilHdbk189Test"] = c => Out(c.MilHdbk189Test(Events, null), AnalyticsJson.Default.TrendTestResult),
         ["PowerLawProcessFit"] = c => Out(c.PowerLawProcessFit(Events, 42), AnalyticsJson.Default.PowerLawFitResult),

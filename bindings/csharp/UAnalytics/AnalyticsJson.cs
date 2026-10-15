@@ -15,6 +15,8 @@ namespace UAnalytics;
 [JsonSerializable(typeof(XbarSChartResult))]
 [JsonSerializable(typeof(ImrChartResult))]
 [JsonSerializable(typeof(IReadOnlyList<ChartPoint>))]
+[JsonSerializable(typeof(IReadOnlyList<CounterIncrement>))]
+[JsonSerializable(typeof(IReadOnlyList<CounterTotal>))]
 [JsonSerializable(typeof(PChartResult))]
 [JsonSerializable(typeof(LaneyPChartResult))]
 [JsonSerializable(typeof(FixedLimitChartResult))]

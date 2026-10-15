@@ -19,6 +19,10 @@
   incidents) arrive at a changing rate — `LaplaceTrendTest`, `MilHdbk189Test`, and the
   power-law process (Crow-AMSAA) fit `PowerLawProcessFit`. Pass the end of observation,
   or `null` when it stopped at the last event
+- **Cumulative counters**: `CounterIncrements` — how much a meter or counter advanced
+  between readings, each step `Normal`, `Declared` (a reset or replacement you pass as
+  `CounterDiscontinuity`), `Wrap` (through the register's `modulus`) or `Unexplained`
+  (no increase guessed) — and `CounterTotals` over intervals
 - **Hypothesis tests**: t (one-sample, Welch, paired), Mann-Whitney, Wilcoxon,
   Jarque-Bera, Shapiro-Wilk, Anderson-Darling, Mann-Kendall, ANOVA, Kruskal-Wallis, Levene, Bartlett,
   χ² goodness of fit and independence, Fisher's exact; Bonferroni and

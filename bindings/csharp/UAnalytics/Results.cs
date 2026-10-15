@@ -304,6 +304,43 @@ public sealed record TrendTestResult(
 public sealed record PowerLawFitResult(
     double Beta, double BetaUnbiased, double Lambda, double IntensityAtEnd, double End, int Events);
 
+// ── Cumulative counters ──
+
+/// <summary>What explains an increment of a cumulative counter.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<IncrementKind>))]
+public enum IncrementKind
+{
+    /// <summary>The value did not fall.</summary>
+    [JsonStringEnumMemberName("normal")] Normal,
+    /// <summary>A declared reset or replacement lies between the readings.</summary>
+    [JsonStringEnumMemberName("declared")] Declared,
+    /// <summary>The value fell and the register's modulus explains it.</summary>
+    [JsonStringEnumMemberName("wrap")] Wrap,
+    /// <summary>The value fell and nothing given explains it; the increase is unknown.</summary>
+    [JsonStringEnumMemberName("unexplained")] Unexplained,
+}
+
+/// <summary>
+/// How much a cumulative counter advanced between two neighbouring readings, at
+/// <c>Start</c> and <c>End</c>. <c>Increase</c> is <c>null</c> when <c>Kind</c> is
+/// <see cref="IncrementKind.Unexplained"/>.
+/// </summary>
+public sealed record CounterIncrement(double Start, double End, double? Increase, IncrementKind Kind);
+
+/// <summary>
+/// The increments that end in one interval [<c>Start</c>, <c>End</c>): the sum of the known
+/// increases, the number of pairs, and how many of them are unexplained.
+/// </summary>
+public sealed record CounterTotal(double Start, double End, double Increase, int Pairs, int Unexplained);
+
+/// <summary>
+/// A reset or replacement of a counter, declared by the caller: when it happened, the
+/// register's value right after it (<c>Start</c>), and the old register's last value when it
+/// was read (<c>Last</c>) — without it, what the counter advanced before the change is not
+/// counted.
+/// </summary>
+public sealed record CounterDiscontinuity(double Time, double Start, double? Last = null);
+
 // ── Hypothesis tests ──
 
 /// <summary>A test statistic, its degrees of freedom (0 where the test has none) and its p value.</summary>

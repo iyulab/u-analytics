@@ -138,6 +138,32 @@ public class BehaviourTests
     }
 
     [Fact]
+    public void A_counter_classifies_each_increment_rather_than_assuming()
+    {
+        // A six-digit register passing 999 999, then a fall nothing explains.
+        var steps = _client.CounterIncrements([0, 1, 2, 3], [999_995, 999_998, 4, 1], modulus: 1_000_000, maxRate: 100);
+        Assert.Equal([IncrementKind.Normal, IncrementKind.Wrap, IncrementKind.Unexplained], steps.Select(s => s.Kind));
+        Assert.Equal(6, steps[1].Increase);
+        Assert.Null(steps[2].Increase);
+
+        // A replacement between the readings: counted from the new register's start.
+        var replaced = _client.CounterIncrements([0, 1, 2], [100, 120, 7],
+            discontinuities: [new CounterDiscontinuity(1.5, 0, Last: 126)]);
+        Assert.Equal(IncrementKind.Declared, replaced[1].Kind);
+        Assert.Equal(13, replaced[1].Increase);
+
+        var days = _client.CounterTotals([0, 6, 12, 24, 30], [0, 1, 3, 4, 2], [0, 24, 48]);
+        Assert.Equal((3.0, 2, 0), (days[0].Increase, days[0].Pairs, days[0].Unexplained));
+        Assert.Equal((1.0, 2, 1), (days[1].Increase, days[1].Pairs, days[1].Unexplained));
+
+        var outside = Assert.Throws<AnalyticsException>(() => _client.CounterIncrements([0, 1], [1, 2],
+            discontinuities: [new CounterDiscontinuity(5, 0)]));
+        Assert.Equal("parameter_out_of_range", outside.ErrorCode);
+        Assert.Equal("discontinuities.time", outside.Parameter);
+        Assert.Equal(0, outside.Index);
+    }
+
+    [Fact]
     public void Trend_direction_is_typed()
     {
         // Gaps shrinking: events coming more often.

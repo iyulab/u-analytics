@@ -440,6 +440,63 @@ public sealed class AnalyticsClient : IDisposable
         => Call(NativeInterop.uanalytics_benjamini_hochberg, AnalyticsJson.Default.ValuesBody,
             ("p_values", Request.Nums("p_values", pValues))).Values;
 
+    // ── Cumulative counters (a meter's register, an hour meter, a production counter) ──
+
+    /// <summary>
+    /// How much a cumulative counter advanced between each pair of neighbouring readings
+    /// (<paramref name="times"/> strictly ascending), each classified rather than assumed:
+    /// <see cref="IncrementKind.Normal"/> (did not fall), <see cref="IncrementKind.Declared"/>
+    /// (one of <paramref name="discontinuities"/> lies between them),
+    /// <see cref="IncrementKind.Wrap"/> (fell, explained by <paramref name="modulus"/> — the value
+    /// at which the register returns to 0; with <paramref name="maxRate"/>, only if the counter
+    /// could advance that much in the time) or <see cref="IncrementKind.Unexplained"/> (fell,
+    /// nothing explains it — the increase is <c>null</c>).
+    /// </summary>
+    public IReadOnlyList<CounterIncrement> CounterIncrements(double[] times, double[] values,
+        double? modulus = null, double? maxRate = null, IReadOnlyList<CounterDiscontinuity>? discontinuities = null)
+        => Call(NativeInterop.uanalytics_counter_increments, AnalyticsJson.Default.IReadOnlyListCounterIncrement,
+            ("times", Request.Nums("times", times)),
+            ("values", Request.Nums("values", values)),
+            ("modulus", Request.Num("modulus", modulus)),
+            ("max_rate", Request.Num("max_rate", maxRate)),
+            ("discontinuities", Discontinuities(discontinuities)));
+
+    /// <summary>
+    /// The increments of <see cref="CounterIncrements"/> summed over the intervals
+    /// [<paramref name="edges"/>[j], <paramref name="edges"/>[j+1]). A pair counts in the interval
+    /// its later reading falls in; <c>Unexplained</c> is how many of an interval's pairs have no
+    /// known increase.
+    /// </summary>
+    public IReadOnlyList<CounterTotal> CounterTotals(double[] times, double[] values, double[] edges,
+        double? modulus = null, double? maxRate = null, IReadOnlyList<CounterDiscontinuity>? discontinuities = null)
+        => Call(NativeInterop.uanalytics_counter_totals, AnalyticsJson.Default.IReadOnlyListCounterTotal,
+            ("times", Request.Nums("times", times)),
+            ("values", Request.Nums("values", values)),
+            ("edges", Request.Nums("edges", edges)),
+            ("modulus", Request.Num("modulus", modulus)),
+            ("max_rate", Request.Num("max_rate", maxRate)),
+            ("discontinuities", Discontinuities(discontinuities)));
+
+    private static JsonArray? Discontinuities(IReadOnlyList<CounterDiscontinuity>? discontinuities)
+    {
+        if (discontinuities is null)
+            return null;
+        var array = new JsonArray();
+        for (var i = 0; i < discontinuities.Count; i++)
+        {
+            var d = discontinuities[i];
+            var item = new JsonObject
+            {
+                ["time"] = Request.Num("discontinuities.time", d.Time, i),
+                ["start"] = Request.Num("discontinuities.start", d.Start, i),
+            };
+            if (d.Last is { } last)
+                item["last"] = Request.Num("discontinuities.last", last, i);
+            array.Add((JsonNode)item);
+        }
+        return array;
+    }
+
     // ── Event-time trend (one unit's events: failures of a repairable system, incidents, ...) ──
 
     /// <summary>

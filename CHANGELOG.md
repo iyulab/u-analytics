@@ -19,7 +19,9 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   only when the counter could advance that much in the time) or `unexplained`
   (fell, nothing explains it -- `increase` is `null`). `counter_totals` sums them
   over intervals with the number of unexplained pairs in each. WebAssembly, C
-  ABI (`uanalytics_counter_increments`, `uanalytics_counter_totals`) and Rust
+  ABI (`uanalytics_counter_increments`, `uanalytics_counter_totals`), .NET
+  (`CounterIncrements` / `CounterTotals` → `CounterIncrement` / `CounterTotal`
+  with `IncrementKind`, discontinuities as `CounterDiscontinuity`) and Rust
   (`counter` module).
 - `codes()` (WebAssembly): every refusal `code` the package throws, with the
   fields that can come with it -- `{ refusals: [{ code, fields }], violations:
