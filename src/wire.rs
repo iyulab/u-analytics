@@ -3627,6 +3627,11 @@ pub(crate) mod reliability {
         pub(crate) log_likelihood: f64,
         pub(crate) iterations: usize,
         pub(crate) intervals: WeibullIntervalsDto,
+        /// Asymptotic covariance of `(shape, scale)` -- the inverse of the
+        /// observed Fisher information, rows and columns shape, scale. Pass
+        /// it to `weibull_reliability` for B-life and reliability intervals.
+        #[cfg_attr(feature = "wasm", tsify(type = "[[number, number], [number, number]]"))]
+        pub(crate) covariance: [[f64; 2]; 2],
     }
 
     /// Weibull median-rank-regression fit.
@@ -3685,6 +3690,7 @@ pub(crate) mod reliability {
             log_likelihood: r.log_likelihood,
             iterations: r.iterations,
             intervals,
+            covariance: r.covariance,
         })
     }
 
@@ -3700,8 +3706,9 @@ pub(crate) mod reliability {
 
     // ── Weibull reliability ───────────────────────────────────────────────
 
-    /// `{ shape, scale, times?, fractions_failed? }` — a fitted (or known)
-    /// Weibull and the points to evaluate it at.
+    /// `{ shape, scale, times?, fractions_failed?, covariance?, confidence? }`
+    /// — a fitted (or known) Weibull and the points to evaluate it at; with
+    /// the fit's `covariance`, intervals at `confidence`.
     #[derive(Deserialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
     #[serde(deny_unknown_fields)]
@@ -3717,6 +3724,32 @@ pub(crate) mod reliability {
         #[serde(default)]
         #[cfg_attr(feature = "wasm", tsify(optional))]
         pub(crate) fractions_failed: Vec<f64>,
+        /// Covariance of the estimated `(shape, scale)` (`weibull_mle`'s
+        /// `covariance`). With it the answer carries `intervals`.
+        #[serde(default)]
+        #[cfg_attr(feature = "wasm", tsify(optional))]
+        #[cfg_attr(
+            feature = "wasm",
+            tsify(type = "[[number, number], [number, number]] | null")
+        )]
+        pub(crate) covariance: Option<[[f64; 2]; 2]>,
+        /// Confidence level of `intervals`, in (0, 1). Omitted: 0.95. Given
+        /// without `covariance` it is refused -- there is nothing to apply it to.
+        #[serde(default)]
+        #[cfg_attr(feature = "wasm", tsify(optional))]
+        #[cfg_attr(feature = "wasm", tsify(type = "number | null"))]
+        pub(crate) confidence: Option<f64>,
+    }
+
+    /// Two-sided intervals at `confidence`, aligned with the requested times
+    /// and fractions: delta method on `ln(−ln R)` and `ln t_p`.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct WeibullReliabilityIntervalsDto {
+        pub(crate) confidence: f64,
+        pub(crate) reliability: Vec<crate::wire::IntervalDto>,
+        pub(crate) b_life: Vec<crate::wire::IntervalDto>,
     }
 
     /// Reliability metrics of a Weibull, aligned with the input arrays.
@@ -3732,6 +3765,9 @@ pub(crate) mod reliability {
         pub(crate) hazard_rate: Vec<f64>,
         /// The B-life for each of `fractions_failed`.
         pub(crate) b_life: Vec<f64>,
+        /// Intervals for `reliability` and `b_life`; `null` without a
+        /// `covariance`.
+        pub(crate) intervals: Option<WeibullReliabilityIntervalsDto>,
     }
 
     pub(crate) fn weibull_reliability_dto(
@@ -3762,8 +3798,77 @@ pub(crate) mod reliability {
                 return Err(e);
             }
         }
-        let ra = crate::weibull::ReliabilityAnalysis::new(shape, scale)
+        let mut ra = crate::weibull::ReliabilityAnalysis::new(shape, scale)
             .expect("shape and scale were checked finite and > 0");
+        let confidence = match (input.covariance, input.confidence) {
+            (None, None) => None,
+            (None, Some(_)) => {
+                return Err(WireError::new(
+                    code::INVALID_OPTION,
+                    None,
+                    "confidence sets the level of the intervals, which need the fit's covariance",
+                )
+                .about("confidence"))
+            }
+            (Some(covariance), confidence) => {
+                for (i, v) in covariance.iter().flatten().enumerate() {
+                    if !v.is_finite() {
+                        return Err(WireError::new(
+                            code::VALUE_NOT_FINITE,
+                            Some(i),
+                            format!("covariance: expected finite numbers, got {v}"),
+                        )
+                        .about("covariance"));
+                    }
+                }
+                ra = ra.with_covariance(covariance).ok_or_else(|| {
+                    WireError::new(
+                        code::INVALID_OPTION,
+                        None,
+                        "covariance must be symmetric and positive definite",
+                    )
+                    .about("covariance")
+                })?;
+                let confidence = confidence.unwrap_or(0.95);
+                if !(confidence > 0.0 && confidence < 1.0) {
+                    return Err(WireError::out_of_range(
+                        "confidence",
+                        Bound::Open(0.0),
+                        Bound::Open(1.0),
+                        confidence,
+                        format!("confidence must be strictly between 0 and 1, got {confidence}"),
+                    ));
+                }
+                Some(confidence)
+            }
+        };
+        let interval = |(_, i): (f64, crate::weibull::WeibullInterval)| crate::wire::IntervalDto {
+            lower: i.lower,
+            upper: i.upper,
+        };
+        let intervals = confidence.map(|confidence| WeibullReliabilityIntervalsDto {
+            confidence,
+            reliability: input
+                .times
+                .iter()
+                .map(|&t| {
+                    interval(
+                        ra.reliability_interval(t, confidence)
+                            .expect("covariance, confidence and time were checked"),
+                    )
+                })
+                .collect(),
+            b_life: input
+                .fractions_failed
+                .iter()
+                .map(|&f| {
+                    interval(
+                        ra.b_life_interval(f, confidence)
+                            .expect("covariance, confidence and fraction were checked"),
+                    )
+                })
+                .collect(),
+        });
         Ok(WeibullReliabilityDto {
             mtbf: ra.mtbf(),
             reliability: input.times.iter().map(|&t| ra.reliability(t)).collect(),
@@ -3773,6 +3878,7 @@ pub(crate) mod reliability {
                 .iter()
                 .map(|&f| ra.b_life(f).expect("fraction checked inside (0, 1)"))
                 .collect(),
+            intervals,
         })
     }
 
@@ -3945,6 +4051,8 @@ pub(crate) mod reliability {
                 scale: 100.0,
                 times: vec![0.0, 100.0],
                 fractions_failed: vec![0.1, 0.5],
+                covariance: None,
+                confidence: None,
             })
             .unwrap();
             assert!((r.reliability[1] - (-1.0f64).exp()).abs() < 1e-12);
@@ -3959,6 +4067,8 @@ pub(crate) mod reliability {
                 scale: 1.0,
                 times: vec![],
                 fractions_failed: vec![],
+                covariance: None,
+                confidence: None,
             })
             .unwrap_err();
             assert_eq!(
@@ -3970,11 +4080,71 @@ pub(crate) mod reliability {
                 scale: 1.0,
                 times: vec![],
                 fractions_failed: vec![0.5, 1.0],
+                covariance: None,
+                confidence: None,
             })
             .unwrap_err();
             assert_eq!(
                 (e.code, e.index, e.parameter.as_deref()),
                 ("parameter_out_of_range", Some(1), Some("fractions_failed"))
+            );
+        }
+
+        /// The fit's covariance, passed through, gives the intervals the
+        /// core gives the fit -- one definition.
+        #[test]
+        fn reliability_intervals_come_from_the_fit_s_covariance() {
+            let times = [55.0, 187.0, 216.0, 240.0, 244.0, 335.0, 361.0, 373.0];
+            let fit = weibull_mle_dto(&times, &[400.0, 400.0], None).unwrap();
+            let input = |covariance, confidence| WeibullReliabilityInputDto {
+                shape: fit.shape,
+                scale: fit.scale,
+                times: vec![0.0, 150.0],
+                fractions_failed: vec![0.1],
+                covariance,
+                confidence,
+            };
+            let r = weibull_reliability_dto(input(Some(fit.covariance), Some(0.9))).unwrap();
+            let i = r.intervals.as_ref().expect("covariance given");
+            assert_eq!(i.confidence, 0.9);
+            assert_eq!((i.reliability.len(), i.b_life.len()), (2, 1));
+            assert_eq!((i.reliability[0].lower, i.reliability[0].upper), (1.0, 1.0));
+            assert!(
+                i.reliability[1].lower < r.reliability[1]
+                    && r.reliability[1] < i.reliability[1].upper
+            );
+            let core = crate::weibull::weibull_mle_censored(&times, &[400.0, 400.0]).unwrap();
+            let (b10, ci) = core.b_life_interval(0.1, 0.9).unwrap();
+            assert_eq!(
+                (r.b_life[0], i.b_life[0].lower, i.b_life[0].upper),
+                (b10, ci.lower, ci.upper)
+            );
+            let r = weibull_reliability_dto(input(Some(fit.covariance), None)).unwrap();
+            assert_eq!(r.intervals.expect("default level").confidence, 0.95);
+            assert!(weibull_reliability_dto(input(None, None))
+                .unwrap()
+                .intervals
+                .is_none());
+
+            let refused = |covariance, confidence| {
+                let e = weibull_reliability_dto(input(covariance, confidence)).unwrap_err();
+                (e.code, e.parameter, e.index)
+            };
+            assert_eq!(
+                refused(None, Some(0.9)),
+                ("invalid_option", Some("confidence".into()), None)
+            );
+            assert_eq!(
+                refused(Some([[0.04, 2.0], [2.0, 25.0]]), None),
+                ("invalid_option", Some("covariance".into()), None)
+            );
+            assert_eq!(
+                refused(Some([[0.04, 0.1], [0.1, f64::INFINITY]]), None),
+                ("value_not_finite", Some("covariance".into()), Some(3))
+            );
+            assert_eq!(
+                refused(Some(fit.covariance), Some(1.0)),
+                ("parameter_out_of_range", Some("confidence".into()), None)
             );
         }
 

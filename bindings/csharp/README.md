@@ -12,7 +12,8 @@
 - **Measurement systems analysis**: Gage R&R by the Average & Range method and by
   ANOVA, each returning the charts the method plots
 - **Reliability**: Weibull fitting by maximum likelihood (`WeibullMle`) and median-rank
-  regression (`WeibullMrr`); `WeibullReliability` — MTBF, R(t), h(t) and B-lives
+  regression (`WeibullMrr`); `WeibullReliability` — MTBF, R(t), h(t) and B-lives, with
+  confidence intervals when given an MLE fit (`WeibullReliability(fit, …)`) or its `Covariance`
 - **Non-normal capability**: `BoxCoxCapability`, and `SigmaToPpm` / `PpmToSigma` on the
   1.5σ-shift convention
 - **Event-time trend**: whether one unit's events (failures of a repairable system,

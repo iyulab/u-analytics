@@ -5,6 +5,8 @@
 
 use u_numflow::special::gamma;
 
+use super::mle::{two_sided_z, WeibullInterval};
+
 /// Reliability analysis results from a fitted Weibull distribution.
 ///
 /// Computes reliability engineering metrics (reliability function, hazard
@@ -39,6 +41,9 @@ pub struct ReliabilityAnalysis {
     shape: f64,
     /// Scale parameter (eta).
     scale: f64,
+    /// Covariance of `(shape, scale)`, when the parameters were estimated --
+    /// what the confidence intervals are made from.
+    covariance: Option<[[f64; 2]; 2]>,
 }
 
 impl ReliabilityAnalysis {
@@ -66,17 +71,61 @@ impl ReliabilityAnalysis {
         if !shape.is_finite() || !scale.is_finite() || shape <= 0.0 || scale <= 0.0 {
             return None;
         }
-        Some(Self { shape, scale })
+        Some(Self {
+            shape,
+            scale,
+            covariance: None,
+        })
+    }
+
+    /// The same analysis with the covariance of the estimated `(shape,
+    /// scale)` -- row and column order shape, scale, as
+    /// [`WeibullMleResult::covariance`](super::WeibullMleResult::covariance)
+    /// gives it -- so the B-lives and reliabilities carry confidence
+    /// intervals ([`Self::b_life_interval`], [`Self::reliability_interval`]).
+    ///
+    /// `None` unless the matrix is a covariance: finite, symmetric (to a
+    /// relative 1e-9) and positive definite.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::weibull::ReliabilityAnalysis;
+    /// let ra = ReliabilityAnalysis::new(2.0, 100.0).unwrap();
+    /// assert!(ra.clone().with_covariance([[0.04, 0.1], [0.1, 25.0]]).is_some());
+    /// assert!(ra.with_covariance([[0.04, 2.0], [2.0, 25.0]]).is_none()); // not positive definite
+    /// ```
+    pub fn with_covariance(self, covariance: [[f64; 2]; 2]) -> Option<Self> {
+        let [[a, b], [c, d]] = covariance;
+        let finite = [a, b, c, d].iter().all(|v| v.is_finite());
+        let symmetric = (b - c).abs() <= 1e-9 * b.abs().max(c.abs()).max(f64::MIN_POSITIVE);
+        if !(finite && symmetric && a > 0.0 && d > 0.0 && a * d - b * c > 0.0) {
+            return None;
+        }
+        Some(Self {
+            covariance: Some(covariance),
+            ..self
+        })
+    }
+
+    /// The covariance of `(shape, scale)` the intervals are made from, when
+    /// there is one.
+    pub fn covariance(&self) -> Option<[[f64; 2]; 2]> {
+        self.covariance
     }
 
     /// Creates a reliability analysis from an MLE fitting result.
     ///
     /// # Panics
     /// This function does not panic. MLE results always have valid parameters.
+    ///
+    /// The fit's covariance comes along, so the analysis gives confidence
+    /// intervals.
     pub fn from_mle(result: &super::mle::WeibullMleResult) -> Self {
         Self {
             shape: result.shape,
             scale: result.scale,
+            covariance: Some(result.covariance),
         }
     }
 
@@ -88,6 +137,7 @@ impl ReliabilityAnalysis {
         Self {
             shape: result.shape,
             scale: result.scale,
+            covariance: None,
         }
     }
 
@@ -252,12 +302,248 @@ impl ReliabilityAnalysis {
         }
         self.time_to_reliability(1.0 - fraction_failed)
     }
+
+    /// `g' Σ g` for a gradient in `(shape, scale)`.
+    fn variance_along(&self, g: [f64; 2]) -> Option<f64> {
+        let c = self.covariance?;
+        Some((g[0] * g[0] * c[0][0] + 2.0 * g[0] * g[1] * c[0][1] + g[1] * g[1] * c[1][1]).max(0.0))
+    }
+
+    /// The B-life at `fraction_failed` with its two-sided interval at
+    /// `confidence`, by the delta method on
+    /// `ln t_p = ln η + ln(−ln(1 − p)) / β` (normal on the log scale, so the
+    /// limits stay positive).
+    ///
+    /// Returns `(estimate, interval)`; `None` without a covariance
+    /// ([`Self::with_covariance`], [`Self::from_mle`]) or when either argument
+    /// is outside (0, 1).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::weibull::ReliabilityAnalysis;
+    /// let ra = ReliabilityAnalysis::new(2.0, 100.0)
+    ///     .unwrap()
+    ///     .with_covariance([[0.04, 0.1], [0.1, 25.0]])
+    ///     .unwrap();
+    /// let (b10, ci) = ra.b_life_interval(0.10, 0.90).unwrap();
+    /// assert!(ci.lower < b10 && b10 < ci.upper);
+    /// ```
+    ///
+    /// # Reference
+    /// Meeker & Escobar (1998), *Statistical Methods for Reliability Data*, §8.4.
+    pub fn b_life_interval(
+        &self,
+        fraction_failed: f64,
+        confidence: f64,
+    ) -> Option<(f64, WeibullInterval)> {
+        let t_p = self.b_life(fraction_failed)?;
+        let z = two_sided_z(confidence)?;
+        let (beta, eta) = (self.shape, self.scale);
+        let w = (-(1.0 - fraction_failed).ln()).ln();
+        // Gradient of ln t_p in (beta, eta).
+        let half = z * self.variance_along([-w / (beta * beta), 1.0 / eta])?.sqrt();
+        Some((
+            t_p,
+            WeibullInterval {
+                lower: t_p * (-half).exp(),
+                upper: t_p * half.exp(),
+            },
+        ))
+    }
+
+    /// The reliability `R(t)` with its two-sided interval at `confidence`, by
+    /// the delta method on `u = ln(−ln R(t)) = β (ln t − ln η)`, which is
+    /// unbounded -- so the limits `exp(−exp(u ± z·se))` stay inside (0, 1).
+    /// At `t ≤ 0` the model has no failures and the interval is `[1, 1]`.
+    ///
+    /// Returns `(estimate, interval)`; `None` without a covariance or when
+    /// `confidence` is outside (0, 1) or `t` is not finite.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::weibull::ReliabilityAnalysis;
+    /// let ra = ReliabilityAnalysis::new(2.0, 100.0)
+    ///     .unwrap()
+    ///     .with_covariance([[0.04, 0.1], [0.1, 25.0]])
+    ///     .unwrap();
+    /// let (r, ci) = ra.reliability_interval(50.0, 0.95).unwrap();
+    /// assert!(0.0 < ci.lower && ci.lower < r && r < ci.upper && ci.upper < 1.0);
+    /// ```
+    ///
+    /// # Reference
+    /// Meeker & Escobar (1998), *Statistical Methods for Reliability Data*, §8.4.
+    pub fn reliability_interval(&self, t: f64, confidence: f64) -> Option<(f64, WeibullInterval)> {
+        let z = two_sided_z(confidence)?;
+        if !t.is_finite() {
+            return None;
+        }
+        self.covariance?;
+        if t <= 0.0 {
+            return Some((
+                1.0,
+                WeibullInterval {
+                    lower: 1.0,
+                    upper: 1.0,
+                },
+            ));
+        }
+        let (beta, eta) = (self.shape, self.scale);
+        let u = beta * (t / eta).ln();
+        // Gradient of u in (beta, eta).
+        let half = z * self.variance_along([u / beta, -beta / eta])?.sqrt();
+        let r = |u: f64| (-u.exp()).exp();
+        Some((
+            self.reliability(t),
+            WeibullInterval {
+                lower: r(u + half),
+                upper: r(u - half),
+            },
+        ))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::weibull::{weibull_mle, weibull_mrr};
+
+    fn estimated() -> ReliabilityAnalysis {
+        ReliabilityAnalysis::new(1.8, 120.0)
+            .unwrap()
+            .with_covariance([[0.05, 0.9], [0.9, 60.0]])
+            .unwrap()
+    }
+
+    /// The delta-method variance with the gradient taken by central
+    /// differences of the function itself, not the closed form.
+    fn numeric_variance(ra: &ReliabilityAnalysis, f: impl Fn(f64, f64) -> f64) -> f64 {
+        let (b, e) = (ra.shape(), ra.scale());
+        let (hb, he) = (1e-6 * b, 1e-6 * e);
+        let g = [
+            (f(b + hb, e) - f(b - hb, e)) / (2.0 * hb),
+            (f(b, e + he) - f(b, e - he)) / (2.0 * he),
+        ];
+        let c = ra.covariance().unwrap();
+        g[0] * g[0] * c[0][0] + 2.0 * g[0] * g[1] * c[0][1] + g[1] * g[1] * c[1][1]
+    }
+
+    #[test]
+    fn interval_widths_are_the_delta_method_of_the_function() {
+        let ra = estimated();
+        let z = u_numflow::special::inverse_normal_cdf(0.975);
+        let p = 0.1;
+        let (t_p, ci) = ra.b_life_interval(p, 0.95).unwrap();
+        let ln_tp = |b: f64, e: f64| e.ln() + (-(1.0 - p).ln()).ln() / b;
+        let half = z * numeric_variance(&ra, ln_tp).sqrt();
+        assert!(((ci.upper / t_p).ln() - half).abs() < 1e-7, "{ci:?}");
+        assert!(((t_p / ci.lower).ln() - half).abs() < 1e-7, "{ci:?}");
+
+        let t = 75.0;
+        let (r, ci) = ra.reliability_interval(t, 0.95).unwrap();
+        let u = |b: f64, e: f64| b * (t / e).ln();
+        let half = z * numeric_variance(&ra, u).sqrt();
+        let u_of = |r: f64| (-r.ln()).ln();
+        assert!((u_of(ci.lower) - u_of(r) - half).abs() < 1e-7, "{ci:?}");
+        assert!((u_of(r) - u_of(ci.upper) - half).abs() < 1e-7, "{ci:?}");
+    }
+
+    /// At t = B_p the two intervals are one statement: u = β(ln t − ln η) is
+    /// −β times (ln t_p − ln η − w/β) moved, so se(u) = β · se(ln t_p).
+    #[test]
+    fn the_reliability_interval_at_a_b_life_is_that_b_life_s_interval() {
+        let ra = estimated();
+        let p = 0.2;
+        let (t_p, b) = ra.b_life_interval(p, 0.9).unwrap();
+        let (r, ci) = ra.reliability_interval(t_p, 0.9).unwrap();
+        assert!((r - (1.0 - p)).abs() < 1e-12);
+        let half_u = (-ci.lower.ln()).ln() - (-r.ln()).ln();
+        let half_t = (b.upper / t_p).ln();
+        assert!(
+            (half_u - ra.shape() * half_t).abs() < 1e-9,
+            "{half_u} vs {half_t}"
+        );
+    }
+
+    #[test]
+    fn reliability_limits_stay_inside_zero_one_and_are_exact_at_time_zero() {
+        let ra = estimated();
+        for t in [1e-3, 1.0, 50.0, 120.0, 400.0, 2000.0] {
+            let (r, ci) = ra.reliability_interval(t, 0.99).unwrap();
+            assert!(
+                0.0 <= ci.lower && ci.lower <= r && r <= ci.upper && ci.upper <= 1.0,
+                "{t}: {ci:?}"
+            );
+        }
+        let (r, ci) = ra.reliability_interval(0.0, 0.95).unwrap();
+        assert_eq!((r, ci.lower, ci.upper), (1.0, 1.0, 1.0));
+        assert!(ra.reliability_interval(f64::NAN, 0.95).is_none());
+        assert!(ra.reliability_interval(10.0, 1.0).is_none());
+    }
+
+    #[test]
+    fn intervals_need_a_covariance() {
+        let ra = ReliabilityAnalysis::new(2.0, 100.0).unwrap();
+        assert!(ra.b_life_interval(0.1, 0.95).is_none());
+        assert!(ra.reliability_interval(10.0, 0.95).is_none());
+        let mrr = weibull_mrr(&[12.0, 25.0, 33.0, 47.0, 58.0, 71.0]).unwrap();
+        assert!(ReliabilityAnalysis::from_mrr(&mrr).covariance().is_none());
+    }
+
+    #[test]
+    fn with_covariance_takes_only_a_covariance() {
+        let ra = || ReliabilityAnalysis::new(2.0, 100.0).unwrap();
+        assert!(ra().with_covariance([[0.04, 0.1], [0.1, 25.0]]).is_some());
+        assert!(
+            ra().with_covariance([[0.04, 0.1], [0.2, 25.0]]).is_none(),
+            "asymmetric"
+        );
+        assert!(
+            ra().with_covariance([[0.04, 1.0], [1.0, 25.0]]).is_none(),
+            "singular"
+        );
+        assert!(
+            ra().with_covariance([[-0.04, 0.0], [0.0, 25.0]]).is_none(),
+            "negative variance"
+        );
+        assert!(ra()
+            .with_covariance([[f64::NAN, 0.0], [0.0, 25.0]])
+            .is_none());
+    }
+
+    #[test]
+    fn the_mle_s_b_life_interval_is_this_one() {
+        let fit = weibull_mle(&[55.0, 187.0, 216.0, 240.0, 244.0, 335.0, 361.0, 373.0]).unwrap();
+        let ra = ReliabilityAnalysis::from_mle(&fit);
+        assert_eq!(fit.b_life_interval(0.1, 0.9), ra.b_life_interval(0.1, 0.9));
+    }
+
+    /// Monte Carlo: n = 40 Weibull(2, 100) samples, MLE, 90 % interval for
+    /// R(60) and for B10. A Wald interval at this n covers within a few
+    /// points of nominal (Meeker & Escobar §8.4 — the log/loglog scales are
+    /// chosen for that); 600 samples give a binomial s.e. of 1.2 %.
+    #[test]
+    fn the_intervals_cover_near_their_level() {
+        use u_numflow::distributions::{Sample, Weibull};
+        let truth = ReliabilityAnalysis::new(2.0, 100.0).unwrap();
+        let (r_true, b10_true) = (truth.reliability(60.0), truth.b_life(0.1).unwrap());
+        let law = Weibull::new(2.0, 100.0).unwrap();
+        let mut rng = u_numflow::random::create_rng(2026);
+        let runs = 600;
+        let (mut r_in, mut b_in) = (0, 0);
+        for _ in 0..runs {
+            let data: Vec<f64> = (0..40).map(|_| law.sample(&mut rng)).collect();
+            let ra = ReliabilityAnalysis::from_mle(&weibull_mle(&data).unwrap());
+            let (_, r) = ra.reliability_interval(60.0, 0.9).unwrap();
+            let (_, b) = ra.b_life_interval(0.1, 0.9).unwrap();
+            r_in += usize::from(r.lower <= r_true && r_true <= r.upper);
+            b_in += usize::from(b.lower <= b10_true && b10_true <= b.upper);
+        }
+        let (rc, bc) = (r_in as f64 / runs as f64, b_in as f64 / runs as f64);
+        assert!((0.85..=0.95).contains(&rc), "R(60) coverage {rc}");
+        assert!((0.85..=0.95).contains(&bc), "B10 coverage {bc}");
+    }
 
     #[test]
     fn test_new_valid() {

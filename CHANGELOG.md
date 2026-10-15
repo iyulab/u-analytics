@@ -8,6 +8,21 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- **Confidence intervals for reliability and B-lives**: `weibull_mle` returns
+  `covariance` (the inverse observed Fisher information of shape and scale),
+  and `weibull_reliability` takes it — with `confidence` (default 0.95) — to
+  return `intervals: { confidence, reliability, b_life }` aligned with `times`
+  and `fractions_failed`: the delta method on `ln(−ln R)` and `ln t_p`, so the
+  limits stay in (0, 1) and above 0 (Meeker & Escobar §8.4). `confidence`
+  without a covariance, or a covariance that is not symmetric positive
+  definite, is refused (`invalid_option`). .NET: `WeibullMleResult.Covariance`,
+  `WeibullReliability(..., covariance, confidence)` and
+  `WeibullReliability(WeibullMleResult fit, ...)` → `WeibullReliabilityResult.Intervals`.
+  Rust: `ReliabilityAnalysis::with_covariance`, `b_life_interval`,
+  `reliability_interval`; `from_mle` carries the fit's covariance.
+
 ## [0.25.0] - 2026-10-16
 
 Depends on u-numflow 0.13. The .NET client is `UAnalytics` 0.20.0.

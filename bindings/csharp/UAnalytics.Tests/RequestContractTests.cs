@@ -109,7 +109,7 @@ public class RequestContractTests
         ["GageRRAnova"] = c => c.GageRRAnova(Gage(), tolerance: 10),
         ["WeibullMle"] = c => c.WeibullMle(Positive, [95.0, 95.0, 100.0], 0.9),
         ["WeibullMrr"] = c => c.WeibullMrr(Positive),
-        ["WeibullReliability"] = c => c.WeibullReliability(2, 100, [50, 100], [0.1]),
+        ["WeibullReliability"] = c => c.WeibullReliability(2, 100, [50, 100], [0.1], [[0.04, 0.1], [0.1, 25]], 0.9),
         ["BoxCoxCapability"] = c => c.BoxCoxCapability(Positive, 120, 5, (-2, 2)),
         ["SigmaToPpm"] = c => c.SigmaToPpm(6),
         ["PpmToSigma"] = c => c.PpmToSigma(3.4),

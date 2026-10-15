@@ -72,29 +72,13 @@ impl WeibullMleResult {
         fraction_failed: f64,
         confidence: f64,
     ) -> Option<(f64, WeibullInterval)> {
-        if !(fraction_failed > 0.0 && fraction_failed < 1.0) {
-            return None;
-        }
-        let z = two_sided_z(confidence)?;
-        let (beta, eta) = (self.shape, self.scale);
-        let w = (-(1.0 - fraction_failed).ln()).ln();
-        let t_p = eta * (w / beta).exp();
-        // Gradient of ln t_p in (beta, eta).
-        let g = [-w / (beta * beta), 1.0 / eta];
-        let c = &self.covariance;
-        let var = g[0] * g[0] * c[0][0] + 2.0 * g[0] * g[1] * c[0][1] + g[1] * g[1] * c[1][1];
-        let half = z * var.max(0.0).sqrt();
-        Some((
-            t_p,
-            WeibullInterval {
-                lower: t_p * (-half).exp(),
-                upper: t_p * half.exp(),
-            },
-        ))
+        super::ReliabilityAnalysis::from_mle(self).b_life_interval(fraction_failed, confidence)
     }
 }
 
-fn two_sided_z(confidence: f64) -> Option<f64> {
+/// The two-sided standard normal quantile for `confidence`, or `None`
+/// outside (0, 1).
+pub(super) fn two_sided_z(confidence: f64) -> Option<f64> {
     (confidence > 0.0 && confidence < 1.0)
         .then(|| inverse_normal_cdf(1.0 - (1.0 - confidence) / 2.0))
 }

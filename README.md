@@ -679,14 +679,35 @@ reliability metrics of a fitted or known Weibull:
 ```ts
 weibull_mle(failure_times, suspension_times?, { confidence? }?):
   { shape, scale, log_likelihood, iterations,
-    intervals: { confidence, shape: { lower, upper }, scale: { lower, upper } } }
+    intervals: { confidence, shape: { lower, upper }, scale: { lower, upper } },
+    covariance: [[var_shape, cov], [cov, var_scale]] }
   // suspension_times: right-censored units (still running / removed unfailed at that time)
   // intervals: log-normal from the observed Fisher information; confidence default 0.95
+  // covariance: inverse observed information -- pass it to weibull_reliability
 weibull_mrr(failure_times): { shape, scale, r_squared }        // median-rank regression (Bernard)
-weibull_reliability({ shape, scale, times?: number[], fractions_failed?: number[] }):
-  { mtbf, reliability: number[], hazard_rate: number[], b_life: number[] }
+weibull_reliability({ shape, scale, times?: number[], fractions_failed?: number[],
+                      covariance?, confidence? }):
+  { mtbf, reliability: number[], hazard_rate: number[], b_life: number[],
+    intervals: { confidence, reliability: { lower, upper }[], b_life: { lower, upper }[] } | null }
   // arrays aligned with times (R(t), h(t)) and fractions_failed (0.1 → B10);
   // the time to reliability p is the B-life at 1 − p
+  // intervals (with an MLE's covariance; confidence default 0.95): delta method on
+  // ln(−ln R) and ln t_p, so the limits stay in (0, 1) and above 0; [1, 1] at t ≤ 0.
+  // confidence without covariance → invalid_option; a covariance that is not
+  // symmetric positive definite → invalid_option (parameter "covariance")
+```
+
+The B10 life of a fleet with units still running, and how sure it is:
+
+```js
+const { weibull_mle, weibull_reliability } = require("@iyulab/u-analytics");
+const fit = weibull_mle([55, 187, 216, 240, 244, 335, 361, 373], [400, 400]);
+const r = weibull_reliability({
+  shape: fit.shape, scale: fit.scale, fractions_failed: [0.1],
+  covariance: fit.covariance, confidence: 0.9,
+});
+const [b10, ci] = [r.b_life[0], r.intervals.b_life[0]];
+if (!(ci.lower < b10 && b10 < ci.upper)) throw new Error("unexpected");
 ```
 
 ```js

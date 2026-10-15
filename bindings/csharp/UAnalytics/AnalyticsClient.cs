@@ -313,14 +313,29 @@ public sealed class AnalyticsClient : IDisposable
     /// Reliability metrics of a Weibull: <c>mtbf</c>, and arrays aligned with the inputs —
     /// <c>reliability</c> and <c>hazard_rate</c> at each of <paramref name="times"/>,
     /// <c>b_life</c> at each of <paramref name="fractionsFailed"/> (0.1 is B10; the time to
-    /// reliability p is the B-life at 1 − p).
+    /// reliability p is the B-life at 1 − p). With the <paramref name="covariance"/> of an
+    /// estimated shape and scale (<see cref="WeibullMleResult.Covariance"/>) the result carries
+    /// <see cref="WeibullReliabilityResult.Intervals"/> at <paramref name="confidence"/>
+    /// (default 0.95); <paramref name="confidence"/> without a covariance is refused.
     /// </summary>
     public WeibullReliabilityResult WeibullReliability(double shape, double scale, double[]? times = null,
-        double[]? fractionsFailed = null)
+        double[]? fractionsFailed = null, double[][]? covariance = null, double? confidence = null)
         => Call(NativeInterop.uanalytics_weibull_reliability, AnalyticsJson.Default.WeibullReliabilityResult,
             ("shape", Request.Num("shape", shape)), ("scale", Request.Num("scale", scale)),
             ("times", Request.Nums("times", times ?? [])),
-            ("fractions_failed", Request.Nums("fractions_failed", fractionsFailed ?? [])));
+            ("fractions_failed", Request.Nums("fractions_failed", fractionsFailed ?? [])),
+            ("covariance", covariance is null ? null : Request.Rows("covariance", covariance)),
+            ("confidence", Request.Num("confidence", confidence)));
+
+    /// <summary>
+    /// Reliability metrics of a Weibull MLE <paramref name="fit"/>, with intervals from its
+    /// covariance at <paramref name="confidence"/> (default 0.95) — the same as passing the
+    /// fit's shape, scale and <see cref="WeibullMleResult.Covariance"/>.
+    /// </summary>
+    public WeibullReliabilityResult WeibullReliability(WeibullMleResult fit, double[]? times = null,
+        double[]? fractionsFailed = null, double? confidence = null)
+        => WeibullReliability(fit.Shape, fit.Scale, times, fractionsFailed,
+            [.. fit.Covariance.Select(row => row.ToArray())], confidence);
 
     // ── Non-normal capability and sigma level ──
 

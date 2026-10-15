@@ -256,8 +256,15 @@ public sealed record GageRRAnovaResult(
 // ── Reliability ──
 
 /// <summary>Weibull maximum-likelihood fit.</summary>
+/// <param name="Shape">Shape β.</param>
+/// <param name="Scale">Scale η (characteristic life).</param>
+/// <param name="LogLikelihood">Log-likelihood at the fit.</param>
+/// <param name="Iterations">Newton-Raphson iterations.</param>
+/// <param name="Intervals">Shape and scale intervals.</param>
+/// <param name="Covariance">Asymptotic covariance of (shape, scale) — rows and columns shape,
+/// scale; the inverse observed Fisher information. Reliability intervals are made from it.</param>
 public sealed record WeibullMleResult(double Shape, double Scale, double LogLikelihood, int Iterations,
-    WeibullIntervals Intervals);
+    WeibullIntervals Intervals, IReadOnlyList<IReadOnlyList<double>> Covariance);
 
 /// <summary>
 /// Two-sided intervals of a Weibull MLE at <see cref="Confidence"/>, normal on the log scale from
@@ -273,7 +280,16 @@ public sealed record WeibullMrrResult(double Shape, double Scale, double RSquare
 /// aligned with the requested times, <see cref="BLife"/> with the requested fractions failed.
 /// </summary>
 public sealed record WeibullReliabilityResult(
-    double Mtbf, IReadOnlyList<double> Reliability, IReadOnlyList<double> HazardRate, IReadOnlyList<double> BLife);
+    double Mtbf, IReadOnlyList<double> Reliability, IReadOnlyList<double> HazardRate, IReadOnlyList<double> BLife,
+    WeibullReliabilityIntervals? Intervals);
+
+/// <summary>
+/// Two-sided intervals at <see cref="Confidence"/>, aligned with
+/// <see cref="WeibullReliabilityResult.Reliability"/> and <see cref="WeibullReliabilityResult.BLife"/>:
+/// the delta method on ln(−ln R) and ln tₚ, so the limits stay inside (0, 1) and above 0.
+/// </summary>
+public sealed record WeibullReliabilityIntervals(
+    double Confidence, IReadOnlyList<ConfidenceInterval> Reliability, IReadOnlyList<ConfidenceInterval> BLife);
 
 // ── Event-time trend ──
 

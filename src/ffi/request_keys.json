@@ -462,6 +462,8 @@
     },
     "uanalytics_weibull_reliability": {
       "properties": {
+        "confidence": {},
+        "covariance": {},
         "fractions_failed": {},
         "scale": {},
         "shape": {},
