@@ -1656,13 +1656,23 @@ export interface WeibullMleOptions {
 "#;
 
 /// Weibull median-rank-regression fit (Bernard's ranks): `{ shape, scale,
-/// r_squared }`. Same input as [`weibull_mle`].
+/// r_squared }`. Same failures and suspensions as [`weibull_mle`]: a
+/// suspension moves the ranks of the failures after it (Johnson's adjusted
+/// ranks).
 #[wasm_bindgen(unchecked_return_type = "WeibullMrrDto")]
 pub fn weibull_mrr(
     #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] failure_times: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "number[] | Float64Array | null")]
+    suspension_times: Option<JsValue>,
 ) -> Result<JsValue, JsValue> {
     let times = read_numbers(&failure_times, "failure_times").map_err(js_err)?;
-    to_js(&weibull_mrr_dto(&times).map_err(js_err)?)
+    let suspensions = match suspension_times {
+        Some(s) if !s.is_undefined() && !s.is_null() => {
+            read_numbers(&s, "suspension_times").map_err(js_err)?
+        }
+        _ => Vec::new(),
+    };
+    to_js(&weibull_mrr_dto(&times, &suspensions).map_err(js_err)?)
 }
 
 /// Reliability metrics of a Weibull: `{ shape, scale, times?, fractions_failed? }`

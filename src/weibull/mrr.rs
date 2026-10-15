@@ -66,30 +66,79 @@ pub struct WeibullMrrResult {
 /// # Complexity
 /// O(n log n) for sorting; O(n) for regression.
 pub fn weibull_mrr(failure_times: &[f64]) -> Option<WeibullMrrResult> {
-    let n = failure_times.len();
-    if n < 2 {
+    weibull_mrr_censored(failure_times, &[])
+}
+
+/// Median Rank Regression with right-censored units (suspensions) -- units
+/// still running, or removed unfailed, at their time.
+///
+/// A suspension has no point on the probability plot, but it moves the ranks
+/// of the failures after it: Johnson's adjusted rank
+///
+/// ```text
+/// A_i = A_{i-1} + (N + 1 − A_{i-1}) / (1 + reverse rank)
+/// ```
+///
+/// over all `N` units sorted by time (a failure before a suspension at the
+/// same time), then Benard's median rank `(A_i − 0.3) / (N + 0.4)` and the
+/// same regression as [`weibull_mrr`]. Without suspensions `A_i = i` and the
+/// fit is [`weibull_mrr`]'s exactly. Dropping the suspensions instead treats
+/// survivors as never having been at risk and pulls the scale (and every
+/// B-life) low.
+///
+/// `None` with fewer than 2 failures, a non-positive or non-finite time, or a
+/// degenerate regression.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::weibull::{weibull_mrr, weibull_mrr_censored};
+/// let failures = [55.0, 187.0, 216.0, 240.0, 244.0, 335.0];
+/// let censored = weibull_mrr_censored(&failures, &[361.0, 373.0, 375.0, 386.0]).unwrap();
+/// let dropped = weibull_mrr(&failures).unwrap();
+/// assert!(censored.scale > dropped.scale);
+/// ```
+///
+/// # References
+/// - Johnson, L.G. (1964). *Theory and Technique of Variation Research*, Elsevier.
+/// - Abernethy, R.B. (2006). *The New Weibull Handbook*, 5th ed., §2.9 ("Suspensions").
+pub fn weibull_mrr_censored(
+    failure_times: &[f64],
+    suspension_times: &[f64],
+) -> Option<WeibullMrrResult> {
+    if failure_times.len() < 2 {
+        return None;
+    }
+    let valid = |t: &f64| t.is_finite() && *t > 0.0;
+    if !failure_times.iter().all(valid) || !suspension_times.iter().all(valid) {
         return None;
     }
 
-    // Validate: all values must be positive and finite
-    if !failure_times.iter().all(|&t| t.is_finite() && t > 0.0) {
-        return None;
-    }
+    // Every unit by time; a failure sorts before a suspension at the same time.
+    let mut units: Vec<(f64, bool)> = failure_times
+        .iter()
+        .map(|&t| (t, true))
+        .chain(suspension_times.iter().map(|&t| (t, false)))
+        .collect();
+    units.sort_by(|a, b| {
+        a.0.partial_cmp(&b.0)
+            .expect("NaN values already filtered above")
+            .then(b.1.cmp(&a.1))
+    });
 
-    // Sort failure times ascending
-    let mut sorted = failure_times.to_vec();
-    sorted.sort_unstable_by(|a, b| a.partial_cmp(b).expect("NaN values already filtered above"));
-
-    let n_f = n as f64;
-
-    // Compute transformed coordinates
-    let mut x_vals = Vec::with_capacity(n);
-    let mut y_vals = Vec::with_capacity(n);
-
-    for (i, &t) in sorted.iter().enumerate() {
-        let rank = (i + 1) as f64;
+    let total = units.len();
+    let total_f = total as f64;
+    let mut x_vals = Vec::with_capacity(failure_times.len());
+    let mut y_vals = Vec::with_capacity(failure_times.len());
+    let mut adjusted = 0.0_f64;
+    for (i, &(t, failed)) in units.iter().enumerate() {
+        if !failed {
+            continue;
+        }
+        let reverse_rank = (total - i) as f64;
+        adjusted += (total_f + 1.0 - adjusted) / (1.0 + reverse_rank);
         // Benard's approximation for median ranks
-        let f_i = (rank - 0.3) / (n_f + 0.4);
+        let f_i = (adjusted - 0.3) / (total_f + 0.4);
 
         let x = t.ln();
         let y = (-(1.0 - f_i).ln()).ln(); // ln(-ln(1 - F_i))
@@ -101,6 +150,7 @@ pub fn weibull_mrr(failure_times: &[f64]) -> Option<WeibullMrrResult> {
         x_vals.push(x);
         y_vals.push(y);
     }
+    let n_f = x_vals.len() as f64;
 
     // Ordinary least squares: y = a + b*x
     // b = (n*sum(x*y) - sum(x)*sum(y)) / (n*sum(x^2) - (sum(x))^2)
@@ -155,6 +205,88 @@ pub fn weibull_mrr(failure_times: &[f64]) -> Option<WeibullMrrResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn without_suspensions_it_is_the_plain_fit_bit_for_bit() {
+        let data = [
+            72.0, 82.0, 97.0, 103.0, 113.0, 117.0, 126.0, 127.0, 127.0, 139.0,
+        ];
+        let plain = weibull_mrr(&data).unwrap();
+        let censored = weibull_mrr_censored(&data, &[]).unwrap();
+        assert_eq!(
+            (
+                plain.shape.to_bits(),
+                plain.scale.to_bits(),
+                plain.r_squared.to_bits()
+            ),
+            (
+                censored.shape.to_bits(),
+                censored.scale.to_bits(),
+                censored.r_squared.to_bits()
+            )
+        );
+    }
+
+    /// Johnson's ranks by hand for F10 S20 F30 F40 S50 (N = 5): 1, then
+    /// 1 + (6 − 1)/(1 + 3) = 2.25, then 2.25 + (6 − 2.25)/(1 + 2) = 3.5; the
+    /// fit is the plain regression on those three points.
+    #[test]
+    fn adjusted_ranks_are_johnson_s() {
+        let fit = weibull_mrr_censored(&[10.0, 30.0, 40.0], &[20.0, 50.0]).unwrap();
+        let points: Vec<(f64, f64)> = [(10.0, 1.0), (30.0, 2.25), (40.0, 3.5)]
+            .iter()
+            .map(|&(t, a): &(f64, f64)| {
+                let f = (a - 0.3) / 5.4;
+                (t.ln(), (-(1.0 - f).ln()).ln())
+            })
+            .collect();
+        let n = 3.0;
+        let (sx, sy) = (
+            points.iter().map(|p| p.0).sum::<f64>(),
+            points.iter().map(|p| p.1).sum::<f64>(),
+        );
+        let sxy: f64 = points.iter().map(|p| p.0 * p.1).sum();
+        let sxx: f64 = points.iter().map(|p| p.0 * p.0).sum();
+        let b = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+        let a = (sy - b * sx) / n;
+        assert!((fit.shape - b).abs() < 1e-12, "{} vs {b}", fit.shape);
+        assert!((fit.scale - (-a / b).exp()).abs() < 1e-9);
+    }
+
+    /// A failure and a suspension at the same time: the failure is ranked
+    /// first (the unit was at risk until then), so the suspension does not
+    /// lift that failure's rank.
+    #[test]
+    fn a_failure_is_ranked_before_a_suspension_at_its_time() {
+        let tied = weibull_mrr_censored(&[10.0, 30.0, 40.0], &[10.0]).unwrap();
+        let after = weibull_mrr_censored(&[10.0, 30.0, 40.0], &[10.0 + 1e-9]).unwrap();
+        assert!((tied.shape - after.shape).abs() < 1e-12);
+    }
+
+    /// Survivors beyond every failure lengthen the characteristic life; the
+    /// censored MLE moves the same way (both see the survivors at risk).
+    #[test]
+    fn suspensions_lengthen_the_scale_like_the_mle() {
+        let failures = [55.0, 187.0, 216.0, 240.0, 244.0, 335.0];
+        let survivors = [361.0, 373.0, 375.0, 386.0];
+        let mrr = weibull_mrr_censored(&failures, &survivors).unwrap();
+        let dropped = weibull_mrr(&failures).unwrap();
+        let mle = crate::weibull::weibull_mle_censored(&failures, &survivors).unwrap();
+        assert!(mrr.scale > dropped.scale);
+        assert!(
+            (mrr.scale / mle.scale - 1.0).abs() < 0.25,
+            "{} vs {}",
+            mrr.scale,
+            mle.scale
+        );
+    }
+
+    #[test]
+    fn censored_refuses_what_the_plain_fit_refuses() {
+        assert!(weibull_mrr_censored(&[10.0], &[20.0, 30.0]).is_none());
+        assert!(weibull_mrr_censored(&[10.0, 20.0], &[-1.0]).is_none());
+        assert!(weibull_mrr_censored(&[10.0, 20.0], &[f64::NAN]).is_none());
+    }
 
     #[test]
     fn test_mrr_uniform_spacing() {

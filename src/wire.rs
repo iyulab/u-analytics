@@ -3587,10 +3587,15 @@ pub(crate) mod reliability {
 
     /// `{ failure_times }` — the C ABI request (WebAssembly takes the array).
     #[cfg(feature = "ffi")]
+    /// `{ failure_times, suspension_times? }` — the C ABI request of the
+    /// median-rank regression, which also takes right-censored units.
+    #[cfg(feature = "ffi")]
     #[derive(Deserialize, Debug)]
     #[serde(deny_unknown_fields)]
-    pub(crate) struct FailureTimesDto {
+    pub(crate) struct WeibullMrrRequestDto {
         pub(crate) failure_times: Vec<f64>,
+        #[serde(default)]
+        pub(crate) suspension_times: Vec<f64>,
     }
 
     /// `{ failure_times, suspension_times? }` — the C ABI request of the MLE,
@@ -3694,9 +3699,16 @@ pub(crate) mod reliability {
         })
     }
 
-    pub(crate) fn weibull_mrr_dto(times: &[f64]) -> Result<WeibullMrrDto, WireError> {
+    /// `suspensions` move the failures' ranks (Johnson); empty fits the
+    /// failures alone.
+    pub(crate) fn weibull_mrr_dto(
+        times: &[f64],
+        suspensions: &[f64],
+    ) -> Result<WeibullMrrDto, WireError> {
         positive_values("failure_times", times, 2)?;
-        let r = crate::weibull::weibull_mrr(times).ok_or_else(|| degenerate("weibull_mrr"))?;
+        positive_values("suspension_times", suspensions, 0)?;
+        let r = crate::weibull::weibull_mrr_censored(times, suspensions)
+            .ok_or_else(|| degenerate("weibull_mrr"))?;
         Ok(WeibullMrrDto {
             shape: r.shape,
             scale: r.scale,
@@ -4031,17 +4043,23 @@ pub(crate) mod reliability {
                 (e.code, e.index, e.parameter.as_deref()),
                 ("non_positive_data", Some(1), Some("failure_times"))
             );
-            let e = weibull_mrr_dto(&[10.0, f64::NAN]).unwrap_err();
+            let e = weibull_mrr_dto(&[10.0, f64::NAN], &[]).unwrap_err();
             assert_eq!((e.code, e.index), ("value_not_finite", Some(1)));
-            let e = weibull_mrr_dto(&[10.0]).unwrap_err();
+            let e = weibull_mrr_dto(&[10.0], &[]).unwrap_err();
             assert_eq!(
                 e.details,
                 vec![("min", Detail::Num(2.0)), ("got", Detail::Num(1.0))]
             );
             let e = weibull_mle_dto(&[5.0, 5.0, 5.0], &[], None).unwrap_err();
             assert_eq!(e.code, "invalid_input");
-            let ok = weibull_mrr_dto(&[150.0, 200.0, 250.0, 300.0, 350.0, 400.0]).unwrap();
+            let ok = weibull_mrr_dto(&[150.0, 200.0, 250.0, 300.0, 350.0, 400.0], &[]).unwrap();
             assert!(ok.shape > 0.0 && ok.r_squared > 0.9);
+            let censored =
+                weibull_mrr_dto(&[150.0, 200.0, 250.0, 300.0, 350.0, 400.0], &[450.0, 450.0])
+                    .unwrap();
+            assert!(censored.scale > ok.scale);
+            let e = weibull_mrr_dto(&[150.0, 200.0], &[0.0]).unwrap_err();
+            assert_eq!(e.parameter.as_deref(), Some("suspension_times"));
         }
 
         #[test]

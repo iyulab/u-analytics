@@ -22,6 +22,18 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   `WeibullReliability(WeibullMleResult fit, ...)` → `WeibullReliabilityResult.Intervals`.
   Rust: `ReliabilityAnalysis::with_covariance`, `b_life_interval`,
   `reliability_interval`; `from_mle` carries the fit's covariance.
+- **Median-rank regression with suspensions**: `weibull_mrr` takes
+  `suspension_times`, which move the ranks of the failures after them
+  (Johnson's adjusted ranks, then Benard's median rank) — dropping survivors
+  pulled the scale and every B-life low. Without suspensions the fit is
+  unchanged, bit for bit. C ABI `suspension_times`, .NET
+  `WeibullMrr(failureTimes, suspensionTimes)`, Rust `weibull_mrr_censored`.
+
+### Changed
+
+- **Breaking (Rust):** `u_analytics::wasm::weibull_mrr` takes a second
+  argument, `suspension_times: Option<JsValue>`. JavaScript callers are
+  unaffected — the argument is optional there.
 
 ## [0.25.0] - 2026-10-16
 

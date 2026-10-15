@@ -684,7 +684,8 @@ weibull_mle(failure_times, suspension_times?, { confidence? }?):
   // suspension_times: right-censored units (still running / removed unfailed at that time)
   // intervals: log-normal from the observed Fisher information; confidence default 0.95
   // covariance: inverse observed information -- pass it to weibull_reliability
-weibull_mrr(failure_times): { shape, scale, r_squared }        // median-rank regression (Bernard)
+weibull_mrr(failure_times, suspension_times?): { shape, scale, r_squared }
+  // median-rank regression (Bernard); suspensions move the failures' ranks (Johnson)
 weibull_reliability({ shape, scale, times?: number[], fractions_failed?: number[],
                       covariance?, confidence? }):
   { mtbf, reliability: number[], hazard_rate: number[], b_life: number[],

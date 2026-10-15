@@ -302,12 +302,14 @@ public sealed class AnalyticsClient : IDisposable
             ("confidence", Request.Num("confidence", confidence)));
 
     /// <summary>
-    /// Weibull median-rank-regression fit (Bernard's ranks). Returns <c>shape</c>,
-    /// <c>scale</c>, <c>r_squared</c>.
+    /// Weibull median-rank-regression fit (Bernard's ranks). <paramref name="suspensionTimes"/>
+    /// are right-censored units: they move the ranks of the failures after them (Johnson's
+    /// adjusted ranks). Returns <c>shape</c>, <c>scale</c>, <c>r_squared</c>.
     /// </summary>
-    public WeibullMrrResult WeibullMrr(double[] failureTimes)
+    public WeibullMrrResult WeibullMrr(double[] failureTimes, double[]? suspensionTimes = null)
         => Call(NativeInterop.uanalytics_weibull_mrr, AnalyticsJson.Default.WeibullMrrResult,
-            ("failure_times", Request.Nums("failure_times", failureTimes)));
+            ("failure_times", Request.Nums("failure_times", failureTimes)),
+            ("suspension_times", suspensionTimes is null ? null : Request.Nums("suspension_times", suspensionTimes)));
 
     /// <summary>
     /// Reliability metrics of a Weibull: <c>mtbf</c>, and arrays aligned with the inputs —

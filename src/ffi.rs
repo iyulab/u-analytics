@@ -909,11 +909,12 @@ wire_export!(
 );
 
 wire_export!(
-    /// Weibull median-rank-regression fit: `{failure_times}` → `{shape, scale,
-    /// r_squared}`.
+    /// Weibull median-rank-regression fit: `{failure_times, suspension_times?}`
+    /// → `{shape, scale, r_squared}`; suspensions move the failures' ranks
+    /// (Johnson).
     uanalytics_weibull_mrr,
-    crate::wire::reliability::FailureTimesDto,
-    |r| crate::wire::reliability::weibull_mrr_dto(&r.failure_times)
+    crate::wire::reliability::WeibullMrrRequestDto,
+    |r| crate::wire::reliability::weibull_mrr_dto(&r.failure_times, &r.suspension_times)
 );
 
 wire_export!(

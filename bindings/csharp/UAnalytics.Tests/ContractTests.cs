@@ -92,6 +92,7 @@ public class ContractTests
         ["GageRRAnova"] = c => Out(c.GageRRAnova(Gage()), AnalyticsJson.Default.GageRRAnovaResult),
         ["WeibullMle"] = c => Out(c.WeibullMle(Positive), AnalyticsJson.Default.WeibullMleResult),
         ["WeibullMrr"] = c => Out(c.WeibullMrr(Positive), AnalyticsJson.Default.WeibullMrrResult),
+        ["WeibullMrr(suspensions)"] = c => Out(c.WeibullMrr(Positive, [95.0, 100.0]), AnalyticsJson.Default.WeibullMrrResult),
         ["WeibullReliability"] = c => Out(c.WeibullReliability(2, 100, [50, 100], [0.1]), AnalyticsJson.Default.WeibullReliabilityResult),
         ["WeibullReliability(fit)"] = c => Out(c.WeibullReliability(c.WeibullMle(Positive, [95.0, 95.0, 100.0]), [0, 50], [0.1], 0.9), AnalyticsJson.Default.WeibullReliabilityResult),
         ["BoxCoxCapability"] = c => Out(c.BoxCoxCapability(Positive, 120, 5), AnalyticsJson.Default.BoxCoxCapabilityResult),
