@@ -511,10 +511,12 @@ pub(crate) enum Code {
     UnknownOption,
     EventsUnordered,
     EventAfterEnd,
+    /// The package failed, not the input.
+    Internal,
 }
 
 impl Code {
-    pub(crate) const ALL: [Code; 17] = [
+    pub(crate) const ALL: [Code; 18] = [
         Code::InvalidInput,
         Code::MalformedInput,
         Code::CountNotWhole,
@@ -532,6 +534,7 @@ impl Code {
         Code::UnknownOption,
         Code::EventsUnordered,
         Code::EventAfterEnd,
+        Code::Internal,
     ];
 
     pub(crate) fn name(self) -> &'static str {
@@ -553,6 +556,7 @@ impl Code {
             Code::UnknownOption => "unknown_option",
             Code::EventsUnordered => "events_unordered",
             Code::EventAfterEnd => "event_after_end",
+            Code::Internal => "internal",
         }
     }
 
@@ -586,6 +590,7 @@ impl Code {
             Code::UnknownOption => &["index", "parameter", "got", "expected"],
             Code::EventsUnordered => &["index", "parameter"],
             Code::EventAfterEnd => &["index", "parameter"],
+            Code::Internal => &["index", "parameter"],
         }
     }
 }
@@ -650,6 +655,8 @@ pub(crate) mod code {
     pub(crate) const EVENTS_UNORDERED: super::Code = super::Code::EventsUnordered;
     /// An event time after the end of observation.
     pub(crate) const EVENT_AFTER_END: super::Code = super::Code::EventAfterEnd;
+    /// The package failed, not the input: a result it could not hand back.
+    pub(crate) const INTERNAL: super::Code = super::Code::Internal;
 }
 
 impl WireError {

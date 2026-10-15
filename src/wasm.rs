@@ -61,9 +61,9 @@ use crate::wire::{
 pub fn codes() -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(&crate::wire::code_catalog()).map_err(|e| {
         js_err(WireError::new(
-            crate::wire::code::INVALID_INPUT,
+            crate::wire::code::INTERNAL,
             None,
-            format!("internal: {e}"),
+            e.to_string(),
         ))
     })
 }
@@ -109,8 +109,9 @@ fn js_err(error: impl Into<WireError>) -> JsValue {
 }
 
 impl From<serde_wasm_bindgen::Error> for WireError {
+    /// Only results are serialized here, so a failure is the package's.
     fn from(e: serde_wasm_bindgen::Error) -> Self {
-        WireError::invalid_input(e.to_string())
+        WireError::new(crate::wire::code::INTERNAL, None, e.to_string())
     }
 }
 

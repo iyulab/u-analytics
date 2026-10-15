@@ -340,6 +340,7 @@ the .NET package from `AnalyticsClient.GetCodes()`.
 | `event_after_end` | an event time after the end of observation (`index`) |
 | `invalid_input` | any other refusal of the input, without a more specific reason (`index`, `parameter`) |
 | `invalid_input` | any other refusal; the message says what |
+| `internal` | A result the package could not hand back — a fault in the package, not in the input; please report it |
 
 `message` is written for people and may change between releases; `code` does not.
 

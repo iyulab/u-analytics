@@ -44,6 +44,15 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   argument, `suspension_times: Option<JsValue>`. JavaScript callers are
   unaffected — the argument is optional there.
 
+### Fixed
+
+- A result the package fails to hand back to JavaScript is refused as
+  `internal`, not as `malformed_input` with `parameter: "result"` — the fault
+  is the package's, not the caller's input. `internal` joins the refusal codes
+  (`codes()`, the README table).
+- A panic inside a C entry point answers with `"code": "internal"` (status −4);
+  its body said `invalid_input`.
+
 ## [0.25.0] - 2026-10-16
 
 Depends on u-numflow 0.13. The .NET client is `UAnalytics` 0.20.0.

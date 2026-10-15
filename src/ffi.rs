@@ -130,7 +130,13 @@ fn ffi_catch(
     }
     match panic::catch_unwind(f) {
         Ok(code) => code,
-        Err(_) => write_error(result_ptr, -4, "internal panic"),
+        // A panic is the library's fault: `internal`, not the `invalid_input`
+        // a bare message would be read as.
+        Err(_) => write_error(
+            result_ptr,
+            -4,
+            crate::wire::WireError::new(crate::wire::code::INTERNAL, None, "internal panic"),
+        ),
     }
 }
 
