@@ -77,7 +77,9 @@ holds `got`, the inclusive bounds `min` / `max` (`null` on a side that is open o
 unbounded) and, only on an open side, `exclusive_min` / `exclusive_max`. Every code and
 the fields it carries are listed in the
 [crate README](https://github.com/iyulab/u-analytics#javascript--wasm-npm) — the
-WebAssembly and .NET bindings refuse with the same codes.
+WebAssembly and .NET bindings refuse with the same codes, and `GetCodes()` returns them
+as data — `Codes(Refusals, Violations)`, each refusal with the fields beside it — from the
+table the engine refuses from.
 
 ## Trimming and NativeAOT
 

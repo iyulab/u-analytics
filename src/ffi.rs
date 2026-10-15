@@ -1423,6 +1423,20 @@ pub unsafe extern "C" fn uanalytics_free_string(ptr: *mut libc::c_char) {
     }
 }
 
+/// Every refusal `code` this library answers with, and the fields beside
+/// each, as JSON: `{"refusals": [{"code", "fields"}], "violations": []}` --
+/// built from the table the refusals are made from, so a caller that
+/// translates codes can check its list against the library's. Release the
+/// string with [`uanalytics_free_string`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub extern "C" fn uanalytics_codes() -> *mut libc::c_char {
+    let json = serde_json::to_string(&crate::wire::code_catalog()).expect("codes serialize");
+    CString::new(json)
+        .expect("JSON has no interior NUL")
+        .into_raw()
+}
+
 /// Get u-analytics version string
 #[cfg(feature = "ffi")]
 #[no_mangle]
@@ -1444,6 +1458,20 @@ mod tests {
     use super::*;
 
     type Entry = unsafe extern "C" fn(*const libc::c_char, *mut *mut libc::c_char) -> i32;
+
+    #[test]
+    fn the_codes_are_the_wire_catalog() {
+        let ptr = uanalytics_codes();
+        let json = unsafe { CStr::from_ptr(ptr) }
+            .to_str()
+            .expect("UTF-8")
+            .to_owned();
+        unsafe { uanalytics_free_string(ptr) };
+        let codes: crate::wire::Codes = serde_json::from_str(&json).expect("a catalog");
+        assert_eq!(codes, crate::wire::code_catalog());
+        assert!(codes.refusals.iter().any(|r| r.code == "value_not_finite"));
+        assert!(codes.violations.is_empty());
+    }
 
     fn call(entry: Entry, request: &str) -> (i32, serde_json::Value) {
         let request = CString::new(request).expect("test request has no interior NUL");

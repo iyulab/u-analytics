@@ -52,47 +52,6 @@ use crate::wire::{
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// A refusal reason: the `code` an `Error` carries and the fields that can
-/// stand beside it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize, tsify::Tsify)]
-#[serde(deny_unknown_fields)]
-struct RefusalCode {
-    code: String,
-    fields: Vec<String>,
-}
-
-/// A violation a checker reports. This package has no checker; the type is
-/// here so every engine's [`Codes`] has one shape.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize, tsify::Tsify)]
-#[serde(deny_unknown_fields)]
-struct ViolationCode {
-    code: String,
-    fields: Vec<String>,
-    checkers: Vec<String>,
-}
-
-/// What this package can answer with besides a result: every refusal
-/// `code`, and no violations -- it has no checker.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize, tsify::Tsify)]
-#[serde(deny_unknown_fields)]
-struct Codes {
-    refusals: Vec<RefusalCode>,
-    violations: Vec<ViolationCode>,
-}
-
-fn code_catalog() -> Codes {
-    Codes {
-        refusals: crate::wire::Code::ALL
-            .into_iter()
-            .map(|c| RefusalCode {
-                code: c.name().to_string(),
-                fields: c.fields().iter().map(|f| f.to_string()).collect(),
-            })
-            .collect(),
-        violations: vec![],
-    }
-}
-
 /// Every refusal `code` the functions of this package throw, with the fields
 /// that can come with it: `{ refusals: [{ code, fields }], violations: [] }`.
 ///
@@ -100,7 +59,7 @@ fn code_catalog() -> Codes {
 /// translates codes can check its list against the package's.
 #[wasm_bindgen(unchecked_return_type = "Codes")]
 pub fn codes() -> Result<JsValue, JsValue> {
-    serde_wasm_bindgen::to_value(&code_catalog()).map_err(|e| {
+    serde_wasm_bindgen::to_value(&crate::wire::code_catalog()).map_err(|e| {
         js_err(WireError::new(
             crate::wire::code::INVALID_INPUT,
             None,
@@ -3023,8 +2982,6 @@ mod binding_contract_tests {
 
 #[cfg(test)]
 mod code_catalog_tests {
-    use super::*;
-
     /// The README's code tables list exactly the published vocabulary, so the
     /// tables and `codes()` cannot drift apart.
     #[test]
@@ -3048,7 +3005,7 @@ mod code_catalog_tests {
                 }
             }
         }
-        let catalog = code_catalog();
+        let catalog = crate::wire::code_catalog();
         let published: std::collections::BTreeSet<String> = catalog
             .refusals
             .iter()

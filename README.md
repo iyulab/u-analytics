@@ -317,7 +317,8 @@ interface AnalyticsError extends Error {
 `codes()` returns every `code` below, with the fields that can come with it —
 `{ refusals: [{ code, fields }], violations: [] }` — built from the table the
 refusals come from, so a caller that translates codes can check its list against
-the package's.
+the package's. The C library returns the same JSON from `uanalytics_codes()` and
+the .NET package from `AnalyticsClient.GetCodes()`.
 
 | `code` | Meaning |
 |---|---|

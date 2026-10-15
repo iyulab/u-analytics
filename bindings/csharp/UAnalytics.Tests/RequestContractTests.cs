@@ -237,7 +237,7 @@ public class RequestContractTests
         var bound = typeof(NativeInterop)
             .GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
             .Select(m => m.Name)
-            .Where(n => n is not ("uanalytics_version" or "uanalytics_free_string"))
+            .Where(n => n is not ("uanalytics_version" or "uanalytics_codes" or "uanalytics_free_string"))
             .Order(StringComparer.Ordinal);
         Assert.Equal(RequestKeys.EntryPoints.Select(e => e.Key).Order(StringComparer.Ordinal), bound);
     }

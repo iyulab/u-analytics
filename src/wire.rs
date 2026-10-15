@@ -443,6 +443,51 @@ pub(crate) fn failure_site(
     (name, index)
 }
 
+/// A refusal reason: the `code` a refusal carries (the WebAssembly `Error`'s,
+/// the C error body's) and the fields that can
+/// stand beside it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RefusalCode {
+    pub(crate) code: String,
+    pub(crate) fields: Vec<String>,
+}
+
+/// A violation a checker reports. This package has no checker; the type is
+/// here so every engine's [`Codes`] has one shape.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ViolationCode {
+    pub(crate) code: String,
+    pub(crate) fields: Vec<String>,
+    pub(crate) checkers: Vec<String>,
+}
+
+/// What this package can answer with besides a result: every refusal
+/// `code`, and no violations -- it has no checker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Codes {
+    pub(crate) refusals: Vec<RefusalCode>,
+    pub(crate) violations: Vec<ViolationCode>,
+}
+
+pub(crate) fn code_catalog() -> Codes {
+    Codes {
+        refusals: Code::ALL
+            .into_iter()
+            .map(|c| RefusalCode {
+                code: c.name().to_string(),
+                fields: c.fields().iter().map(|f| f.to_string()).collect(),
+            })
+            .collect(),
+        violations: vec![],
+    }
+}
+
 /// Every reason the crate's transports refuse with: the stable `code` a
 /// refusal carries, and the fields that can stand beside it. A [`WireError`]
 /// holds one of these (named through [`code`]), so the published list
@@ -469,7 +514,6 @@ pub(crate) enum Code {
 }
 
 impl Code {
-    #[cfg_attr(not(feature = "wasm"), allow(dead_code))]
     pub(crate) const ALL: [Code; 17] = [
         Code::InvalidInput,
         Code::MalformedInput,

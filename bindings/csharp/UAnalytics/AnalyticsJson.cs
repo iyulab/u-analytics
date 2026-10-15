@@ -11,6 +11,7 @@ namespace UAnalytics;
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
     RespectNullableAnnotations = true,
     RespectRequiredConstructorParameters = true)]
+[JsonSerializable(typeof(Codes))]
 [JsonSerializable(typeof(XbarRChartResult))]
 [JsonSerializable(typeof(XbarSChartResult))]
 [JsonSerializable(typeof(ImrChartResult))]

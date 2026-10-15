@@ -38,6 +38,30 @@ public sealed class AnalyticsClient : IDisposable
         return version;
     }
 
+    /// <summary>
+    /// Every refusal <see cref="AnalyticsException.ErrorCode"/> the engine and this client
+    /// raise, with the fields beside each — built from the table the refusals are made from,
+    /// so a caller that translates codes can check its list against the engine's. This package
+    /// has no checker: <see cref="Codes.Violations"/> is empty.
+    /// </summary>
+    public Codes GetCodes()
+    {
+        var ptr = NativeInterop.uanalytics_codes();
+        string body;
+        try
+        {
+            body = Marshal.PtrToStringUTF8(ptr)
+                ?? throw new InvalidOperationException("The native engine returned no code catalog.");
+        }
+        finally
+        {
+            NativeInterop.uanalytics_free_string(ptr);
+        }
+        ResponseObserver?.Invoke(body);
+        return JsonSerializer.Deserialize(body, AnalyticsJson.Default.Codes)
+            ?? throw new InvalidOperationException("The native engine returned no code catalog.");
+    }
+
     // ── SPC ──
 
     /// <summary>

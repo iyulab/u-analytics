@@ -27,7 +27,8 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   fields that can come with it -- `{ refusals: [{ code, fields }], violations:
   [] }`, the shape every engine package shares -- built from the table the
   refusals are built from, so a caller that translates codes can check its list
-  against the package's.
+  against the package's. The same catalog over the C ABI (`uanalytics_codes()`)
+  and in .NET (`AnalyticsClient.GetCodes()` → `Codes(Refusals, Violations)`).
 
 ### Fixed
 

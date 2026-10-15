@@ -176,4 +176,7 @@ internal static partial class NativeInterop
 
     [LibraryImport(DllName)]
     public static partial IntPtr uanalytics_version();
+
+    [LibraryImport(DllName)]
+    public static partial IntPtr uanalytics_codes();
 }
