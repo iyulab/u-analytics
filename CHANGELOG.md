@@ -8,6 +8,8 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-15
+
 ### Added
 
 - **Run-test sets by name**: `rules` takes the name of a set as well as the tests
