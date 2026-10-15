@@ -27,9 +27,7 @@ use super::rules::{RuleSet, RunRule};
 // Control chart factor tables, indexed by subgroup size n=2..=25.
 // Index 0 corresponds to n=2.
 //
-// Values for n=2..=10 are the ASTM E2587 published constants. The whole range
-// is computed from the definitions rather than transcribed, because no
-// published table this crate could cite covers n up to 25 in every factor:
+// The whole range is computed from the definitions rather than transcribed:
 //
 //   d2(n) = E[W],  d3(n) = sd[W]   for W the range of n iid standard normals
 //   c4(n) = sqrt(2/(n-1)) * Gamma(n/2) / Gamma((n-1)/2)
@@ -37,10 +35,9 @@ use super::rules::{RuleSet, RunRule};
 //   D3 = max(0, 1 - 3*d3/d2)       D4 = 1 + 3*d3/d2
 //   B3 = max(0, 1 - 3*sqrt(1-c4^2)/c4)   B4 = 1 + 3*sqrt(1-c4^2)/c4
 //
-// The computation reproduces all 72 published values for n=2..=10 across the
-// eight tables, which is what licenses the extension to n=25. The test
-// `factor_tables_reproduce_the_published_astm_values` pins that agreement so a
-// future edit cannot quietly break it.
+// The test `factor_tables_reproduce_the_published_table` holds all eight
+// tables against a published table for every n = 2..=25 (192 values), so a
+// future edit cannot quietly break them.
 // ---------------------------------------------------------------------------
 
 /// The range-chart and average-chart factors for a subgroup of `n`.
@@ -1084,47 +1081,105 @@ mod tests {
     /// over the range a standard covers is the evidence that the extension to
     /// n=25 is the same quantity and not a plausible-looking different one.
     #[test]
-    fn factor_tables_reproduce_the_published_astm_values() {
-        // ASTM E2587 / Montgomery Appendix VI, n = 2..=10.
-        const PUB_A2: [f64; 9] = [
-            1.880, 1.023, 0.729, 0.577, 0.483, 0.419, 0.373, 0.337, 0.308,
+    fn factor_tables_reproduce_the_published_table() {
+        // "Factors useful in the Construction of Control Charts", n = 2..=25 --
+        // the table of Duncan, *Quality Control and Industrial Statistics*, as
+        // reproduced by the University of York (histstat/tables/controlfactors.pdf);
+        // n = 2..=10 agree with ASTM E2587 and Montgomery, Appendix VI.
+        const PUB_A2: [f64; 24] = [
+            1.880, 1.023, 0.729, 0.577, 0.483, 0.419, 0.373, 0.337, 0.308, 0.285, 0.266, 0.249,
+            0.235, 0.223, 0.212, 0.203, 0.194, 0.187, 0.180, 0.173, 0.167, 0.162, 0.157, 0.153,
         ];
-        const PUB_D3: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.076, 0.136, 0.184, 0.223];
-        const PUB_D4: [f64; 9] = [
-            3.267, 2.575, 2.282, 2.114, 2.004, 1.924, 1.864, 1.816, 1.777,
+        const PUB_A3: [f64; 24] = [
+            2.659, 1.954, 1.628, 1.427, 1.287, 1.182, 1.099, 1.032, 0.975, 0.927, 0.886, 0.850,
+            0.817, 0.789, 0.763, 0.739, 0.718, 0.698, 0.680, 0.663, 0.647, 0.633, 0.619, 0.606,
         ];
-        const PUB_D2: [f64; 9] = [
-            1.128, 1.693, 2.059, 2.326, 2.534, 2.704, 2.847, 2.970, 3.078,
+        const PUB_C4: [f64; 24] = [
+            0.7979, 0.8862, 0.9213, 0.9400, 0.9515, 0.9594, 0.9650, 0.9693, 0.9727, 0.9754, 0.9776,
+            0.9794, 0.9810, 0.9823, 0.9835, 0.9845, 0.9854, 0.9862, 0.9869, 0.9876, 0.9882, 0.9887,
+            0.9892, 0.9896,
         ];
-        const PUB_A3: [f64; 9] = [
-            2.659, 1.954, 1.628, 1.427, 1.287, 1.182, 1.099, 1.032, 0.975,
+        const PUB_B3: [f64; 24] = [
+            0.0, 0.0, 0.0, 0.0, 0.030, 0.118, 0.185, 0.239, 0.284, 0.321, 0.354, 0.382, 0.406,
+            0.428, 0.448, 0.466, 0.482, 0.497, 0.510, 0.523, 0.534, 0.545, 0.555, 0.565,
         ];
-        const PUB_B3: [f64; 9] = [0.0, 0.0, 0.0, 0.0, 0.030, 0.118, 0.185, 0.239, 0.284];
-        const PUB_B4: [f64; 9] = [
-            3.267, 2.568, 2.266, 2.089, 1.970, 1.882, 1.815, 1.761, 1.716,
+        const PUB_B4: [f64; 24] = [
+            3.267, 2.568, 2.266, 2.089, 1.970, 1.882, 1.815, 1.761, 1.716, 1.679, 1.646, 1.618,
+            1.594, 1.572, 1.552, 1.534, 1.518, 1.503, 1.490, 1.477, 1.466, 1.455, 1.445, 1.435,
         ];
-        const PUB_C4: [f64; 9] = [
-            0.7979, 0.8862, 0.9213, 0.9400, 0.9515, 0.9594, 0.9650, 0.9693, 0.9727,
+        const PUB_D2: [f64; 24] = [
+            1.128, 1.693, 2.059, 2.326, 2.534, 2.704, 2.847, 2.970, 3.078, 3.173, 3.258, 3.336,
+            3.407, 3.472, 3.532, 3.588, 3.640, 3.689, 3.735, 3.778, 3.819, 3.858, 3.895, 3.931,
+        ];
+        const PUB_D3: [f64; 24] = [
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.076, 0.137, 0.184, 0.223, 0.256, 0.284, 0.307, 0.328, 0.347,
+            0.363, 0.378, 0.392, 0.404, 0.415, 0.425, 0.435, 0.444, 0.452, 0.460,
+        ];
+        const PUB_D4: [f64; 24] = [
+            3.266, 2.574, 2.281, 2.114, 2.003, 1.924, 1.863, 1.816, 1.777, 1.744, 1.716, 1.693,
+            1.672, 1.653, 1.637, 1.622, 1.608, 1.596, 1.585, 1.575, 1.565, 1.556, 1.548, 1.540,
         ];
 
+        // Half a unit in the table's last place: the crate's values are the
+        // definitions rounded the same way -- d2 to four places where the table
+        // has three, so its bound adds the crate's own half unit (3.2585 is
+        // d2(12) = 3.25846 rounded; the table prints 3.258).
         for (name, table, published, tol) in [
-            ("A2", &A2[..9], &PUB_A2[..], 5e-4),
-            ("D3", &D3[..9], &PUB_D3[..], 5e-4),
-            ("D4", &D4[..9], &PUB_D4[..], 5e-4),
-            ("d2", &D2[..9], &PUB_D2[..], 5e-4),
-            ("A3", &A3[..9], &PUB_A3[..], 5e-4),
-            ("B3", &B3[..9], &PUB_B3[..], 5e-4),
-            ("B4", &B4[..9], &PUB_B4[..], 5e-4),
-            ("c4", &C4[..9], &PUB_C4[..], 5e-5),
+            ("A2", &A2, &PUB_A2, 5e-4),
+            ("A3", &A3, &PUB_A3, 5e-4),
+            ("c4", &C4, &PUB_C4, 5e-5),
+            ("B3", &B3, &PUB_B3, 5e-4),
+            ("B4", &B4, &PUB_B4, 5e-4),
+            ("d2", &D2, &PUB_D2, 5.5e-4),
         ] {
             for (i, (got, want)) in table.iter().zip(published).enumerate() {
                 assert!(
-                    (got - want).abs() < tol,
+                    (got - want).abs() <= tol,
                     "{name}[n={}] = {got}, published {want}",
                     i + 2
                 );
             }
         }
+
+        // D3 and D4 rest on d3, the standard deviation of the range, whose
+        // fourth significant figure the older tables carry in doubt for n > 5
+        // (Duncan's own caveat). This table's D3/D4 differ from the rounded
+        // definition by one unit in the last place at n = 2, 6, 8, 12, 18, 23,
+        // 25 -- e.g. n = 8: d3/d2 = 0.8198/2.8472 gives D3 = 0.1362, D4 =
+        // 1.8638, which ASTM E2587 prints as 0.136 / 1.864 and this table as
+        // 0.137 / 1.863. So D3/D4 are held to one unit in the last place, and
+        // D3 + D4 = 2 exactly wherever D3 > 0 (both are 1 -/+ 3 d3/d2).
+        for (name, table, published) in [("D3", &D3, &PUB_D3), ("D4", &D4, &PUB_D4)] {
+            for (i, (got, want)) in table.iter().zip(published).enumerate() {
+                assert!(
+                    (got - want).abs() <= 1e-3 + 1e-12,
+                    "{name}[n={}] = {got}, published {want}",
+                    i + 2
+                );
+            }
+        }
+        for i in 0..24 {
+            if D3[i] > 0.0 {
+                assert!(
+                    (D3[i] + D4[i] - 2.0).abs() < 1e-12,
+                    "D3 + D4 at n = {} is {}",
+                    i + 2,
+                    D3[i] + D4[i]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_xbar_r_subgroup_size_below_range_is_an_error() {
+        assert_eq!(
+            XBarRChart::new(1).unwrap_err(),
+            ControlChartError::SubgroupSizeOutOfRange {
+                got: 1,
+                min: 2,
+                max: 25
+            }
+        );
     }
 
     /// Every table covers the whole declared range and stays monotone in the
@@ -1160,18 +1215,6 @@ mod tests {
         }
         // c4 is bounded by 1 and approaches it.
         assert!(C4[span - 1] < 1.0 && C4[span - 1] > 0.98);
-    }
-
-    #[test]
-    fn test_xbar_r_subgroup_size_below_range_is_an_error() {
-        assert_eq!(
-            XBarRChart::new(1).unwrap_err(),
-            ControlChartError::SubgroupSizeOutOfRange {
-                got: 1,
-                min: 2,
-                max: 25
-            }
-        );
     }
 
     #[test]
@@ -1376,62 +1419,7 @@ mod tests {
 
     // --- Montgomery Table VI: d2 constant verification ---
 
-    /// Verify d2 constants against Montgomery (2020), Appendix Table VI.
-    ///
-    /// d2 is the expected value of the sample range for a standard-normal
-    /// distribution with subgroup size n. Used as sigma-hat = R-bar / d2.
-    ///
-    /// Allowed tolerance: ±0.001 (matches 3-decimal precision in Table VI).
-    #[test]
-    fn test_d2_constants_montgomery_table_vi() {
-        // (n, expected_d2) pairs from Montgomery (2020) Table VI, n=2..10
-        let expected: [(usize, f64); 9] = [
-            (2, 1.128),
-            (3, 1.693),
-            (4, 2.059),
-            (5, 2.326),
-            (6, 2.534),
-            (7, 2.704),
-            (8, 2.847),
-            (9, 2.970),
-            (10, 3.078),
-        ];
-        for (n, d2_ref) in expected {
-            let d2 = D2[n - 2];
-            assert!(
-                (d2 - d2_ref).abs() < 0.001,
-                "d2(n={n}): expected {d2_ref}, got {d2}"
-            );
-        }
-    }
-
     // --- Montgomery Table VI: c4 constant verification ---
-
-    /// Verify c4 constants against Montgomery (2020), Appendix Table VI.
-    ///
-    /// c4 is the bias-correction factor for estimating sigma from S-bar.
-    /// sigma-hat = S-bar / c4.
-    ///
-    /// Allowed tolerance: ±0.001 (matches 4-decimal precision in Table VI).
-    #[test]
-    fn test_c4_constants_montgomery_table_vi() {
-        // (n, expected_c4) pairs from Montgomery (2020) Table VI, n=2..6
-        let expected: [(usize, f64); 6] = [
-            (2, 0.7979),
-            (3, 0.8862),
-            (4, 0.9213),
-            (5, 0.9400),
-            (6, 0.9515),
-            (7, 0.9594),
-        ];
-        for (n, c4_ref) in expected {
-            let c4 = C4[n - 2];
-            assert!(
-                (c4 - c4_ref).abs() < 0.001,
-                "c4(n={n}): expected {c4_ref}, got {c4}"
-            );
-        }
-    }
 
     // --- sigma-hat from the chart (Cycle 266) --------------------------------
     //
