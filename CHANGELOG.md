@@ -8,6 +8,23 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking** `adf_test`'s `max_lags` bounds the AIC search for the lag
+  count, as its name says — it was the exact count. `lags` fixes the count
+  (not with `max_lags`: `invalid_option`). Rust: `adf_test(data, model,
+  AdfLags)` with `AdfLags::Aic { max }` (the default) and
+  `AdfLags::Fixed(p)`; .NET: `AdfTest(data, model, maxLags, lags)`.
+
+### Fixed
+
+- `adf_test` compares the AIC of every candidate lag count on the same
+  observations (those the largest count leaves) and refits the chosen count
+  on all the observations it leaves; each candidate used to be fitted on its
+  own sample, so the AICs compared different data. The regression also kept
+  one observation fewer than the lags need to drop. The statistic, lag count
+  and `n_obs` now agree with statsmodels' `adfuller(autolag="AIC")`.
+
 ## [0.26.0] - 2026-10-16
 
 Depends on u-numflow 0.13. The .NET client is `UAnalytics` 0.21.0.

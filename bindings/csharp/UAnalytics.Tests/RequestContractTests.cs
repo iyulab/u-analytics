@@ -125,6 +125,7 @@ public class RequestContractTests
         ["AdfTest(none)"] = c => c.AdfTest(Walk(), AdfModel.None, maxLags: 2),
         ["AdfTest(constant)"] = c => c.AdfTest(Walk(), AdfModel.Constant, maxLags: 2),
         ["AdfTest(constant_trend)"] = c => c.AdfTest(Walk(), AdfModel.ConstantTrend, maxLags: 2),
+        ["AdfTest(lags)"] = c => c.AdfTest(Walk(), AdfModel.Constant, lags: 2),
         ["MannKendallTest"] = c => c.MannKendallTest(Series),
         ["OneWayAnova"] = c => c.OneWayAnova(Subgroups),
         ["KruskalWallisTest"] = c => c.KruskalWallisTest(Subgroups),

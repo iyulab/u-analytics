@@ -761,11 +761,14 @@ t_chart(times: number[] | Float64Array): { t_bar: number, points: AttrPoint[] } 
 anderson_darling_test(data: number[] | Float64Array):
   { statistic: number, statistic_modified: number, p_value: number }
 
-// Stationarity — augmented Dickey-Fuller, H₀: unit root. At least 10 values;
-// max_lags absent or null selects the lag count by AIC. A deterministic series
-// whose differences the lags fit exactly is refused (invalid_input), not tested.
+// Stationarity — augmented Dickey-Fuller, H₀: unit root. At least 10 values.
+// The lag count is chosen by AIC from 0 to max_lags (absent or null: Schwert's
+// rule), every candidate fitted on the same observations, then refitted on all
+// it leaves — as statsmodels' adfuller(autolag="AIC"); `lags` fixes it instead
+// (not both: invalid_option). A deterministic series whose differences the
+// lags fit exactly is refused (invalid_input), not tested.
 adf_test(input: { data: number[], model?: "none" | "constant" | "constant_trend",
-                  max_lags?: number | null }):
+                  max_lags?: number | null, lags?: number | null }):
   { statistic: number, n_lags: number, n_obs: number,
     levels: { level: number, critical_value: number, rejected: boolean }[] }  // 1 %, 5 %, 10 %
 

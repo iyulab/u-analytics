@@ -4,6 +4,7 @@
     "uanalytics_adf_test": {
       "properties": {
         "data": {},
+        "lags": {},
         "max_lags": {},
         "model": {
           "enum": [

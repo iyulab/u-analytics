@@ -424,16 +424,18 @@ public sealed class AnalyticsClient : IDisposable
     /// <summary>
     /// Augmented Dickey-Fuller unit-root test (H₀: the series has a unit root). At least
     /// 10 values. <paramref name="model"/> is <c>"constant"</c> (default), <c>"none"</c> or
-    /// <c>"constant_trend"</c>; <paramref name="maxLags"/> fixes the number of lagged
-    /// differences, <c>null</c> selects it by AIC. Returns <c>statistic</c>, <c>n_lags</c>,
+    /// <c>"constant_trend"</c>. The number of lagged differences is chosen by AIC up to
+    /// <paramref name="maxLags"/> (<c>null</c>: Schwert's rule), or fixed by
+    /// <paramref name="lags"/> — give at most one. Returns <c>statistic</c>, <c>n_lags</c>,
     /// <c>n_obs</c> and <c>levels</c> — <c>level</c>, <c>critical_value</c>, <c>rejected</c>
     /// for 1 %, 5 % and 10 %.
     /// </summary>
-    public AdfResult AdfTest(double[] data, AdfModel model = AdfModel.Constant, int? maxLags = null)
+    public AdfResult AdfTest(double[] data, AdfModel model = AdfModel.Constant, int? maxLags = null, int? lags = null)
         => Call(NativeInterop.uanalytics_adf_test, AnalyticsJson.Default.AdfResult,
             ("data", Request.Nums("data", data)),
             ("model", Request.Option(model, AnalyticsJson.Default.AdfModel)),
-            ("max_lags", maxLags is { } l ? JsonValue.Create(l) : null));
+            ("max_lags", maxLags is { } m ? JsonValue.Create(m) : null),
+            ("lags", lags is { } l ? JsonValue.Create(l) : null));
 
     /// <summary>Mann-Kendall trend test with Kendall's tau and Sen's slope.</summary>
     public MannKendallResult MannKendallTest(double[] data)

@@ -1827,6 +1827,27 @@ pub struct AdfResult {
     pub rejected: [bool; 3],
 }
 
+/// How [`adf_test`] chooses the number of lagged differences.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdfLags {
+    /// The count from 0 to `max` with the smallest AIC, every candidate fitted
+    /// on the same observations (those the largest count leaves), then the
+    /// chosen count refitted on all the observations it leaves. `max` `None`
+    /// is Schwert's rule, `⌊12·(n/100)^¼⌋`, capped at `n / 3`.
+    Aic {
+        /// The largest count considered.
+        max: Option<usize>,
+    },
+    /// Exactly this many.
+    Fixed(usize),
+}
+
+impl Default for AdfLags {
+    fn default() -> Self {
+        AdfLags::Aic { max: None }
+    }
+}
+
 /// Model specification for the ADF test.
 #[derive(Debug, Clone, Copy)]
 pub enum AdfModel {
@@ -1848,8 +1869,9 @@ pub enum AdfModel {
 /// 2. Estimates via OLS
 /// 3. Tests t-ratio for γ against Dickey-Fuller critical values
 ///
-/// When `max_lags` is `None`, lag length is selected by AIC (Schwert rule
-/// for maximum). When `Some(p)`, exactly `p` lags are used.
+/// `lags` chooses the number of lagged differences ([`AdfLags`]): by AIC up
+/// to a maximum (the default, as `statsmodels.adfuller(autolag="AIC")`), or a
+/// fixed count.
 ///
 /// Reference: Dickey & Fuller (1979), "Distribution of the Estimators for
 /// Autoregressive Time Series with a Unit Root"
@@ -1861,7 +1883,7 @@ pub enum AdfModel {
 /// # Examples
 ///
 /// ```
-/// use u_analytics::testing::{adf_test, AdfModel};
+/// use u_analytics::testing::{adf_test, AdfLags, AdfModel};
 ///
 /// // Stationary series: strong mean-reversion
 /// let mut data = vec![0.0_f64; 40];
@@ -1869,11 +1891,11 @@ pub enum AdfModel {
 ///     data[i] = 0.3 * data[i - 1] + [0.5, -0.8, 0.3, -0.6, 0.9,
 ///         -0.4, 0.7, -0.2, 0.1, -0.5][i % 10];
 /// }
-/// let r = adf_test(&data, AdfModel::Constant, None).unwrap();
+/// let r = adf_test(&data, AdfModel::Constant, AdfLags::default()).unwrap();
 /// assert!(r.statistic.is_finite());
 /// assert_eq!(r.critical_values.len(), 3);
 /// ```
-pub fn adf_test(data: &[f64], model: AdfModel, max_lags: Option<usize>) -> Option<AdfResult> {
+pub fn adf_test(data: &[f64], model: AdfModel, lags: AdfLags) -> Option<AdfResult> {
     let n = data.len();
     if n < 10 || data.iter().any(|v| !v.is_finite()) {
         return None;
@@ -1882,37 +1904,35 @@ pub fn adf_test(data: &[f64], model: AdfModel, max_lags: Option<usize>) -> Optio
     // Compute differences
     let dy: Vec<f64> = data.windows(2).map(|w| w[1] - w[0]).collect();
 
-    // Determine lag count
-    let best_lag = match max_lags {
-        Some(p) => p, // Use exact lag count when specified
-        None => {
-            // Schwert (1989) rule for maximum lag
+    let best_lag = match lags {
+        AdfLags::Fixed(p) => p,
+        AdfLags::Aic { max } => {
+            // Schwert (1989) rule for the largest count considered.
             let schwert = (12.0 * (n as f64 / 100.0).powf(0.25)).floor() as usize;
-            let p_max = schwert.min(n / 3);
-            // Select optimal lag by AIC
-            select_adf_lag(data, &dy, model, p_max)
+            let p_max = max.unwrap_or_else(|| schwert.min(n / 3));
+            select_adf_lag(data, &dy, model, p_max)?
         }
     };
 
-    // Run OLS regression with selected lag
+    // The chosen count, on every observation it leaves.
     adf_ols(data, &dy, model, best_lag)
 }
 
-/// Selects optimal lag for ADF by minimizing AIC.
-fn select_adf_lag(data: &[f64], dy: &[f64], model: AdfModel, p_max: usize) -> usize {
-    let mut best_aic = f64::INFINITY;
-    let mut best_p = 0;
-
+/// The lag count in `0..=p_max` with the smallest AIC. Every candidate is
+/// fitted on the observations `p_max` lags leave, so the AICs compare the same
+/// data — fitted on their own (longer) samples they would not be comparable.
+/// `None` when no candidate can be fitted.
+fn select_adf_lag(data: &[f64], dy: &[f64], model: AdfModel, p_max: usize) -> Option<usize> {
+    let start = p_max;
+    let mut best: Option<(f64, usize)> = None;
     for p in 0..=p_max {
-        if let Some((aic, _)) = adf_ols_aic(data, dy, model, p) {
-            if aic < best_aic {
-                best_aic = aic;
-                best_p = p;
+        if let Some(aic) = adf_ols_aic(data, dy, model, p, start) {
+            if best.is_none_or(|(b, _)| aic < b) {
+                best = Some((aic, p));
             }
         }
     }
-
-    best_p
+    best.map(|(_, p)| p)
 }
 
 /// Builds the ADF design matrix and dependent variable.
@@ -1924,8 +1944,10 @@ fn adf_build_matrix(
     dy: &[f64],
     model: AdfModel,
     p: usize,
+    start: usize,
 ) -> Option<(Vec<f64>, Vec<f64>, usize, usize, usize)> {
-    let start = p + 1;
+    // Row t regresses dy[t] on the level data[t] and dy[t-1] ... dy[t-p].
+    debug_assert!(start >= p, "the first row needs its p lagged differences");
     if start >= dy.len() || dy.len() - start < 5 {
         return None;
     }
@@ -2132,16 +2154,16 @@ fn adf_ols_core(
 }
 
 /// Runs ADF OLS and returns AIC + number of observations.
-fn adf_ols_aic(data: &[f64], dy: &[f64], model: AdfModel, p: usize) -> Option<(f64, usize)> {
-    let (x_data, y_dep, m, ncols, gamma_col) = adf_build_matrix(data, dy, model, p)?;
+/// AIC of the regression with `p` lags on the rows from `start` on.
+fn adf_ols_aic(data: &[f64], dy: &[f64], model: AdfModel, p: usize, start: usize) -> Option<f64> {
+    let (x_data, y_dep, m, ncols, gamma_col) = adf_build_matrix(data, dy, model, p, start)?;
     let (_t_stat, rss, k) = adf_ols_core(&x_data, &y_dep, m, ncols, gamma_col)?;
-    let aic = 2.0 * k as f64 + m as f64 * (rss / m as f64).ln();
-    Some((aic, m))
+    Some(2.0 * k as f64 + m as f64 * (rss / m as f64).ln())
 }
 
 /// Runs the actual ADF OLS and returns the test result.
 fn adf_ols(data: &[f64], dy: &[f64], model: AdfModel, p: usize) -> Option<AdfResult> {
-    let (x_data, y_dep, m, ncols, gamma_col) = adf_build_matrix(data, dy, model, p)?;
+    let (x_data, y_dep, m, ncols, gamma_col) = adf_build_matrix(data, dy, model, p, p)?;
     let (gamma_t, _rss, _k) = adf_ols_core(&x_data, &y_dep, m, ncols, gamma_col)?;
 
     let critical_values = adf_critical_values(model, m);
@@ -3451,7 +3473,7 @@ mod tests {
             0.38, -0.25, 0.12, 0.44, -0.13, 0.36, -0.09, 0.27, 0.51, -0.15, 0.33, -0.22, 0.18,
             0.42, -0.08, 0.31, -0.19, 0.25, 0.48, -0.11, 0.37, -0.24, 0.15, 0.43, -0.07, 0.34,
         ];
-        let r = adf_test(&data, AdfModel::Constant, None).expect("should compute");
+        let r = adf_test(&data, AdfModel::Constant, AdfLags::default()).expect("should compute");
         // Should reject H₀ (series is stationary)
         assert!(
             r.rejected[2],
@@ -3474,7 +3496,7 @@ mod tests {
             cum += inc;
             walk.push(cum);
         }
-        let r = adf_test(&walk, AdfModel::Constant, None).expect("should compute");
+        let r = adf_test(&walk, AdfModel::Constant, AdfLags::default()).expect("should compute");
         // Random walk should NOT reject at 1%
         assert!(
             !r.rejected[0],
@@ -3492,7 +3514,7 @@ mod tests {
         let data: Vec<f64> = (0..50)
             .map(|i| (i as f64 * 0.5).sin() + 0.02 * i as f64 + 0.1 * (rng() - 0.5))
             .collect();
-        let r = adf_test(&data, AdfModel::Constant, Some(2)).expect("should compute");
+        let r = adf_test(&data, AdfModel::Constant, AdfLags::Fixed(2)).expect("should compute");
         assert_eq!(r.n_lags, 2);
         assert!(r.statistic.is_finite());
     }
@@ -3504,7 +3526,8 @@ mod tests {
         let data: Vec<f64> = (0..30)
             .map(|i| i as f64 + (i as f64 * 0.3).sin() * 0.5)
             .collect();
-        let r = adf_test(&data, AdfModel::ConstantTrend, None).expect("should compute");
+        let r =
+            adf_test(&data, AdfModel::ConstantTrend, AdfLags::default()).expect("should compute");
         assert!(r.statistic.is_finite());
         assert_eq!(r.critical_values.len(), 3);
     }
@@ -3512,11 +3535,11 @@ mod tests {
     #[test]
     fn adf_edge_cases() {
         // Too few data points
-        assert!(adf_test(&[1.0; 9], AdfModel::Constant, None).is_none());
+        assert!(adf_test(&[1.0; 9], AdfModel::Constant, AdfLags::default()).is_none());
         // NaN
         let mut data = vec![0.0; 20];
         data[5] = f64::NAN;
-        assert!(adf_test(&data, AdfModel::Constant, None).is_none());
+        assert!(adf_test(&data, AdfModel::Constant, AdfLags::default()).is_none());
     }
 
     /// Differences that repeat with period 10 are fitted exactly by 9 lags. The
@@ -3531,10 +3554,68 @@ mod tests {
         for i in 1..walk.len() {
             walk[i] = walk[i - 1] + shocks[(i * 7) % 10];
         }
-        assert!(adf_test(&walk, AdfModel::ConstantTrend, Some(9)).is_none());
-        let r = adf_test(&walk, AdfModel::ConstantTrend, None).expect("a lag below 9 fits");
+        assert!(adf_test(&walk, AdfModel::ConstantTrend, AdfLags::Fixed(9)).is_none());
+        let r = adf_test(&walk, AdfModel::ConstantTrend, AdfLags::default())
+            .expect("a lag below 9 fits");
         assert!(r.n_lags < 9, "chose the exact fit: {} lags", r.n_lags);
         assert!(r.statistic.abs() < 1e3, "t = {}", r.statistic);
+    }
+
+    /// statsmodels 0.15 `adfuller` on the same series: the AIC search fits
+    /// every candidate on one sample and refits the chosen count on all the
+    /// observations it leaves (the statistic, the count and `nobs` agree).
+    #[test]
+    fn adf_matches_statsmodels() {
+        let mut x = vec![0.0_f64; 120];
+        for t in 1..x.len() {
+            let e = ((t * 7919) % 101) as f64 / 50.0 - 1.0;
+            x[t] = 0.7 * x[t - 1] + e;
+        }
+        for (model, lags, stat, n_lags, n_obs) in [
+            (
+                AdfModel::Constant,
+                AdfLags::Aic { max: Some(8) },
+                -3.436_052_894_8,
+                5,
+                114,
+            ),
+            (
+                AdfModel::Constant,
+                AdfLags::Aic { max: None },
+                -3.436_052_894_8,
+                5,
+                114,
+            ),
+            (
+                AdfModel::ConstantTrend,
+                AdfLags::Aic { max: Some(6) },
+                -3.505_247_069_0,
+                5,
+                114,
+            ),
+            (
+                AdfModel::None,
+                AdfLags::Aic { max: Some(5) },
+                -3.459_240_021_9,
+                5,
+                114,
+            ),
+            (
+                AdfModel::Constant,
+                AdfLags::Fixed(3),
+                -4.652_930_484_4,
+                3,
+                116,
+            ),
+        ] {
+            let r = adf_test(&x, model, lags).expect("fits");
+            assert_eq!((r.n_lags, r.n_obs), (n_lags, n_obs), "{model:?} {lags:?}");
+            assert!(
+                (r.statistic - stat).abs() < 1e-8,
+                "{model:?} {lags:?}: {}",
+                r.statistic
+            );
+        }
     }
 
     #[test]

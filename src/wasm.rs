@@ -664,9 +664,10 @@ pub fn anderson_darling_test(
 ///
 /// # Input JSON
 ///
-/// `{ data: number[], model?: "none" | "constant" | "constant_trend", max_lags?: number | null }`
-/// -- at least 10 values; `model` defaults to `"constant"`; `max_lags` absent or
-/// `null` selects the lag count by AIC up to Schwert's rule.
+/// `{ data: number[], model?: "none" | "constant" | "constant_trend", max_lags?: number | null,
+/// lags?: number | null }` -- at least 10 values; `model` defaults to `"constant"`;
+/// the lag count is chosen by AIC from 0 to `max_lags` (absent or `null`:
+/// Schwert's rule), or fixed by `lags` (not both).
 ///
 /// # Output JSON
 ///
@@ -2800,8 +2801,8 @@ mod binding_contract_tests {
                     .expect("a whole number reads"),
             )
         };
-        for got in [-1.0, 3.0] {
-            let e = adf(json!(got as i64)).expect_err("outside [0, 2]");
+        for got in [-1.0, 4.0] {
+            let e = adf(json!(got as i64)).expect_err("outside [0, 3]");
             assert_eq!(
                 (e.code, e.parameter.as_deref()),
                 ("parameter_out_of_range", Some("max_lags"))
@@ -2810,14 +2811,18 @@ mod binding_contract_tests {
                 e.details,
                 vec![
                     ("min", Detail::Num(0.0)),
-                    ("max", Detail::Num(2.0)),
+                    ("max", Detail::Num(3.0)),
                     ("got", Detail::Num(got)),
                 ]
             );
         }
-        // An integer is still read as one, and `2.0` is the same count.
-        assert_eq!(adf(json!(2)).expect("in range").n_lags, 2);
-        assert_eq!(adf(json!(2.0)).expect("in range").n_lags, 2);
+        // An integer is still read as one, and `2.0` is the same bound on the
+        // AIC search.
+        assert!(adf(json!(2)).expect("in range").n_lags <= 2);
+        assert_eq!(
+            adf(json!(2)).expect("in range").n_lags,
+            adf(json!(2.0)).expect("in range").n_lags
+        );
 
         let e = super::pelt_dto(
             super::from_json(

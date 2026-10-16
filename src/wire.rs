@@ -1672,10 +1672,15 @@ pub(crate) mod hypothesis {
             tsify(type = "\"none\" | \"constant\" | \"constant_trend\"")
         )]
         pub(crate) model: String,
-        /// Lagged differences to include; absent or `null` selects them by AIC.
+        /// The largest number of lagged differences the AIC search considers;
+        /// absent or `null`: Schwert's rule. Not with `lags`.
         #[serde(default)]
         #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
         pub(crate) max_lags: Option<Whole>,
+        /// Exactly this many lagged differences, no search. Not with `max_lags`.
+        #[serde(default)]
+        #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+        pub(crate) lags: Option<Whole>,
     }
 
     fn default_adf_model() -> String {
@@ -1723,28 +1728,41 @@ pub(crate) mod hypothesis {
             }
         };
         let data = at_least(input.data, 10, "data")?;
-        // With p lags the regression keeps n - 2 - p rows (one value is lost to
-        // differencing, p + 1 to the lags and the lagged level) and has
-        // fixed_columns + p columns. It needs ADF_MIN_REGRESSION_ROWS rows and a
-        // residual degree of freedom.
+        // With p lags the regression keeps n - 1 - p rows (one value is lost to
+        // differencing, p to the lags) and has fixed_columns + p columns. It
+        // needs ADF_MIN_REGRESSION_ROWS rows and a residual degree of freedom.
         let n = data.len();
-        let max = (n - 2 - ADF_MIN_REGRESSION_ROWS).min((n - 3 - fixed_columns) / 2);
-        let max_lags = match input.max_lags {
-            Some(Whole(p)) if !(0.0..=max as f64).contains(&p) => {
-                return Err(WireError::out_of_range(
-                    "max_lags",
-                    Bound::Closed(0.0),
-                    Bound::Closed(max as f64),
-                    p,
-                    format!(
-                        "max_lags: {} values leave room for 0 to {max} lags, got {p}",
-                        data.len()
-                    ),
-                ));
-            }
-            p => p.map(Whole::count),
+        let max = (n - 1 - ADF_MIN_REGRESSION_ROWS).min((n - 2 - fixed_columns) / 2);
+        let count = |parameter: &'static str, value: Option<Whole>| match value {
+            Some(Whole(p)) if !(0.0..=max as f64).contains(&p) => Err(WireError::out_of_range(
+                parameter,
+                Bound::Closed(0.0),
+                Bound::Closed(max as f64),
+                p,
+                format!(
+                    "{parameter}: {} values leave room for 0 to {max} lags, got {p}",
+                    data.len()
+                ),
+            )),
+            p => Ok(p.map(Whole::count)),
         };
-        let r = crate::testing::adf_test(&data, model, max_lags).ok_or_else(|| {
+        let lags = match (
+            count("max_lags", input.max_lags)?,
+            count("lags", input.lags)?,
+        ) {
+            (Some(_), Some(_)) => {
+                return Err(WireError::new(
+                    code::INVALID_OPTION,
+                    None,
+                    "lags fixes the number of lagged differences and max_lags bounds the \
+                     AIC search for it -- give one",
+                )
+                .about("lags"))
+            }
+            (_, Some(p)) => crate::testing::AdfLags::Fixed(p),
+            (max, None) => crate::testing::AdfLags::Aic { max },
+        };
+        let r = crate::testing::adf_test(&data, model, lags).ok_or_else(|| {
             WireError::invalid_input(
                 "adf_test: the test regression is degenerate -- singular, or an exact \
                  fit of the differences (a deterministic series), so the t-ratio is \

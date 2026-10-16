@@ -1833,22 +1833,33 @@ mod tests {
         );
         assert_eq!(b["levels"][1]["rejected"], false, "{b}");
 
-        // Ten values leave room for two lags beside a constant (eight rows less
-        // the lags, against four columns), three with no deterministic term.
+        // Ten values leave room for three lags beside a constant (nine rows
+        // less the lags, against two columns plus the lags), two with a trend.
         let ten = r#"[1, 3, 2, 5, 4, 6, 5, 8, 7, 9]"#;
         let (code, b) = call(
             uanalytics_adf_test,
-            &format!(r#"{{"data": {ten}, "max_lags": 2}}"#),
+            &format!(r#"{{"data": {ten}, "lags": 2}}"#),
         );
         assert_eq!((code, b["n_lags"].as_u64()), (0, Some(2)), "{b}");
+        // `max_lags` bounds the AIC search: the count chosen is at most it.
         let (code, b) = call(
             uanalytics_adf_test,
             &format!(r#"{{"data": {ten}, "model": "none", "max_lags": 3}}"#),
         );
-        assert_eq!((code, b["n_lags"].as_u64()), (0, Some(3)), "{b}");
+        assert_eq!(code, 0, "{b}");
+        assert!(b["n_lags"].as_u64().is_some_and(|p| p <= 3), "{b}");
+        let (_, b) = call(
+            uanalytics_adf_test,
+            &format!(r#"{{"data": {ten}, "lags": 1, "max_lags": 3}}"#),
+        );
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("invalid_option"), Some("lags")),
+            "{b}"
+        );
         let (code, b) = call(
             uanalytics_adf_test,
-            &format!(r#"{{"data": {ten}, "max_lags": 3}}"#),
+            &format!(r#"{{"data": {ten}, "max_lags": 4}}"#),
         );
         assert_eq!(
             (
@@ -1861,7 +1872,7 @@ mod tests {
                 -3,
                 Some("parameter_out_of_range"),
                 Some("max_lags"),
-                Some(2.0)
+                Some(3.0)
             )
         );
         let (_, b) = call(
@@ -1895,7 +1906,7 @@ mod tests {
                 "index": null,
                 "parameter": "max_lags",
                 "min": 0.0,
-                "max": 2.0,
+                "max": 3.0,
                 "got": -1.0,
             })
         );
@@ -1947,7 +1958,7 @@ mod tests {
         for lags in ["2", "2.0"] {
             let (code, b) = call(
                 uanalytics_adf_test,
-                &format!(r#"{{"data": {ten}, "max_lags": {lags}}}"#),
+                &format!(r#"{{"data": {ten}, "lags": {lags}}}"#),
             );
             assert_eq!((code, b["n_lags"].as_u64()), (0, Some(2)), "{b}");
         }
