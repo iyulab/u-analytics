@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-16
+
+Depends on u-numflow 0.14. The .NET client is `UAnalytics` 0.22.0.
+
 ### Changed
 
 - **Breaking** `adf_test`'s `max_lags` bounds the AIC search for the lag
