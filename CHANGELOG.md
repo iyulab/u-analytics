@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-16
+
+Depends on u-numflow 0.13. The .NET client is `UAnalytics` 0.21.0.
+
 ### Added
 
 - **Confidence intervals for reliability and B-lives**: `weibull_mle` returns
