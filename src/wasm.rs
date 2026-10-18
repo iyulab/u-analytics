@@ -687,11 +687,13 @@ pub fn adf_test(
 
 /// `{ method? }` for [`correlation_matrix`].
 #[derive(serde::Deserialize, Default, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[tsify(missing_as_null)]
 #[serde(deny_unknown_fields)]
 struct CorrelationOptions {
     #[serde(default)]
     #[tsify(optional, type = "\"pearson\" | \"spearman\" | \"kendall\"")]
+    #[cfg_attr(test, schemars(extend("enum" = ["pearson", "spearman", "kendall"])))]
     method: Option<String>,
 }
 
@@ -1650,11 +1652,13 @@ pub fn weibull_mle(
 
 /// The optional third argument of [`weibull_mle`].
 #[derive(serde::Deserialize, Default)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct WeibullMleOptions {
     #[serde(default)]
     confidence: Option<f64>,
     #[serde(default)]
+    #[cfg_attr(test, schemars(schema_with = "card_schema::interval_method"))]
     method: Option<String>,
     #[serde(default)]
     fractions_failed: Vec<f64>,
@@ -3044,5 +3048,353 @@ mod code_catalog_tests {
             .chain(catalog.violations.iter().map(|v| v.code.clone()))
             .collect();
         assert_eq!(documented, published);
+    }
+}
+
+/// The option objects declared by hand in `OPTIONS_TS`, as JSON Schema built
+/// from the tables the binding reads them with (the engine card's schemas;
+/// tests only).
+#[cfg(test)]
+mod card_schema {
+    use schemars::{Schema, SchemaGenerator};
+    use serde_json::json;
+
+    use crate::engine_card::string_enum;
+
+    fn schema(value: serde_json::Value) -> Schema {
+        Schema::try_from(value).expect("an object is a schema")
+    }
+
+    pub(super) fn interval_method(_: &mut SchemaGenerator) -> Schema {
+        let names = string_enum(crate::wire::reliability::INTERVAL_METHODS).to_value();
+        schema(json!({ "anyOf": [names, { "type": "null" }] }))
+    }
+
+    /// `{ rules? }`: a named rule set, the tests spelt out, or null.
+    pub(super) fn rule_options() -> Schema {
+        let sets = string_enum(crate::spc::RuleSet::NAMES).to_value();
+        let rules = string_enum(crate::spc::ViolationType::ALL.iter().map(|v| v.name())).to_value();
+        schema(json!({
+            "description": "Which run tests to apply: a named set, or the tests spelt out. Omitted or null: \"shewhart\". []: none.",
+            "type": ["object", "null"],
+            "properties": {
+                "rules": { "anyOf": [sets, { "type": "array", "items": rules }, { "type": "null" }] }
+            },
+            "additionalProperties": false
+        }))
+    }
+
+    /// A Phase I standard: the named fields, each a number or null.
+    pub(super) fn standard(fields: &[&str], description: &str) -> Schema {
+        let properties: serde_json::Map<String, serde_json::Value> = fields
+            .iter()
+            .map(|f| (f.to_string(), json!({ "type": ["number", "null"] })))
+            .collect();
+        schema(json!({
+            "description": description,
+            "type": ["object", "null"],
+            "properties": properties,
+            "additionalProperties": false
+        }))
+    }
+}
+
+#[cfg(test)]
+mod engine_card_tests {
+    //! The engine card's operations are this binding's exports, and the
+    //! schemas it points at are generated from the types they read and return.
+
+    use super::*;
+    use crate::engine_card::{arg, optional, Schemas};
+    use crate::wire::{
+        counter, hypothesis, point_process, reliability, CapabilityDto, ChartPointDto,
+        CorrelationMatrixDto, CusumDto, DistributionFitDto, EwmaDto, FixedLimitChartDto, GChartDto,
+        GageRRAnovaResultDto, GageRRResultDto, ImrChartDto, LaneyPChartDto, LaneyUChartDto,
+        PChartDto, PeltResultDto, PercentileCapabilityDto, RegressionDto, SeasonalityDto,
+        SpectralResidualDto, TChartDto, UChartDto, XbarRChartDto, XbarSChartDto,
+    };
+
+    fn schemas() -> Schemas {
+        let s = Schemas::new();
+        let num = || s.of::<f64>();
+        let numbers = || s.of::<Vec<f64>>();
+        let rows = || s.of::<Vec<Vec<f64>>>();
+        let pairs = || s.of::<Vec<(f64, f64)>>();
+        let rules = || optional("options", card_schema::rule_options());
+        let test = || s.of::<hypothesis::TestResultDto>();
+
+        s.op(
+            "xbar_r_chart",
+            vec![arg("data", rows()), rules()],
+            s.of::<XbarRChartDto>(),
+        );
+        s.op(
+            "xbar_s_chart",
+            vec![arg("data", rows()), rules()],
+            s.of::<XbarSChartDto>(),
+        );
+        s.op(
+            "imr_chart",
+            vec![arg("values", numbers()), rules()],
+            s.of::<ImrChartDto>(),
+        );
+        s.op(
+            "run_rules",
+            vec![
+                arg("values", numbers()),
+                arg("limits", s.of::<LimitsInputDto>()),
+                rules(),
+            ],
+            s.of::<Vec<ChartPointDto>>(),
+        );
+        let standard = |fields: &[&str]| {
+            optional(
+                "options",
+                card_schema::standard(fields, "A known standard from a Phase I study."),
+            )
+        };
+        s.op(
+            "p_chart",
+            vec![arg("samples", pairs()), standard(&["p_bar"])],
+            s.of::<PChartDto>(),
+        );
+        s.op(
+            "laney_p_chart",
+            vec![arg("samples", pairs()), standard(&["p_bar", "phi"])],
+            s.of::<LaneyPChartDto>(),
+        );
+        s.op(
+            "u_chart",
+            vec![arg("samples", pairs()), standard(&["u_bar"])],
+            s.of::<UChartDto>(),
+        );
+        s.op(
+            "laney_u_chart",
+            vec![arg("samples", pairs()), standard(&["u_bar", "phi"])],
+            s.of::<LaneyUChartDto>(),
+        );
+        s.op(
+            "np_chart",
+            vec![arg("defectives", numbers()), arg("sample_size", num())],
+            s.of::<FixedLimitChartDto>(),
+        );
+        s.op(
+            "c_chart",
+            vec![arg("defects", numbers())],
+            s.of::<FixedLimitChartDto>(),
+        );
+        s.op("g_chart", vec![arg("gaps", numbers())], s.of::<GChartDto>());
+        s.op(
+            "t_chart",
+            vec![arg("times", numbers())],
+            s.of::<TChartDto>(),
+        );
+        s.op(
+            "process_capability",
+            vec![arg("input", s.of::<CapabilityInputDto>())],
+            s.of::<CapabilityDto>(),
+        );
+        s.op(
+            "anderson_darling_test",
+            vec![arg("data", numbers())],
+            s.of::<hypothesis::AndersonDarlingDto>(),
+        );
+        s.op(
+            "adf_test",
+            vec![arg("input", s.of::<AdfInputDto>())],
+            s.of::<hypothesis::AdfDto>(),
+        );
+        s.op(
+            "correlation_matrix",
+            vec![
+                arg("variables", rows()),
+                optional("options", s.of::<Option<CorrelationOptions>>()),
+            ],
+            s.of::<CorrelationMatrixDto>(),
+        );
+        s.op(
+            "simple_regression",
+            vec![arg("x", numbers()), arg("y", numbers())],
+            s.of::<RegressionDto>(),
+        );
+        s.op(
+            "fit_best",
+            vec![arg("data", numbers())],
+            s.of::<Vec<DistributionFitDto>>(),
+        );
+        s.op(
+            "one_sample_t_test",
+            vec![arg("data", numbers()), arg("mu0", num())],
+            test(),
+        );
+        for (id, a, b) in [
+            ("two_sample_t_test", "a", "b"),
+            ("paired_t_test", "x", "y"),
+            ("mann_whitney_u_test", "a", "b"),
+            ("wilcoxon_signed_rank_test", "x", "y"),
+            ("chi_squared_goodness_of_fit", "observed", "expected"),
+        ] {
+            s.op(id, vec![arg(a, numbers()), arg(b, numbers())], test());
+        }
+        s.op("jarque_bera_test", vec![arg("data", numbers())], test());
+        s.op(
+            "shapiro_wilk_test",
+            vec![arg("data", numbers())],
+            s.of::<hypothesis::ShapiroWilkDto>(),
+        );
+        s.op(
+            "mann_kendall_test",
+            vec![arg("data", numbers())],
+            s.of::<hypothesis::MannKendallDto>(),
+        );
+        let counter_options = || optional("options", s.of::<Option<counter::CounterOptionsDto>>());
+        s.op(
+            "counter_increments",
+            vec![
+                arg("times", numbers()),
+                arg("values", numbers()),
+                counter_options(),
+            ],
+            s.of::<Vec<counter::CounterIncrementDto>>(),
+        );
+        s.op(
+            "counter_totals",
+            vec![
+                arg("times", numbers()),
+                arg("values", numbers()),
+                arg("edges", numbers()),
+                counter_options(),
+            ],
+            s.of::<Vec<counter::CounterTotalDto>>(),
+        );
+        let observation = || arg("observation", s.of::<point_process::ObservationDto>());
+        for id in ["laplace_trend_test", "mil_hdbk_189_test"] {
+            s.op(
+                id,
+                vec![arg("times", numbers()), observation()],
+                s.of::<point_process::TrendTestDto>(),
+            );
+        }
+        s.op(
+            "power_law_process_fit",
+            vec![arg("times", numbers()), observation()],
+            s.of::<point_process::PowerLawFitDto>(),
+        );
+        s.op(
+            "one_way_anova",
+            vec![arg("groups", rows())],
+            s.of::<hypothesis::AnovaDto>(),
+        );
+        for id in ["kruskal_wallis_test", "levene_test", "bartlett_test"] {
+            s.op(id, vec![arg("groups", rows())], test());
+        }
+        s.op(
+            "chi_squared_independence",
+            vec![arg("table", rows())],
+            test(),
+        );
+        s.op(
+            "fisher_exact_test",
+            vec![arg("table", s.of::<[[f64; 2]; 2]>())],
+            test(),
+        );
+        for id in ["bonferroni_correction", "benjamini_hochberg"] {
+            s.op(id, vec![arg("p_values", numbers())], numbers());
+        }
+        s.op(
+            "detect_changepoints",
+            vec![arg("input", s.of::<PeltInputDto>())],
+            s.of::<PeltResultDto>(),
+        );
+        s.op(
+            "detect_changepoints_multi",
+            vec![arg("input", s.of::<MultiPeltInputDto>())],
+            s.of::<PeltResultDto>(),
+        );
+        s.op(
+            "gage_rr_xbar_r",
+            vec![arg("input", s.of::<GageRRInputDto>())],
+            s.of::<GageRRResultDto>(),
+        );
+        s.op(
+            "gage_rr_anova",
+            vec![arg("input", s.of::<GageRRInputDto>())],
+            s.of::<GageRRAnovaResultDto>(),
+        );
+        s.op(
+            "percentile_capability",
+            vec![arg("input", s.of::<PercentileCapabilityInputDto>())],
+            s.of::<PercentileCapabilityDto>(),
+        );
+        s.op(
+            "cusum",
+            vec![arg("input", s.of::<CusumInputDto>())],
+            s.of::<CusumDto>(),
+        );
+        s.op(
+            "ewma",
+            vec![arg("input", s.of::<EwmaInputDto>())],
+            s.of::<EwmaDto>(),
+        );
+        s.op(
+            "boxcox_capability",
+            vec![arg("input", s.of::<BoxcoxCapabilityInputDto>())],
+            s.of::<reliability::BoxcoxCapabilityDto>(),
+        );
+        s.op(
+            "estimate_period",
+            vec![arg("input", s.of::<SeasonalityInputDto>())],
+            s.of::<SeasonalityDto>(),
+        );
+        s.op(
+            "spectral_residual",
+            vec![arg("input", s.of::<SpectralResidualInputDto>())],
+            s.of::<SpectralResidualDto>(),
+        );
+        s.op("sigma_to_ppm", vec![arg("sigma", num())], num());
+        s.op("ppm_to_sigma", vec![arg("ppm", num())], num());
+        let suspensions = || optional("suspension_times", s.of::<Option<Vec<f64>>>());
+        s.op(
+            "weibull_mle",
+            vec![
+                arg("failure_times", numbers()),
+                suspensions(),
+                optional("options", s.of::<Option<WeibullMleOptions>>()),
+            ],
+            s.of::<reliability::WeibullMleDto>(),
+        );
+        s.op(
+            "weibull_mrr",
+            vec![arg("failure_times", numbers()), suspensions()],
+            s.of::<reliability::WeibullMrrDto>(),
+        );
+        s.op(
+            "weibull_reliability",
+            vec![arg("input", s.of::<WeibullReliabilityInputDto>())],
+            s.of::<reliability::WeibullReliabilityDto>(),
+        );
+        s
+    }
+
+    #[test]
+    fn the_schemas_are_generated_from_the_binding_types() {
+        schemas().check("u-analytics WebAssembly operations");
+    }
+
+    #[test]
+    fn every_export_is_a_card_operation_with_its_arguments() {
+        let s = schemas();
+        s.check_exports(include_str!("wasm.rs"));
+        s.check_card();
+    }
+
+    /// No operation reads a clock or draws a random number, so each returns
+    /// the same result for the same arguments.
+    #[test]
+    fn the_crate_reads_no_clock_and_no_randomness() {
+        assert_eq!(
+            crate::engine_card::clock_and_entropy_uses(),
+            Vec::<(String, &str)>::new()
+        );
     }
 }

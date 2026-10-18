@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct XbarRChartDto {
     pub(crate) xbar_cl: f64,
@@ -46,6 +47,7 @@ pub(crate) struct XbarRChartDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct ChartPointDto {
     pub(crate) index: usize,
@@ -55,6 +57,7 @@ pub(crate) struct ChartPointDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct PChartDto {
     pub(crate) p_bar: f64,
@@ -64,6 +67,7 @@ pub(crate) struct PChartDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct AttributeChartPointDto {
     pub(crate) index: usize,
@@ -135,6 +139,7 @@ impl AttributeStandardDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct LaneyPChartDto {
     pub(crate) p_bar: f64,
@@ -231,6 +236,7 @@ pub(crate) fn subgroup_size(subgroups: &[Vec<f64>]) -> Result<usize, WireError> 
 /// `code` is stable across releases; `message` is for people and may change.
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct WireError {
     /// Stable, machine-readable reason: the name of [`Self::reason`].
@@ -358,6 +364,23 @@ pub(crate) fn describe(low: Bound, high: Bound) -> String {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Whole(pub(crate) f64);
 
+/// On the wire a [`Whole`] is a whole number -- its range is the field's to
+/// check.
+#[cfg(all(test, feature = "wasm"))]
+impl schemars::JsonSchema for Whole {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Whole".into()
+    }
+
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "integer" })
+    }
+}
+
 impl Whole {
     /// The value as a count, once a range check has accepted it as `>= 0`.
     pub(crate) fn count(self) -> usize {
@@ -448,6 +471,7 @@ pub(crate) fn failure_site(
 /// stand beside it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RefusalCode {
     pub(crate) code: String,
@@ -458,6 +482,7 @@ pub(crate) struct RefusalCode {
 /// here so every engine's [`Codes`] has one shape.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ViolationCode {
     pub(crate) code: String,
@@ -469,6 +494,7 @@ pub(crate) struct ViolationCode {
 /// `code`, and no violations -- it has no checker.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Codes {
     pub(crate) refusals: Vec<RefusalCode>,
@@ -1183,6 +1209,7 @@ pub(crate) fn laney_p_dto(
 /// NP and C charts: one set of limits for every point.
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct FixedLimitChartDto {
     pub(crate) cl: f64,
@@ -1194,6 +1221,7 @@ pub(crate) struct FixedLimitChartDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct UChartDto {
     pub(crate) u_bar: f64,
@@ -1203,6 +1231,7 @@ pub(crate) struct UChartDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct LaneyUChartDto {
     pub(crate) u_bar: f64,
@@ -1211,6 +1240,7 @@ pub(crate) struct LaneyUChartDto {
 }
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct GChartDto {
     pub(crate) g_bar: f64,
@@ -1219,6 +1249,7 @@ pub(crate) struct GChartDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct GChartPointDto {
     pub(crate) index: usize,
@@ -1231,6 +1262,7 @@ pub(crate) struct GChartPointDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct TChartDto {
     pub(crate) t_bar: f64,
@@ -1239,6 +1271,7 @@ pub(crate) struct TChartDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct TChartPointDto {
     pub(crate) index: usize,
@@ -1435,6 +1468,7 @@ pub(crate) mod hypothesis {
     /// A test statistic, its degrees of freedom and two-sided p-value.
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct TestResultDto {
         pub(crate) statistic: f64,
@@ -1455,6 +1489,7 @@ pub(crate) mod hypothesis {
     /// One-way ANOVA table.
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct AnovaDto {
         pub(crate) f_statistic: f64,
@@ -1468,6 +1503,7 @@ pub(crate) mod hypothesis {
     /// Shapiro-Wilk W and its p-value.
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct ShapiroWilkDto {
         pub(crate) w: f64,
@@ -1477,6 +1513,7 @@ pub(crate) mod hypothesis {
     /// Mann-Kendall trend test with Sen's slope.
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct MannKendallDto {
         pub(crate) s_statistic: i64,
@@ -1639,6 +1676,7 @@ pub(crate) mod hypothesis {
     /// Anderson-Darling normality: A², the sample-size-corrected A²* and its p-value.
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct AndersonDarlingDto {
         pub(crate) statistic: f64,
@@ -1660,6 +1698,7 @@ pub(crate) mod hypothesis {
     /// Augmented Dickey-Fuller unit-root test input.
     #[derive(Deserialize)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     #[serde(deny_unknown_fields)]
     pub(crate) struct AdfInputDto {
@@ -1671,6 +1710,7 @@ pub(crate) mod hypothesis {
             feature = "wasm",
             tsify(type = "\"none\" | \"constant\" | \"constant_trend\"")
         )]
+        #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["none", "constant", "constant_trend"])))]
         pub(crate) model: String,
         /// The largest number of lagged differences the AIC search considers;
         /// absent or `null`: Schwert's rule. Not with `lags`.
@@ -1690,6 +1730,7 @@ pub(crate) mod hypothesis {
     /// One significance level of the ADF test.
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct AdfLevelDto {
         pub(crate) level: f64,
@@ -1700,6 +1741,7 @@ pub(crate) mod hypothesis {
 
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct AdfDto {
         pub(crate) statistic: f64,
@@ -1963,6 +2005,7 @@ pub(crate) mod hypothesis {
 /// be present -- a capability index without a specification limit is undefined.
 #[derive(Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CapabilityInputDto {
@@ -2003,6 +2046,7 @@ pub(crate) struct CapabilityInputDto {
 /// A two-sided confidence interval.
 #[derive(Serialize, Debug, PartialEq)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 pub(crate) struct IntervalDto {
     pub(crate) lower: f64,
     pub(crate) upper: f64,
@@ -2012,6 +2056,7 @@ pub(crate) struct IntervalDto {
 /// and for `cp` / `cpk` unless `sigma_within_df` was given.
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct CapabilityIntervalsDto {
     pub(crate) confidence: f64,
@@ -2023,6 +2068,7 @@ pub(crate) struct CapabilityIntervalsDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct CapabilityDto {
     pub(crate) mean: f64,
@@ -2171,6 +2217,7 @@ pub(crate) fn capability_dto(input: CapabilityInputDto) -> Result<CapabilityDto,
 /// Input for `percentile_capability`.
 #[derive(Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PercentileCapabilityInputDto {
@@ -2191,6 +2238,7 @@ pub(crate) struct PercentileCapabilityInputDto {
             type = "\"Normal\" | \"LogNormal\" | \"Weibull\" | \"Gamma\" | \"Exponential\" | \"Beta\" | null"
         )
     )]
+    #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["Normal", "LogNormal", "Weibull", "Gamma", "Exponential", "Beta", null])))]
     pub(crate) distribution: Option<String>,
 }
 
@@ -2233,6 +2281,7 @@ fn capability_model_name(model: crate::capability::CapabilityModel) -> &'static 
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct PercentileCapabilityDto {
     pub(crate) cp_star: Option<f64>,
@@ -2249,6 +2298,7 @@ pub(crate) struct PercentileCapabilityDto {
             type = "\"Normal\" | \"LogNormal\" | \"Weibull\" | \"Gamma\" | \"Exponential\" | \"Beta\""
         )
     )]
+    #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["Normal", "LogNormal", "Weibull", "Gamma", "Exponential", "Beta"])))]
     pub(crate) distribution: &'static str,
     /// Its fitted parameters by name, as `fit_best` reports them.
     #[cfg_attr(feature = "wasm", tsify(type = "Record<string, number>"))]
@@ -2257,6 +2307,7 @@ pub(crate) struct PercentileCapabilityDto {
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct GageRRInputDto {
@@ -2268,6 +2319,7 @@ pub(crate) struct GageRRInputDto {
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct GageChartLimitsDto {
     pub(crate) center: f64,
@@ -2287,6 +2339,7 @@ impl From<crate::msa::GageChartLimits> for GageChartLimitsDto {
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct GageRRResultDto {
     /// The range chart the method plots, from the same R̄ the components use.
@@ -2309,6 +2362,7 @@ pub(crate) struct GageRRResultDto {
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct GageRRAnovaResultDto {
     pub(crate) anova_table: Vec<AnovaRowDto>,
@@ -2328,6 +2382,7 @@ pub(crate) struct GageRRAnovaResultDto {
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct AnovaRowDto {
     pub(crate) source: String,
@@ -2340,6 +2395,7 @@ pub(crate) struct AnovaRowDto {
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct VarianceComponentsDto {
     pub(crate) part: f64,
@@ -2360,6 +2416,7 @@ pub(crate) fn grr_status_str(status: crate::msa::GrrStatus) -> &'static str {
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PeltInputDto {
@@ -2367,10 +2424,15 @@ pub(crate) struct PeltInputDto {
     #[serde(default = "default_cost")]
     #[cfg_attr(feature = "wasm", tsify(optional))]
     #[cfg_attr(feature = "wasm", tsify(type = "\"l2\" | \"normal\""))]
+    #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["l2", "normal"])))]
     pub(crate) cost: String,
     #[serde(default = "default_penalty")]
     #[cfg_attr(feature = "wasm", tsify(optional))]
     #[cfg_attr(feature = "wasm", tsify(type = "\"bic\" | number"))]
+    #[cfg_attr(
+        all(test, feature = "wasm"),
+        schemars(schema_with = "crate::wire::card_schema::penalty")
+    )]
     pub(crate) penalty: PeltPenaltyDto,
     #[serde(default = "default_min_seg")]
     #[cfg_attr(feature = "wasm", tsify(optional, type = "number"))]
@@ -2386,6 +2448,7 @@ pub(crate) enum PeltPenaltyDto {
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct PeltResultDto {
     pub(crate) changepoints: Vec<usize>,
@@ -2690,6 +2753,7 @@ pub(crate) fn pelt_dto(input: PeltInputDto) -> Result<PeltResultDto, WireError> 
 /// PELT over several aligned signals: one set of changepoints for all.
 #[derive(Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct MultiPeltInputDto {
@@ -2697,10 +2761,15 @@ pub(crate) struct MultiPeltInputDto {
     #[serde(default = "default_cost")]
     #[cfg_attr(feature = "wasm", tsify(optional))]
     #[cfg_attr(feature = "wasm", tsify(type = "\"l2\" | \"normal\""))]
+    #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["l2", "normal"])))]
     pub(crate) cost: String,
     #[serde(default = "default_penalty")]
     #[cfg_attr(feature = "wasm", tsify(optional))]
     #[cfg_attr(feature = "wasm", tsify(type = "\"bic\" | number"))]
+    #[cfg_attr(
+        all(test, feature = "wasm"),
+        schemars(schema_with = "crate::wire::card_schema::penalty")
+    )]
     pub(crate) penalty: PeltPenaltyDto,
     #[serde(default = "default_min_seg")]
     #[cfg_attr(feature = "wasm", tsify(optional, type = "number"))]
@@ -2741,6 +2810,7 @@ pub(crate) fn multi_pelt_dto(input: MultiPeltInputDto) -> Result<PeltResultDto, 
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CusumInputDto {
@@ -2765,6 +2835,7 @@ fn default_cusum_h() -> f64 {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct CusumPointDto {
     pub(crate) index: usize,
@@ -2775,6 +2846,7 @@ pub(crate) struct CusumPointDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct CusumDto {
     /// Decision interval actually used, echoed so a caller can draw the
@@ -2788,6 +2860,7 @@ pub(crate) struct CusumDto {
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EwmaInputDto {
@@ -2812,6 +2885,7 @@ fn default_ewma_l_factor() -> f64 {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct EwmaPointDto {
     pub(crate) index: usize,
@@ -2823,6 +2897,7 @@ pub(crate) struct EwmaPointDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct EwmaDto {
     pub(crate) points: Vec<EwmaPointDto>,
@@ -2935,6 +3010,7 @@ pub(crate) fn ewma_dto(input: EwmaInputDto) -> Result<EwmaDto, WireError> {
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CorrelationInputDto {
@@ -2946,6 +3022,7 @@ pub(crate) struct CorrelationInputDto {
         feature = "wasm",
         tsify(type = "\"pearson\" | \"spearman\" | \"kendall\"")
     )]
+    #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["pearson", "spearman", "kendall"])))]
     pub(crate) method: String,
 }
 
@@ -2955,6 +3032,7 @@ pub(crate) fn default_correlation_method() -> String {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct CorrelationMatrixDto {
     /// `matrix[i][j]` is the correlation of variables `i` and `j`.
@@ -3040,6 +3118,7 @@ pub(crate) fn correlation_matrix_dto(
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RegressionInputDto {
@@ -3050,6 +3129,7 @@ pub(crate) struct RegressionInputDto {
 /// Ordinary least squares `y = intercept + slope · x`.
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct RegressionDto {
     pub(crate) slope: f64,
@@ -3119,6 +3199,7 @@ pub(crate) fn simple_regression_dto(input: RegressionInputDto) -> Result<Regress
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct DistributionFitDto {
     /// `"Normal"`, `"Exponential"`, `"Gamma"`, `"LogNormal"`, `"Weibull"` or `"Beta"`.
@@ -3128,6 +3209,7 @@ pub(crate) struct DistributionFitDto {
             type = "\"Normal\" | \"LogNormal\" | \"Weibull\" | \"Gamma\" | \"Exponential\" | \"Beta\""
         )
     )]
+    #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["Normal", "LogNormal", "Weibull", "Gamma", "Exponential", "Beta"])))]
     pub(crate) distribution: String,
     /// Estimated parameters by name (`mu`/`sigma`, `lambda`, `alpha`/`beta`,
     /// `shape`/`scale`).
@@ -3163,6 +3245,7 @@ pub(crate) fn fit_best_dto(data: &[f64]) -> Result<Vec<DistributionFitDto>, Wire
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct XbarSChartDto {
     pub(crate) xbar_cl: f64,
@@ -3183,6 +3266,7 @@ pub(crate) struct XbarSChartDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct ImrChartDto {
     pub(crate) i_cl: f64,
@@ -3204,6 +3288,7 @@ pub(crate) struct ImrChartDto {
 /// Control limits a caller supplies to `run_rules`.
 #[derive(Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct LimitsInputDto {
@@ -3340,6 +3425,7 @@ pub(crate) fn run_rules_dto(
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SeasonalityInputDto {
@@ -3348,6 +3434,7 @@ pub(crate) struct SeasonalityInputDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct PeriodCandidateDto {
     pub(crate) period: usize,
@@ -3359,6 +3446,7 @@ pub(crate) struct PeriodCandidateDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct SeasonalityDto {
     /// `null` when no periodicity passed both stages.
@@ -3411,6 +3499,7 @@ pub(crate) fn seasonality_dto(input: SeasonalityInputDto) -> Result<SeasonalityD
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SpectralResidualInputDto {
@@ -3443,6 +3532,7 @@ pub(crate) struct SpectralResidualInputDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct SrPointDto {
     pub(crate) index: usize,
@@ -3460,6 +3550,7 @@ pub(crate) struct SrPointDto {
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct SpectralResidualDto {
     pub(crate) points: Vec<SrPointDto>,
@@ -3648,10 +3739,12 @@ pub(crate) mod reliability {
     /// `likelihood_ratio` -- the profile-likelihood interval.
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct WeibullIntervalsDto {
         pub(crate) confidence: f64,
         #[cfg_attr(feature = "wasm", tsify(type = "\"wald\" | \"likelihood_ratio\""))]
+        #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["wald", "likelihood_ratio"])))]
         pub(crate) method: &'static str,
         pub(crate) shape: crate::wire::IntervalDto,
         pub(crate) scale: crate::wire::IntervalDto,
@@ -3662,6 +3755,7 @@ pub(crate) mod reliability {
     /// Weibull maximum-likelihood fit.
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct WeibullMleDto {
         pub(crate) shape: f64,
@@ -3681,6 +3775,7 @@ pub(crate) mod reliability {
     /// Weibull median-rank-regression fit.
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct WeibullMrrDto {
         pub(crate) shape: f64,
@@ -3833,6 +3928,7 @@ pub(crate) mod reliability {
     /// the fit's `covariance`, intervals at `confidence`.
     #[derive(Deserialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[serde(deny_unknown_fields)]
     pub(crate) struct WeibullReliabilityInputDto {
         pub(crate) shape: f64,
@@ -3867,6 +3963,7 @@ pub(crate) mod reliability {
     /// and fractions: delta method on `ln(−ln R)` and `ln t_p`.
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct WeibullReliabilityIntervalsDto {
         pub(crate) confidence: f64,
@@ -3877,6 +3974,7 @@ pub(crate) mod reliability {
     /// Reliability metrics of a Weibull, aligned with the input arrays.
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct WeibullReliabilityDto {
         /// Mean time between (to) failure, `η·Γ(1 + 1/β)`.
@@ -4024,6 +4122,7 @@ pub(crate) mod reliability {
 
     #[derive(Deserialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     #[serde(deny_unknown_fields)]
     pub(crate) struct BoxcoxCapabilityInputDto {
@@ -4042,6 +4141,7 @@ pub(crate) mod reliability {
 
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct BoxcoxCapabilityDto {
         /// Estimated optimal Box-Cox parameter. `0` is a log transform, `1` the
@@ -4404,6 +4504,7 @@ pub(crate) mod counter {
     /// right after it, and (when read) the old register's last value.
     #[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[serde(deny_unknown_fields)]
     pub(crate) struct DiscontinuityDto {
         pub(crate) time: f64,
@@ -4416,6 +4517,7 @@ pub(crate) mod counter {
     /// The settings of a counter's increments; every one may be left out.
     #[derive(Deserialize, Debug, Clone, Default, PartialEq)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[serde(deny_unknown_fields)]
     pub(crate) struct CounterOptionsDto {
         /// The value at which the register returns to 0.
@@ -4453,6 +4555,7 @@ pub(crate) mod counter {
     /// How much the counter advanced between two neighbouring readings.
     #[derive(Serialize, Debug, PartialEq)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct CounterIncrementDto {
         pub(crate) start: f64,
@@ -4463,6 +4566,7 @@ pub(crate) mod counter {
             feature = "wasm",
             tsify(type = "\"normal\" | \"declared\" | \"wrap\" | \"unexplained\"")
         )]
+        #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["normal", "declared", "wrap", "unexplained"])))]
         pub(crate) kind: &'static str,
     }
 
@@ -4485,6 +4589,7 @@ pub(crate) mod counter {
     /// The increments that end in one interval `[start, end)`.
     #[derive(Serialize, Debug, PartialEq)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     pub(crate) struct CounterTotalDto {
         pub(crate) start: f64,
         pub(crate) end: f64,
@@ -4718,6 +4823,7 @@ pub(crate) mod point_process {
     /// `end` — or `{ truncation: "failure" }` — stopped at the last event.
     #[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[serde(tag = "truncation", rename_all = "snake_case", deny_unknown_fields)]
     pub(crate) enum ObservationDto {
         Time { end: f64 },
@@ -4751,6 +4857,7 @@ pub(crate) mod point_process {
     /// A trend test against a constant event rate.
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct TrendTestDto {
         pub(crate) statistic: f64,
@@ -4760,6 +4867,7 @@ pub(crate) mod point_process {
             feature = "wasm",
             tsify(type = "\"increasing\" | \"decreasing\" | \"flat\"")
         )]
+        #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["increasing", "decreasing", "flat"])))]
         pub(crate) direction: &'static str,
         pub(crate) events_used: usize,
         /// χ² degrees of freedom (MIL-HDBK-189); `null` for Laplace.
@@ -4785,6 +4893,7 @@ pub(crate) mod point_process {
     /// A power-law process (Crow-AMSAA) fit.
     #[derive(Serialize, Debug)]
     #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
     #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
     pub(crate) struct PowerLawFitDto {
         pub(crate) beta: f64,
@@ -5536,5 +5645,19 @@ mod input_error_tests {
         assert_eq!(c, code::PARAMETER_OUT_OF_RANGE);
         // Unknown option keys are refused by the schema.
         assert!(serde_json::from_value::<AttributeStandardDto>(json!({ "pbar": 0.1 })).is_err());
+    }
+}
+
+/// Wire shapes JSON Schema cannot read off a Rust type (the engine card's
+/// schemas; tests only).
+#[cfg(all(test, feature = "wasm"))]
+pub(crate) mod card_schema {
+    use schemars::{Schema, SchemaGenerator};
+
+    /// A PELT penalty: `"bic"` or a number.
+    pub(crate) fn penalty(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({
+            "anyOf": [{ "type": "string", "enum": ["bic"] }, { "type": "number" }]
+        })
     }
 }

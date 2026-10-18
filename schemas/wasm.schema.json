@@ -1,0 +1,4332 @@
+{
+  "$defs": {
+    "AdfDto": {
+      "properties": {
+        "levels": {
+          "description": "1 %, 5 % and 10 %, in that order (MacKinnon 2010 response surfaces).",
+          "items": {
+            "$ref": "#/$defs/AdfLevelDto"
+          },
+          "type": "array"
+        },
+        "n_lags": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "n_obs": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "statistic": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "statistic",
+        "n_lags",
+        "n_obs",
+        "levels"
+      ],
+      "type": "object"
+    },
+    "AdfInputDto": {
+      "additionalProperties": false,
+      "description": "Augmented Dickey-Fuller unit-root test input.",
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "lags": {
+          "description": "Exactly this many lagged differences, no search. Not with `max_lags`.",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_lags": {
+          "description": "The largest number of lagged differences the AIC search considers;\nabsent or `null`: Schwert's rule. Not with `lags`.",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "model": {
+          "default": "constant",
+          "description": "Deterministic terms in the test regression.",
+          "enum": [
+            "none",
+            "constant",
+            "constant_trend"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "AdfLevelDto": {
+      "description": "One significance level of the ADF test.",
+      "properties": {
+        "critical_value": {
+          "format": "double",
+          "type": "number"
+        },
+        "level": {
+          "format": "double",
+          "type": "number"
+        },
+        "rejected": {
+          "description": "`statistic <= critical_value`: the unit root is rejected at this level.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "level",
+        "critical_value",
+        "rejected"
+      ],
+      "type": "object"
+    },
+    "AndersonDarlingDto": {
+      "description": "Anderson-Darling normality: A², the sample-size-corrected A²* and its p-value.",
+      "properties": {
+        "p_value": {
+          "format": "double",
+          "type": "number"
+        },
+        "statistic": {
+          "format": "double",
+          "type": "number"
+        },
+        "statistic_modified": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "statistic",
+        "statistic_modified",
+        "p_value"
+      ],
+      "type": "object"
+    },
+    "AnovaDto": {
+      "description": "One-way ANOVA table.",
+      "properties": {
+        "df_between": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "df_within": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "f_statistic": {
+          "format": "double",
+          "type": "number"
+        },
+        "p_value": {
+          "format": "double",
+          "type": "number"
+        },
+        "ss_between": {
+          "format": "double",
+          "type": "number"
+        },
+        "ss_within": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "f_statistic",
+        "df_between",
+        "df_within",
+        "p_value",
+        "ss_between",
+        "ss_within"
+      ],
+      "type": "object"
+    },
+    "AnovaRowDto": {
+      "properties": {
+        "df": {
+          "format": "double",
+          "type": "number"
+        },
+        "f_value": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ms": {
+          "format": "double",
+          "type": "number"
+        },
+        "p_value": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "ss": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "source",
+        "df",
+        "ss",
+        "ms"
+      ],
+      "type": "object"
+    },
+    "AttributeChartPointDto": {
+      "properties": {
+        "cl": {
+          "format": "double",
+          "type": "number"
+        },
+        "index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "lcl": {
+          "format": "double",
+          "type": "number"
+        },
+        "out_of_control": {
+          "type": "boolean"
+        },
+        "ucl": {
+          "format": "double",
+          "type": "number"
+        },
+        "value": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "description": "Standardized value -- the scale on which every limit is +/-3, so zone\nrun rules apply to charts whose limits vary with n.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "index",
+        "value",
+        "ucl",
+        "cl",
+        "lcl",
+        "out_of_control"
+      ],
+      "type": "object"
+    },
+    "BoxcoxCapabilityDto": {
+      "properties": {
+        "cp": {
+          "description": "Every index below is on the **transformed** scale, which is where the\nnormal-theory formulas are valid -- they are not comparable to indices\ncomputed on the raw non-normal data.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cpk": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cpl": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cpm": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cpu": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "lambda": {
+          "description": "Estimated optimal Box-Cox parameter. `0` is a log transform, `1` the\nidentity, `0.5` approximately a square root.",
+          "format": "double",
+          "type": "number"
+        },
+        "lambda_at_bound": {
+          "description": "`true` when the likelihood maximum is on an end of `lambda_range`, so\n`lambda` is that limit rather than an interior estimate.",
+          "type": "boolean"
+        },
+        "pp": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ppk": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ppl": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ppu": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "lambda",
+        "lambda_at_bound"
+      ],
+      "type": "object"
+    },
+    "BoxcoxCapabilityInputDto": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "lambda_range": {
+          "default": null,
+          "description": "`[min, max]` lambda search range; defaults to `[-5, 5]`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "lsl": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "usl": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "CapabilityDto": {
+      "properties": {
+        "cp": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cpk": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cpl": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cpm": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cpu": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "intervals": {
+          "$ref": "#/$defs/CapabilityIntervalsDto"
+        },
+        "mean": {
+          "format": "double",
+          "type": "number"
+        },
+        "pp": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ppk": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ppl": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ppu": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "sigma_source": {
+          "description": "`\"within\"` when `sigma_within` was supplied, `\"overall\"` otherwise.\nWithout it the short-term indices are not computed at all rather than\nbeing filled with the long-term sigma -- a number under the wrong name\nis harder to notice than a null.",
+          "type": "string"
+        },
+        "std_dev_overall": {
+          "format": "double",
+          "type": "number"
+        },
+        "std_dev_within": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "mean",
+        "sigma_source",
+        "std_dev_overall",
+        "intervals"
+      ],
+      "type": "object"
+    },
+    "CapabilityInputDto": {
+      "additionalProperties": false,
+      "description": "Input for `process_capability`.\n\nEvery field except `data` is optional, but at least one of `usl`/`lsl` must\nbe present -- a capability index without a specification limit is undefined.",
+      "properties": {
+        "confidence": {
+          "default": null,
+          "description": "Confidence level of `intervals`, in (0, 1). Omitted: 0.95.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "lsl": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "sigma_within": {
+          "default": null,
+          "description": "Short-term (within-subgroup) sigma, normally estimated from a control\nchart as R-bar/d2 or S-bar/c4. It cannot be recovered from `data`: the\nsubgroup structure is not in a flat measurement vector.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "sigma_within_df": {
+          "default": null,
+          "description": "Degrees of freedom of `sigma_within` -- they depend on how it was\nestimated, so the short-term intervals are given only with them.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "target": {
+          "default": null,
+          "description": "Process target for Cpm. Without it `cpm` is `null`.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "usl": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "CapabilityIntervalsDto": {
+      "description": "Confidence intervals of the capability indices; `null` where the index is,\nand for `cp` / `cpk` unless `sigma_within_df` was given.",
+      "properties": {
+        "confidence": {
+          "format": "double",
+          "type": "number"
+        },
+        "cp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IntervalDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cpk": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IntervalDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IntervalDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ppk": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IntervalDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "confidence"
+      ],
+      "type": "object"
+    },
+    "ChartPointDto": {
+      "properties": {
+        "index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "value": {
+          "format": "double",
+          "type": "number"
+        },
+        "violations": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "index",
+        "value",
+        "violations"
+      ],
+      "type": "object"
+    },
+    "CorrelationMatrixDto": {
+      "properties": {
+        "matrix": {
+          "description": "`matrix[i][j]` is the correlation of variables `i` and `j`.",
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "matrix"
+      ],
+      "type": "object"
+    },
+    "CorrelationOptions": {
+      "additionalProperties": false,
+      "description": "`{ method? }` for [`correlation_matrix`].",
+      "properties": {
+        "method": {
+          "default": null,
+          "enum": [
+            "pearson",
+            "spearman",
+            "kendall"
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CounterIncrementDto": {
+      "description": "How much the counter advanced between two neighbouring readings.",
+      "properties": {
+        "end": {
+          "format": "double",
+          "type": "number"
+        },
+        "increase": {
+          "description": "`null` when `kind` is `\"unexplained\"`.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "normal",
+            "declared",
+            "wrap",
+            "unexplained"
+          ],
+          "type": "string"
+        },
+        "start": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "CounterOptionsDto": {
+      "additionalProperties": false,
+      "description": "The settings of a counter's increments; every one may be left out.",
+      "properties": {
+        "discontinuities": {
+          "description": "Resets and replacements, in time order.",
+          "items": {
+            "$ref": "#/$defs/DiscontinuityDto"
+          },
+          "type": "array"
+        },
+        "max_rate": {
+          "default": null,
+          "description": "The most the counter can advance per unit of time.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "modulus": {
+          "default": null,
+          "description": "The value at which the register returns to 0.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CounterTotalDto": {
+      "description": "The increments that end in one interval `[start, end)`.",
+      "properties": {
+        "end": {
+          "format": "double",
+          "type": "number"
+        },
+        "increase": {
+          "format": "double",
+          "type": "number"
+        },
+        "pairs": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "double",
+          "type": "number"
+        },
+        "unexplained": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "increase",
+        "pairs",
+        "unexplained"
+      ],
+      "type": "object"
+    },
+    "CusumDto": {
+      "properties": {
+        "h": {
+          "description": "Decision interval actually used, echoed so a caller can draw the\nboundary without restating its own input. Unlike EWMA's widening\nlimits this one is constant, so it belongs to the chart, not the point.",
+          "format": "double",
+          "type": "number"
+        },
+        "in_control": {
+          "type": "boolean"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/CusumPointDto"
+          },
+          "type": "array"
+        },
+        "signal_indices": {
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "h",
+        "points",
+        "signal_indices",
+        "in_control"
+      ],
+      "type": "object"
+    },
+    "CusumInputDto": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "h": {
+          "default": 5.0,
+          "format": "double",
+          "type": "number"
+        },
+        "k": {
+          "default": 0.5,
+          "format": "double",
+          "type": "number"
+        },
+        "sigma": {
+          "format": "double",
+          "type": "number"
+        },
+        "target": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "data",
+        "target",
+        "sigma"
+      ],
+      "type": "object"
+    },
+    "CusumPointDto": {
+      "properties": {
+        "index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "s_lower": {
+          "format": "double",
+          "type": "number"
+        },
+        "s_upper": {
+          "format": "double",
+          "type": "number"
+        },
+        "signal": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "index",
+        "s_upper",
+        "s_lower",
+        "signal"
+      ],
+      "type": "object"
+    },
+    "DiscontinuityDto": {
+      "additionalProperties": false,
+      "description": "A reset or replacement the caller declares: when, the register's value\nright after it, and (when read) the old register's last value.",
+      "properties": {
+        "last": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "start": {
+          "format": "double",
+          "type": "number"
+        },
+        "time": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "time",
+        "start"
+      ],
+      "type": "object"
+    },
+    "DistributionFitDto": {
+      "properties": {
+        "aic": {
+          "format": "double",
+          "type": "number"
+        },
+        "bic": {
+          "format": "double",
+          "type": "number"
+        },
+        "distribution": {
+          "description": "`\"Normal\"`, `\"Exponential\"`, `\"Gamma\"`, `\"LogNormal\"`, `\"Weibull\"` or `\"Beta\"`.",
+          "enum": [
+            "Normal",
+            "LogNormal",
+            "Weibull",
+            "Gamma",
+            "Exponential",
+            "Beta"
+          ],
+          "type": "string"
+        },
+        "log_likelihood": {
+          "format": "double",
+          "type": "number"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "description": "Estimated parameters by name (`mu`/`sigma`, `lambda`, `alpha`/`beta`,\n`shape`/`scale`).",
+          "type": "object"
+        }
+      },
+      "required": [
+        "distribution",
+        "parameters",
+        "log_likelihood",
+        "aic",
+        "bic"
+      ],
+      "type": "object"
+    },
+    "EwmaDto": {
+      "properties": {
+        "in_control": {
+          "type": "boolean"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/EwmaPointDto"
+          },
+          "type": "array"
+        },
+        "signal_indices": {
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "points",
+        "signal_indices",
+        "in_control"
+      ],
+      "type": "object"
+    },
+    "EwmaInputDto": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "l_factor": {
+          "default": 3.0,
+          "format": "double",
+          "type": "number"
+        },
+        "lambda": {
+          "default": 0.2,
+          "format": "double",
+          "type": "number"
+        },
+        "sigma": {
+          "format": "double",
+          "type": "number"
+        },
+        "target": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "data",
+        "target",
+        "sigma"
+      ],
+      "type": "object"
+    },
+    "EwmaPointDto": {
+      "properties": {
+        "ewma": {
+          "format": "double",
+          "type": "number"
+        },
+        "index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "lcl": {
+          "format": "double",
+          "type": "number"
+        },
+        "signal": {
+          "type": "boolean"
+        },
+        "ucl": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "index",
+        "ewma",
+        "ucl",
+        "lcl",
+        "signal"
+      ],
+      "type": "object"
+    },
+    "FixedLimitChartDto": {
+      "description": "NP and C charts: one set of limits for every point.",
+      "properties": {
+        "cl": {
+          "format": "double",
+          "type": "number"
+        },
+        "in_control": {
+          "type": "boolean"
+        },
+        "lcl": {
+          "format": "double",
+          "type": "number"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/AttributeChartPointDto"
+          },
+          "type": "array"
+        },
+        "ucl": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "cl",
+        "ucl",
+        "lcl",
+        "points",
+        "in_control"
+      ],
+      "type": "object"
+    },
+    "GChartDto": {
+      "properties": {
+        "g_bar": {
+          "format": "double",
+          "type": "number"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/GChartPointDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "g_bar",
+        "points"
+      ],
+      "type": "object"
+    },
+    "GChartPointDto": {
+      "properties": {
+        "cl": {
+          "format": "double",
+          "type": "number"
+        },
+        "index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "lcl": {
+          "format": "double",
+          "type": "number"
+        },
+        "out_of_control": {
+          "type": "boolean"
+        },
+        "ucl": {
+          "format": "double",
+          "type": "number"
+        },
+        "value": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "index",
+        "value",
+        "ucl",
+        "cl",
+        "lcl",
+        "out_of_control"
+      ],
+      "type": "object"
+    },
+    "GageChartLimitsDto": {
+      "properties": {
+        "center": {
+          "format": "double",
+          "type": "number"
+        },
+        "lcl": {
+          "format": "double",
+          "type": "number"
+        },
+        "ucl": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "center",
+        "ucl",
+        "lcl"
+      ],
+      "type": "object"
+    },
+    "GageRRAnovaResultDto": {
+      "properties": {
+        "anova_table": {
+          "items": {
+            "$ref": "#/$defs/AnovaRowDto"
+          },
+          "type": "array"
+        },
+        "av": {
+          "format": "double",
+          "type": "number"
+        },
+        "ev": {
+          "format": "double",
+          "type": "number"
+        },
+        "grr": {
+          "format": "double",
+          "type": "number"
+        },
+        "interaction_pooled": {
+          "type": "boolean"
+        },
+        "interaction_significant": {
+          "type": "boolean"
+        },
+        "ndc": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "percent_grr": {
+          "format": "double",
+          "type": "number"
+        },
+        "percent_tolerance": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "pv": {
+          "format": "double",
+          "type": "number"
+        },
+        "status": {
+          "type": "string"
+        },
+        "tv": {
+          "format": "double",
+          "type": "number"
+        },
+        "variance_components": {
+          "$ref": "#/$defs/VarianceComponentsDto"
+        }
+      },
+      "required": [
+        "anova_table",
+        "variance_components",
+        "ev",
+        "av",
+        "grr",
+        "pv",
+        "tv",
+        "percent_grr",
+        "ndc",
+        "status",
+        "interaction_significant",
+        "interaction_pooled"
+      ],
+      "type": "object"
+    },
+    "GageRRInputDto": {
+      "additionalProperties": false,
+      "properties": {
+        "measurements": {
+          "items": {
+            "items": {
+              "items": {
+                "format": "double",
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "tolerance": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "measurements"
+      ],
+      "type": "object"
+    },
+    "GageRRResultDto": {
+      "properties": {
+        "av": {
+          "format": "double",
+          "type": "number"
+        },
+        "average_chart": {
+          "$ref": "#/$defs/GageChartLimitsDto",
+          "description": "The average chart the method plots."
+        },
+        "ev": {
+          "format": "double",
+          "type": "number"
+        },
+        "grr": {
+          "format": "double",
+          "type": "number"
+        },
+        "ndc": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "percent_av": {
+          "format": "double",
+          "type": "number"
+        },
+        "percent_ev": {
+          "format": "double",
+          "type": "number"
+        },
+        "percent_grr": {
+          "format": "double",
+          "type": "number"
+        },
+        "percent_pv": {
+          "format": "double",
+          "type": "number"
+        },
+        "percent_tolerance": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "pv": {
+          "format": "double",
+          "type": "number"
+        },
+        "range_chart": {
+          "$ref": "#/$defs/GageChartLimitsDto",
+          "description": "The range chart the method plots, from the same R̄ the components use."
+        },
+        "status": {
+          "type": "string"
+        },
+        "tv": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "range_chart",
+        "average_chart",
+        "ev",
+        "av",
+        "grr",
+        "pv",
+        "tv",
+        "percent_ev",
+        "percent_av",
+        "percent_grr",
+        "percent_pv",
+        "ndc",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ImrChartDto": {
+      "properties": {
+        "i_cl": {
+          "format": "double",
+          "type": "number"
+        },
+        "i_lcl": {
+          "format": "double",
+          "type": "number"
+        },
+        "i_points": {
+          "items": {
+            "$ref": "#/$defs/ChartPointDto"
+          },
+          "type": "array"
+        },
+        "i_ucl": {
+          "format": "double",
+          "type": "number"
+        },
+        "in_control": {
+          "type": "boolean"
+        },
+        "mr_cl": {
+          "format": "double",
+          "type": "number"
+        },
+        "mr_lcl": {
+          "format": "double",
+          "type": "number"
+        },
+        "mr_points": {
+          "description": "Starts at index 1: the first value has no moving range.",
+          "items": {
+            "$ref": "#/$defs/ChartPointDto"
+          },
+          "type": "array"
+        },
+        "mr_ucl": {
+          "format": "double",
+          "type": "number"
+        },
+        "sigma_hat": {
+          "description": "Short-term sigma implied by this chart (`MR-bar / d2(2)`).",
+          "format": "double",
+          "type": "number"
+        },
+        "sigma_hat_df": {
+          "description": "Degrees of freedom of `sigma_hat` (`0.62 (n - 1)`), for `sigma_within_df`.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "i_cl",
+        "i_ucl",
+        "i_lcl",
+        "mr_cl",
+        "mr_ucl",
+        "mr_lcl",
+        "sigma_hat",
+        "sigma_hat_df",
+        "i_points",
+        "mr_points",
+        "in_control"
+      ],
+      "type": "object"
+    },
+    "IntervalDto": {
+      "description": "A two-sided confidence interval.",
+      "properties": {
+        "lower": {
+          "format": "double",
+          "type": "number"
+        },
+        "upper": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "lower",
+        "upper"
+      ],
+      "type": "object"
+    },
+    "LaneyPChartDto": {
+      "properties": {
+        "p_bar": {
+          "format": "double",
+          "type": "number"
+        },
+        "phi": {
+          "format": "double",
+          "type": "number"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/AttributeChartPointDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "p_bar",
+        "phi",
+        "points"
+      ],
+      "type": "object"
+    },
+    "LaneyUChartDto": {
+      "properties": {
+        "phi": {
+          "format": "double",
+          "type": "number"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/AttributeChartPointDto"
+          },
+          "type": "array"
+        },
+        "u_bar": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "u_bar",
+        "phi",
+        "points"
+      ],
+      "type": "object"
+    },
+    "LimitsInputDto": {
+      "additionalProperties": false,
+      "description": "Control limits a caller supplies to `run_rules`.",
+      "properties": {
+        "cl": {
+          "format": "double",
+          "type": "number"
+        },
+        "lcl": {
+          "format": "double",
+          "type": "number"
+        },
+        "ucl": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "ucl",
+        "cl",
+        "lcl"
+      ],
+      "type": "object"
+    },
+    "MannKendallDto": {
+      "description": "Mann-Kendall trend test with Sen's slope.",
+      "properties": {
+        "kendall_tau": {
+          "format": "double",
+          "type": "number"
+        },
+        "p_value": {
+          "format": "double",
+          "type": "number"
+        },
+        "s_statistic": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "sen_slope": {
+          "format": "double",
+          "type": "number"
+        },
+        "variance": {
+          "format": "double",
+          "type": "number"
+        },
+        "z_statistic": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "s_statistic",
+        "variance",
+        "z_statistic",
+        "p_value",
+        "kendall_tau",
+        "sen_slope"
+      ],
+      "type": "object"
+    },
+    "MultiPeltInputDto": {
+      "additionalProperties": false,
+      "description": "PELT over several aligned signals: one set of changepoints for all.",
+      "properties": {
+        "cost": {
+          "default": "l2",
+          "enum": [
+            "l2",
+            "normal"
+          ],
+          "type": "string"
+        },
+        "min_segment_len": {
+          "type": "integer"
+        },
+        "penalty": {
+          "anyOf": [
+            {
+              "enum": [
+                "bic"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        "signals": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "signals"
+      ],
+      "type": "object"
+    },
+    "ObservationDto": {
+      "description": "How observation ended: `{ truncation: \"time\", end }` — watched until\n`end` — or `{ truncation: \"failure\" }` — stopped at the last event.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "end": {
+              "format": "double",
+              "type": "number"
+            },
+            "truncation": {
+              "const": "time",
+              "type": "string"
+            }
+          },
+          "required": [
+            "truncation",
+            "end"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "truncation": {
+              "const": "failure",
+              "type": "string"
+            }
+          },
+          "required": [
+            "truncation"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PChartDto": {
+      "properties": {
+        "in_control": {
+          "type": "boolean"
+        },
+        "p_bar": {
+          "format": "double",
+          "type": "number"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/AttributeChartPointDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "p_bar",
+        "points",
+        "in_control"
+      ],
+      "type": "object"
+    },
+    "PeltInputDto": {
+      "additionalProperties": false,
+      "properties": {
+        "cost": {
+          "default": "l2",
+          "enum": [
+            "l2",
+            "normal"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "min_segment_len": {
+          "type": "integer"
+        },
+        "penalty": {
+          "anyOf": [
+            {
+              "enum": [
+                "bic"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "PeltResultDto": {
+      "properties": {
+        "changepoints": {
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "n_segments": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "changepoints",
+        "n_segments"
+      ],
+      "type": "object"
+    },
+    "PercentileCapabilityDto": {
+      "properties": {
+        "cp_star": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cpk_star": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cpl_star": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cpu_star": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "distribution": {
+          "description": "The family the quantiles come from (`fit_best`'s names).",
+          "enum": [
+            "Normal",
+            "LogNormal",
+            "Weibull",
+            "Gamma",
+            "Exponential",
+            "Beta"
+          ],
+          "type": "string"
+        },
+        "median": {
+          "format": "double",
+          "type": "number"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "description": "Its fitted parameters by name, as `fit_best` reports them.",
+          "type": "object"
+        },
+        "percentile_lower": {
+          "format": "double",
+          "type": "number"
+        },
+        "percentile_upper": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "median",
+        "percentile_lower",
+        "percentile_upper",
+        "distribution",
+        "parameters"
+      ],
+      "type": "object"
+    },
+    "PercentileCapabilityInputDto": {
+      "additionalProperties": false,
+      "description": "Input for `percentile_capability`.",
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "distribution": {
+          "default": null,
+          "description": "The family to fit, by the names `fit_best` reports; absent = the one it\nranks first.",
+          "enum": [
+            "Normal",
+            "LogNormal",
+            "Weibull",
+            "Gamma",
+            "Exponential",
+            "Beta",
+            null
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lsl": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "usl": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "PeriodCandidateDto": {
+      "properties": {
+        "acf": {
+          "format": "double",
+          "type": "number"
+        },
+        "bin": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "period": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "power": {
+          "format": "double",
+          "type": "number"
+        },
+        "power_share": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "period",
+        "acf",
+        "bin",
+        "power",
+        "power_share"
+      ],
+      "type": "object"
+    },
+    "PowerLawFitDto": {
+      "description": "A power-law process (Crow-AMSAA) fit.",
+      "properties": {
+        "beta": {
+          "format": "double",
+          "type": "number"
+        },
+        "beta_unbiased": {
+          "format": "double",
+          "type": "number"
+        },
+        "end": {
+          "format": "double",
+          "type": "number"
+        },
+        "events": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "intensity_at_end": {
+          "format": "double",
+          "type": "number"
+        },
+        "lambda": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "beta",
+        "beta_unbiased",
+        "lambda",
+        "intensity_at_end",
+        "end",
+        "events"
+      ],
+      "type": "object"
+    },
+    "RegressionDto": {
+      "description": "Ordinary least squares `y = intercept + slope · x`.",
+      "properties": {
+        "adjusted_r_squared": {
+          "format": "double",
+          "type": "number"
+        },
+        "f_p_value": {
+          "format": "double",
+          "type": "number"
+        },
+        "f_statistic": {
+          "description": "`null` when the fit is exact.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "fitted": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "intercept": {
+          "format": "double",
+          "type": "number"
+        },
+        "intercept_p": {
+          "format": "double",
+          "type": "number"
+        },
+        "intercept_se": {
+          "format": "double",
+          "type": "number"
+        },
+        "intercept_t": {
+          "description": "`null` when the fit is exact (a standard error of 0).",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "r_squared": {
+          "format": "double",
+          "type": "number"
+        },
+        "residual_se": {
+          "format": "double",
+          "type": "number"
+        },
+        "residuals": {
+          "description": "`y[i]` minus its fitted value, in input order.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "slope": {
+          "format": "double",
+          "type": "number"
+        },
+        "slope_p": {
+          "format": "double",
+          "type": "number"
+        },
+        "slope_se": {
+          "format": "double",
+          "type": "number"
+        },
+        "slope_t": {
+          "description": "`null` when the fit is exact (a standard error of 0).",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "slope",
+        "intercept",
+        "r_squared",
+        "adjusted_r_squared",
+        "slope_se",
+        "intercept_se",
+        "slope_p",
+        "intercept_p",
+        "residual_se",
+        "f_p_value",
+        "residuals",
+        "fitted"
+      ],
+      "type": "object"
+    },
+    "SeasonalityDto": {
+      "properties": {
+        "acf_threshold": {
+          "format": "double",
+          "type": "number"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/PeriodCandidateDto"
+          },
+          "type": "array"
+        },
+        "n": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "period": {
+          "description": "`null` when no periodicity passed both stages.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "power_threshold": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "candidates",
+        "n",
+        "acf_threshold",
+        "power_threshold"
+      ],
+      "type": "object"
+    },
+    "SeasonalityInputDto": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "ShapiroWilkDto": {
+      "description": "Shapiro-Wilk W and its p-value.",
+      "properties": {
+        "p_value": {
+          "format": "double",
+          "type": "number"
+        },
+        "w": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "w",
+        "p_value"
+      ],
+      "type": "object"
+    },
+    "SpectralResidualDto": {
+      "properties": {
+        "anomalies": {
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/SrPointDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "points",
+        "anomalies"
+      ],
+      "type": "object"
+    },
+    "SpectralResidualInputDto": {
+      "additionalProperties": false,
+      "properties": {
+        "averaging_window": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "batch_size": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "judgement_window": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "min_zscore": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "sensitivity": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "threshold": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "SrPointDto": {
+      "properties": {
+        "expected": {
+          "format": "double",
+          "type": "number"
+        },
+        "index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "is_anomaly": {
+          "type": "boolean"
+        },
+        "lower": {
+          "format": "double",
+          "type": "number"
+        },
+        "near_edge": {
+          "description": "Within kappa = 5 places of an end of its batch, where the transform's\nown boundary handling moves the saliency most.",
+          "type": "boolean"
+        },
+        "saliency": {
+          "format": "double",
+          "type": "number"
+        },
+        "score": {
+          "format": "double",
+          "type": "number"
+        },
+        "upper": {
+          "format": "double",
+          "type": "number"
+        },
+        "value": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "index",
+        "value",
+        "saliency",
+        "score",
+        "expected",
+        "lower",
+        "upper",
+        "is_anomaly",
+        "near_edge"
+      ],
+      "type": "object"
+    },
+    "TChartDto": {
+      "properties": {
+        "points": {
+          "items": {
+            "$ref": "#/$defs/TChartPointDto"
+          },
+          "type": "array"
+        },
+        "t_bar": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "t_bar",
+        "points"
+      ],
+      "type": "object"
+    },
+    "TChartPointDto": {
+      "properties": {
+        "cl": {
+          "format": "double",
+          "type": "number"
+        },
+        "index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "lcl": {
+          "format": "double",
+          "type": "number"
+        },
+        "out_of_control": {
+          "type": "boolean"
+        },
+        "ucl": {
+          "format": "double",
+          "type": "number"
+        },
+        "value": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "index",
+        "value",
+        "ucl",
+        "cl",
+        "lcl",
+        "out_of_control"
+      ],
+      "type": "object"
+    },
+    "TestResultDto": {
+      "description": "A test statistic, its degrees of freedom and two-sided p-value.",
+      "properties": {
+        "df": {
+          "format": "double",
+          "type": "number"
+        },
+        "p_value": {
+          "format": "double",
+          "type": "number"
+        },
+        "statistic": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "statistic",
+        "df",
+        "p_value"
+      ],
+      "type": "object"
+    },
+    "TrendTestDto": {
+      "description": "A trend test against a constant event rate.",
+      "properties": {
+        "df": {
+          "description": "χ² degrees of freedom (MIL-HDBK-189); `null` for Laplace.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "direction": {
+          "enum": [
+            "increasing",
+            "decreasing",
+            "flat"
+          ],
+          "type": "string"
+        },
+        "events_used": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "p_value": {
+          "description": "Two-sided; the one-sided p-value in `direction` is half of it.",
+          "format": "double",
+          "type": "number"
+        },
+        "statistic": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "statistic",
+        "p_value",
+        "direction",
+        "events_used"
+      ],
+      "type": "object"
+    },
+    "UChartDto": {
+      "properties": {
+        "in_control": {
+          "type": "boolean"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/AttributeChartPointDto"
+          },
+          "type": "array"
+        },
+        "u_bar": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "u_bar",
+        "points",
+        "in_control"
+      ],
+      "type": "object"
+    },
+    "VarianceComponentsDto": {
+      "properties": {
+        "interaction": {
+          "format": "double",
+          "type": "number"
+        },
+        "operator": {
+          "format": "double",
+          "type": "number"
+        },
+        "part": {
+          "format": "double",
+          "type": "number"
+        },
+        "repeatability": {
+          "format": "double",
+          "type": "number"
+        },
+        "reproducibility": {
+          "format": "double",
+          "type": "number"
+        },
+        "total": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "part",
+        "operator",
+        "interaction",
+        "repeatability",
+        "reproducibility",
+        "total"
+      ],
+      "type": "object"
+    },
+    "WeibullIntervalsDto": {
+      "description": "Two-sided intervals of the Weibull MLE at `confidence`: `wald` --\nnormal on the log scale from the observed Fisher information -- or\n`likelihood_ratio` -- the profile-likelihood interval.",
+      "properties": {
+        "b_life": {
+          "description": "The B-life intervals, aligned with `fractions_failed`.",
+          "items": {
+            "$ref": "#/$defs/IntervalDto"
+          },
+          "type": "array"
+        },
+        "confidence": {
+          "format": "double",
+          "type": "number"
+        },
+        "method": {
+          "enum": [
+            "wald",
+            "likelihood_ratio"
+          ],
+          "type": "string"
+        },
+        "scale": {
+          "$ref": "#/$defs/IntervalDto"
+        },
+        "shape": {
+          "$ref": "#/$defs/IntervalDto"
+        }
+      },
+      "required": [
+        "confidence",
+        "method",
+        "shape",
+        "scale",
+        "b_life"
+      ],
+      "type": "object"
+    },
+    "WeibullMleDto": {
+      "description": "Weibull maximum-likelihood fit.",
+      "properties": {
+        "b_life": {
+          "description": "The B-life at each of the requested `fractions_failed`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "covariance": {
+          "description": "Asymptotic covariance of `(shape, scale)` -- the inverse of the\nobserved Fisher information, rows and columns shape, scale. Pass\nit to `weibull_reliability` for B-life and reliability intervals.",
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "intervals": {
+          "$ref": "#/$defs/WeibullIntervalsDto"
+        },
+        "iterations": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "log_likelihood": {
+          "format": "double",
+          "type": "number"
+        },
+        "scale": {
+          "format": "double",
+          "type": "number"
+        },
+        "shape": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "shape",
+        "scale",
+        "log_likelihood",
+        "iterations",
+        "b_life",
+        "intervals",
+        "covariance"
+      ],
+      "type": "object"
+    },
+    "WeibullMleOptions": {
+      "additionalProperties": false,
+      "description": "The optional third argument of [`weibull_mle`].",
+      "properties": {
+        "confidence": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "fractions_failed": {
+          "default": [],
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "method": {
+          "anyOf": [
+            {
+              "enum": [
+                "wald",
+                "likelihood_ratio"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "WeibullMrrDto": {
+      "description": "Weibull median-rank-regression fit.",
+      "properties": {
+        "r_squared": {
+          "format": "double",
+          "type": "number"
+        },
+        "scale": {
+          "format": "double",
+          "type": "number"
+        },
+        "shape": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "shape",
+        "scale",
+        "r_squared"
+      ],
+      "type": "object"
+    },
+    "WeibullReliabilityDto": {
+      "description": "Reliability metrics of a Weibull, aligned with the input arrays.",
+      "properties": {
+        "b_life": {
+          "description": "The B-life for each of `fractions_failed`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "hazard_rate": {
+          "description": "`h(t)` for each of `times`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "intervals": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WeibullReliabilityIntervalsDto"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Intervals for `reliability` and `b_life`; `null` without a\n`covariance`."
+        },
+        "mtbf": {
+          "description": "Mean time between (to) failure, `η·Γ(1 + 1/β)`.",
+          "format": "double",
+          "type": "number"
+        },
+        "reliability": {
+          "description": "`R(t)` for each of `times`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "mtbf",
+        "reliability",
+        "hazard_rate",
+        "b_life"
+      ],
+      "type": "object"
+    },
+    "WeibullReliabilityInputDto": {
+      "additionalProperties": false,
+      "description": "`{ shape, scale, times?, fractions_failed?, covariance?, confidence? }`\n— a fitted (or known) Weibull and the points to evaluate it at; with\nthe fit's `covariance`, intervals at `confidence`.",
+      "properties": {
+        "confidence": {
+          "default": null,
+          "description": "Confidence level of `intervals`, in (0, 1). Omitted: 0.95. Given\nwithout `covariance` it is refused -- there is nothing to apply it to.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "covariance": {
+          "default": null,
+          "description": "Covariance of the estimated `(shape, scale)` (`weibull_mle`'s\n`covariance`). With it the answer carries `intervals`.",
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "fractions_failed": {
+          "default": [],
+          "description": "Fractions failed (each in `(0, 1)`) whose B-life to report;\n`0.1` is B10. (The time to reliability `p` is the B-life at `1 − p`.)",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "scale": {
+          "format": "double",
+          "type": "number"
+        },
+        "shape": {
+          "format": "double",
+          "type": "number"
+        },
+        "times": {
+          "default": [],
+          "description": "Times at which to evaluate `R(t)` and `h(t)`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "shape",
+        "scale"
+      ],
+      "type": "object"
+    },
+    "WeibullReliabilityIntervalsDto": {
+      "description": "Two-sided intervals at `confidence`, aligned with the requested times\nand fractions: delta method on `ln(−ln R)` and `ln t_p`.",
+      "properties": {
+        "b_life": {
+          "items": {
+            "$ref": "#/$defs/IntervalDto"
+          },
+          "type": "array"
+        },
+        "confidence": {
+          "format": "double",
+          "type": "number"
+        },
+        "reliability": {
+          "items": {
+            "$ref": "#/$defs/IntervalDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "confidence",
+        "reliability",
+        "b_life"
+      ],
+      "type": "object"
+    },
+    "XbarRChartDto": {
+      "properties": {
+        "in_control": {
+          "type": "boolean"
+        },
+        "r_cl": {
+          "format": "double",
+          "type": "number"
+        },
+        "r_lcl": {
+          "format": "double",
+          "type": "number"
+        },
+        "r_points": {
+          "items": {
+            "$ref": "#/$defs/ChartPointDto"
+          },
+          "type": "array"
+        },
+        "r_ucl": {
+          "format": "double",
+          "type": "number"
+        },
+        "sigma_hat": {
+          "description": "Short-term sigma implied by this chart (`R-bar / d2`). Feed it to\n`process_capability` as `sigma_within` -- it is the quantity a\ncapability study needs and the one a flat measurement vector cannot\ncarry.",
+          "format": "double",
+          "type": "number"
+        },
+        "sigma_hat_df": {
+          "description": "Degrees of freedom of `sigma_hat` -- `process_capability`'s\n`sigma_within_df`, for Cp/Cpk confidence intervals.",
+          "format": "double",
+          "type": "number"
+        },
+        "xbar_cl": {
+          "format": "double",
+          "type": "number"
+        },
+        "xbar_lcl": {
+          "format": "double",
+          "type": "number"
+        },
+        "xbar_points": {
+          "items": {
+            "$ref": "#/$defs/ChartPointDto"
+          },
+          "type": "array"
+        },
+        "xbar_ucl": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "xbar_cl",
+        "xbar_ucl",
+        "xbar_lcl",
+        "r_cl",
+        "r_ucl",
+        "r_lcl",
+        "sigma_hat",
+        "sigma_hat_df",
+        "xbar_points",
+        "r_points",
+        "in_control"
+      ],
+      "type": "object"
+    },
+    "XbarSChartDto": {
+      "properties": {
+        "in_control": {
+          "type": "boolean"
+        },
+        "s_cl": {
+          "format": "double",
+          "type": "number"
+        },
+        "s_lcl": {
+          "format": "double",
+          "type": "number"
+        },
+        "s_points": {
+          "items": {
+            "$ref": "#/$defs/ChartPointDto"
+          },
+          "type": "array"
+        },
+        "s_ucl": {
+          "format": "double",
+          "type": "number"
+        },
+        "sigma_hat": {
+          "description": "Short-term sigma implied by this chart (`S-bar / c4`), for\n`process_capability`'s `sigma_within`.",
+          "format": "double",
+          "type": "number"
+        },
+        "sigma_hat_df": {
+          "description": "Degrees of freedom of `sigma_hat`, for `sigma_within_df`.",
+          "format": "double",
+          "type": "number"
+        },
+        "xbar_cl": {
+          "format": "double",
+          "type": "number"
+        },
+        "xbar_lcl": {
+          "format": "double",
+          "type": "number"
+        },
+        "xbar_points": {
+          "items": {
+            "$ref": "#/$defs/ChartPointDto"
+          },
+          "type": "array"
+        },
+        "xbar_ucl": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "xbar_cl",
+        "xbar_ucl",
+        "xbar_lcl",
+        "s_cl",
+        "s_ucl",
+        "s_lcl",
+        "sigma_hat",
+        "sigma_hat_df",
+        "xbar_points",
+        "s_points",
+        "in_control"
+      ],
+      "type": "object"
+    },
+    "adf_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of adf_test(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/AdfInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "adf_test.output": {
+      "$ref": "#/$defs/AdfDto"
+    },
+    "anderson_darling_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of anderson_darling_test(data), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "anderson_darling_test.output": {
+      "$ref": "#/$defs/AndersonDarlingDto"
+    },
+    "bartlett_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of bartlett_test(groups), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "groups": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "groups"
+      ],
+      "type": "object"
+    },
+    "bartlett_test.output": {
+      "$ref": "#/$defs/TestResultDto"
+    },
+    "benjamini_hochberg.input": {
+      "additionalProperties": false,
+      "description": "The arguments of benjamini_hochberg(p_values), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "p_values": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "p_values"
+      ],
+      "type": "object"
+    },
+    "benjamini_hochberg.output": {
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "bonferroni_correction.input": {
+      "additionalProperties": false,
+      "description": "The arguments of bonferroni_correction(p_values), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "p_values": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "p_values"
+      ],
+      "type": "object"
+    },
+    "bonferroni_correction.output": {
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "boxcox_capability.input": {
+      "additionalProperties": false,
+      "description": "The arguments of boxcox_capability(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/BoxcoxCapabilityInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "boxcox_capability.output": {
+      "$ref": "#/$defs/BoxcoxCapabilityDto"
+    },
+    "c_chart.input": {
+      "additionalProperties": false,
+      "description": "The arguments of c_chart(defects), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "defects": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "defects"
+      ],
+      "type": "object"
+    },
+    "c_chart.output": {
+      "$ref": "#/$defs/FixedLimitChartDto"
+    },
+    "chi_squared_goodness_of_fit.input": {
+      "additionalProperties": false,
+      "description": "The arguments of chi_squared_goodness_of_fit(observed, expected), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "expected": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "observed": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "observed",
+        "expected"
+      ],
+      "type": "object"
+    },
+    "chi_squared_goodness_of_fit.output": {
+      "$ref": "#/$defs/TestResultDto"
+    },
+    "chi_squared_independence.input": {
+      "additionalProperties": false,
+      "description": "The arguments of chi_squared_independence(table), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "table": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "table"
+      ],
+      "type": "object"
+    },
+    "chi_squared_independence.output": {
+      "$ref": "#/$defs/TestResultDto"
+    },
+    "correlation_matrix.input": {
+      "additionalProperties": false,
+      "description": "The arguments of correlation_matrix(variables, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "options": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CorrelationOptions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "variables": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "variables"
+      ],
+      "type": "object"
+    },
+    "correlation_matrix.output": {
+      "$ref": "#/$defs/CorrelationMatrixDto"
+    },
+    "counter_increments.input": {
+      "additionalProperties": false,
+      "description": "The arguments of counter_increments(times, values, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "options": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CounterOptionsDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "times": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "values": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "times",
+        "values"
+      ],
+      "type": "object"
+    },
+    "counter_increments.output": {
+      "items": {
+        "$ref": "#/$defs/CounterIncrementDto"
+      },
+      "type": "array"
+    },
+    "counter_totals.input": {
+      "additionalProperties": false,
+      "description": "The arguments of counter_totals(times, values, edges, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "edges": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CounterOptionsDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "times": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "values": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "times",
+        "values",
+        "edges"
+      ],
+      "type": "object"
+    },
+    "counter_totals.output": {
+      "items": {
+        "$ref": "#/$defs/CounterTotalDto"
+      },
+      "type": "array"
+    },
+    "cusum.input": {
+      "additionalProperties": false,
+      "description": "The arguments of cusum(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/CusumInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "cusum.output": {
+      "$ref": "#/$defs/CusumDto"
+    },
+    "detect_changepoints.input": {
+      "additionalProperties": false,
+      "description": "The arguments of detect_changepoints(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/PeltInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "detect_changepoints.output": {
+      "$ref": "#/$defs/PeltResultDto"
+    },
+    "detect_changepoints_multi.input": {
+      "additionalProperties": false,
+      "description": "The arguments of detect_changepoints_multi(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/MultiPeltInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "detect_changepoints_multi.output": {
+      "$ref": "#/$defs/PeltResultDto"
+    },
+    "estimate_period.input": {
+      "additionalProperties": false,
+      "description": "The arguments of estimate_period(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/SeasonalityInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "estimate_period.output": {
+      "$ref": "#/$defs/SeasonalityDto"
+    },
+    "ewma.input": {
+      "additionalProperties": false,
+      "description": "The arguments of ewma(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/EwmaInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "ewma.output": {
+      "$ref": "#/$defs/EwmaDto"
+    },
+    "fisher_exact_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of fisher_exact_test(table), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "table": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "table"
+      ],
+      "type": "object"
+    },
+    "fisher_exact_test.output": {
+      "$ref": "#/$defs/TestResultDto"
+    },
+    "fit_best.input": {
+      "additionalProperties": false,
+      "description": "The arguments of fit_best(data), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "fit_best.output": {
+      "items": {
+        "$ref": "#/$defs/DistributionFitDto"
+      },
+      "type": "array"
+    },
+    "g_chart.input": {
+      "additionalProperties": false,
+      "description": "The arguments of g_chart(gaps), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "gaps": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "gaps"
+      ],
+      "type": "object"
+    },
+    "g_chart.output": {
+      "$ref": "#/$defs/GChartDto"
+    },
+    "gage_rr_anova.input": {
+      "additionalProperties": false,
+      "description": "The arguments of gage_rr_anova(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/GageRRInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "gage_rr_anova.output": {
+      "$ref": "#/$defs/GageRRAnovaResultDto"
+    },
+    "gage_rr_xbar_r.input": {
+      "additionalProperties": false,
+      "description": "The arguments of gage_rr_xbar_r(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/GageRRInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "gage_rr_xbar_r.output": {
+      "$ref": "#/$defs/GageRRResultDto"
+    },
+    "imr_chart.input": {
+      "additionalProperties": false,
+      "description": "The arguments of imr_chart(values, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "options": {
+          "additionalProperties": false,
+          "description": "Which run tests to apply: a named set, or the tests spelt out. Omitted or null: \"shewhart\". []: none.",
+          "properties": {
+            "rules": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "shewhart",
+                    "western_electric",
+                    "nelson"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "items": {
+                    "enum": [
+                      "BeyondLimits",
+                      "NineOneSide",
+                      "SixTrend",
+                      "FourteenAlternating",
+                      "TwoOfThreeBeyond2Sigma",
+                      "FourOfFiveBeyond1Sigma",
+                      "FifteenWithin1Sigma",
+                      "EightBeyond1Sigma",
+                      "EightOneSide"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "values": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "values"
+      ],
+      "type": "object"
+    },
+    "imr_chart.output": {
+      "$ref": "#/$defs/ImrChartDto"
+    },
+    "jarque_bera_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of jarque_bera_test(data), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "jarque_bera_test.output": {
+      "$ref": "#/$defs/TestResultDto"
+    },
+    "kruskal_wallis_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of kruskal_wallis_test(groups), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "groups": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "groups"
+      ],
+      "type": "object"
+    },
+    "kruskal_wallis_test.output": {
+      "$ref": "#/$defs/TestResultDto"
+    },
+    "laney_p_chart.input": {
+      "additionalProperties": false,
+      "description": "The arguments of laney_p_chart(samples, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "options": {
+          "additionalProperties": false,
+          "description": "A known standard from a Phase I study.",
+          "properties": {
+            "p_bar": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "phi": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "samples": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "format": "double",
+                "type": "number"
+              },
+              {
+                "format": "double",
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "samples"
+      ],
+      "type": "object"
+    },
+    "laney_p_chart.output": {
+      "$ref": "#/$defs/LaneyPChartDto"
+    },
+    "laney_u_chart.input": {
+      "additionalProperties": false,
+      "description": "The arguments of laney_u_chart(samples, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "options": {
+          "additionalProperties": false,
+          "description": "A known standard from a Phase I study.",
+          "properties": {
+            "phi": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "u_bar": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "samples": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "format": "double",
+                "type": "number"
+              },
+              {
+                "format": "double",
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "samples"
+      ],
+      "type": "object"
+    },
+    "laney_u_chart.output": {
+      "$ref": "#/$defs/LaneyUChartDto"
+    },
+    "laplace_trend_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of laplace_trend_test(times, observation), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "observation": {
+          "$ref": "#/$defs/ObservationDto"
+        },
+        "times": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "times",
+        "observation"
+      ],
+      "type": "object"
+    },
+    "laplace_trend_test.output": {
+      "$ref": "#/$defs/TrendTestDto"
+    },
+    "levene_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of levene_test(groups), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "groups": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "groups"
+      ],
+      "type": "object"
+    },
+    "levene_test.output": {
+      "$ref": "#/$defs/TestResultDto"
+    },
+    "mann_kendall_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of mann_kendall_test(data), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "mann_kendall_test.output": {
+      "$ref": "#/$defs/MannKendallDto"
+    },
+    "mann_whitney_u_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of mann_whitney_u_test(a, b), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "a": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "b": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "a",
+        "b"
+      ],
+      "type": "object"
+    },
+    "mann_whitney_u_test.output": {
+      "$ref": "#/$defs/TestResultDto"
+    },
+    "mil_hdbk_189_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of mil_hdbk_189_test(times, observation), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "observation": {
+          "$ref": "#/$defs/ObservationDto"
+        },
+        "times": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "times",
+        "observation"
+      ],
+      "type": "object"
+    },
+    "mil_hdbk_189_test.output": {
+      "$ref": "#/$defs/TrendTestDto"
+    },
+    "np_chart.input": {
+      "additionalProperties": false,
+      "description": "The arguments of np_chart(defectives, sample_size), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "defectives": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "sample_size": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "defectives",
+        "sample_size"
+      ],
+      "type": "object"
+    },
+    "np_chart.output": {
+      "$ref": "#/$defs/FixedLimitChartDto"
+    },
+    "one_sample_t_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of one_sample_t_test(data, mu0), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "mu0": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "data",
+        "mu0"
+      ],
+      "type": "object"
+    },
+    "one_sample_t_test.output": {
+      "$ref": "#/$defs/TestResultDto"
+    },
+    "one_way_anova.input": {
+      "additionalProperties": false,
+      "description": "The arguments of one_way_anova(groups), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "groups": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "groups"
+      ],
+      "type": "object"
+    },
+    "one_way_anova.output": {
+      "$ref": "#/$defs/AnovaDto"
+    },
+    "p_chart.input": {
+      "additionalProperties": false,
+      "description": "The arguments of p_chart(samples, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "options": {
+          "additionalProperties": false,
+          "description": "A known standard from a Phase I study.",
+          "properties": {
+            "p_bar": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "samples": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "format": "double",
+                "type": "number"
+              },
+              {
+                "format": "double",
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "samples"
+      ],
+      "type": "object"
+    },
+    "p_chart.output": {
+      "$ref": "#/$defs/PChartDto"
+    },
+    "paired_t_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of paired_t_test(x, y), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "x": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "y": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "paired_t_test.output": {
+      "$ref": "#/$defs/TestResultDto"
+    },
+    "percentile_capability.input": {
+      "additionalProperties": false,
+      "description": "The arguments of percentile_capability(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/PercentileCapabilityInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "percentile_capability.output": {
+      "$ref": "#/$defs/PercentileCapabilityDto"
+    },
+    "power_law_process_fit.input": {
+      "additionalProperties": false,
+      "description": "The arguments of power_law_process_fit(times, observation), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "observation": {
+          "$ref": "#/$defs/ObservationDto"
+        },
+        "times": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "times",
+        "observation"
+      ],
+      "type": "object"
+    },
+    "power_law_process_fit.output": {
+      "$ref": "#/$defs/PowerLawFitDto"
+    },
+    "ppm_to_sigma.input": {
+      "additionalProperties": false,
+      "description": "The arguments of ppm_to_sigma(ppm), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "ppm": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "ppm"
+      ],
+      "type": "object"
+    },
+    "ppm_to_sigma.output": {
+      "format": "double",
+      "type": "number"
+    },
+    "process_capability.input": {
+      "additionalProperties": false,
+      "description": "The arguments of process_capability(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/CapabilityInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "process_capability.output": {
+      "$ref": "#/$defs/CapabilityDto"
+    },
+    "run_rules.input": {
+      "additionalProperties": false,
+      "description": "The arguments of run_rules(values, limits, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "limits": {
+          "$ref": "#/$defs/LimitsInputDto"
+        },
+        "options": {
+          "additionalProperties": false,
+          "description": "Which run tests to apply: a named set, or the tests spelt out. Omitted or null: \"shewhart\". []: none.",
+          "properties": {
+            "rules": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "shewhart",
+                    "western_electric",
+                    "nelson"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "items": {
+                    "enum": [
+                      "BeyondLimits",
+                      "NineOneSide",
+                      "SixTrend",
+                      "FourteenAlternating",
+                      "TwoOfThreeBeyond2Sigma",
+                      "FourOfFiveBeyond1Sigma",
+                      "FifteenWithin1Sigma",
+                      "EightBeyond1Sigma",
+                      "EightOneSide"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "values": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "values",
+        "limits"
+      ],
+      "type": "object"
+    },
+    "run_rules.output": {
+      "items": {
+        "$ref": "#/$defs/ChartPointDto"
+      },
+      "type": "array"
+    },
+    "shapiro_wilk_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of shapiro_wilk_test(data), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "shapiro_wilk_test.output": {
+      "$ref": "#/$defs/ShapiroWilkDto"
+    },
+    "sigma_to_ppm.input": {
+      "additionalProperties": false,
+      "description": "The arguments of sigma_to_ppm(sigma), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "sigma": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "sigma"
+      ],
+      "type": "object"
+    },
+    "sigma_to_ppm.output": {
+      "format": "double",
+      "type": "number"
+    },
+    "simple_regression.input": {
+      "additionalProperties": false,
+      "description": "The arguments of simple_regression(x, y), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "x": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "y": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "simple_regression.output": {
+      "$ref": "#/$defs/RegressionDto"
+    },
+    "spectral_residual.input": {
+      "additionalProperties": false,
+      "description": "The arguments of spectral_residual(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/SpectralResidualInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "spectral_residual.output": {
+      "$ref": "#/$defs/SpectralResidualDto"
+    },
+    "t_chart.input": {
+      "additionalProperties": false,
+      "description": "The arguments of t_chart(times), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "times": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "times"
+      ],
+      "type": "object"
+    },
+    "t_chart.output": {
+      "$ref": "#/$defs/TChartDto"
+    },
+    "two_sample_t_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of two_sample_t_test(a, b), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "a": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "b": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "a",
+        "b"
+      ],
+      "type": "object"
+    },
+    "two_sample_t_test.output": {
+      "$ref": "#/$defs/TestResultDto"
+    },
+    "u_chart.input": {
+      "additionalProperties": false,
+      "description": "The arguments of u_chart(samples, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "options": {
+          "additionalProperties": false,
+          "description": "A known standard from a Phase I study.",
+          "properties": {
+            "u_bar": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "samples": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "format": "double",
+                "type": "number"
+              },
+              {
+                "format": "double",
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "samples"
+      ],
+      "type": "object"
+    },
+    "u_chart.output": {
+      "$ref": "#/$defs/UChartDto"
+    },
+    "weibull_mle.input": {
+      "additionalProperties": false,
+      "description": "The arguments of weibull_mle(failure_times, suspension_times, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "failure_times": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WeibullMleOptions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "suspension_times": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "failure_times"
+      ],
+      "type": "object"
+    },
+    "weibull_mle.output": {
+      "$ref": "#/$defs/WeibullMleDto"
+    },
+    "weibull_mrr.input": {
+      "additionalProperties": false,
+      "description": "The arguments of weibull_mrr(failure_times, suspension_times), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "failure_times": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "suspension_times": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "failure_times"
+      ],
+      "type": "object"
+    },
+    "weibull_mrr.output": {
+      "$ref": "#/$defs/WeibullMrrDto"
+    },
+    "weibull_reliability.input": {
+      "additionalProperties": false,
+      "description": "The arguments of weibull_reliability(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/WeibullReliabilityInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "weibull_reliability.output": {
+      "$ref": "#/$defs/WeibullReliabilityDto"
+    },
+    "wilcoxon_signed_rank_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of wilcoxon_signed_rank_test(x, y), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "x": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "y": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "wilcoxon_signed_rank_test.output": {
+      "$ref": "#/$defs/TestResultDto"
+    },
+    "xbar_r_chart.input": {
+      "additionalProperties": false,
+      "description": "The arguments of xbar_r_chart(data, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "options": {
+          "additionalProperties": false,
+          "description": "Which run tests to apply: a named set, or the tests spelt out. Omitted or null: \"shewhart\". []: none.",
+          "properties": {
+            "rules": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "shewhart",
+                    "western_electric",
+                    "nelson"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "items": {
+                    "enum": [
+                      "BeyondLimits",
+                      "NineOneSide",
+                      "SixTrend",
+                      "FourteenAlternating",
+                      "TwoOfThreeBeyond2Sigma",
+                      "FourOfFiveBeyond1Sigma",
+                      "FifteenWithin1Sigma",
+                      "EightBeyond1Sigma",
+                      "EightOneSide"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "xbar_r_chart.output": {
+      "$ref": "#/$defs/XbarRChartDto"
+    },
+    "xbar_s_chart.input": {
+      "additionalProperties": false,
+      "description": "The arguments of xbar_s_chart(data, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "options": {
+          "additionalProperties": false,
+          "description": "Which run tests to apply: a named set, or the tests spelt out. Omitted or null: \"shewhart\". []: none.",
+          "properties": {
+            "rules": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "shewhart",
+                    "western_electric",
+                    "nelson"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "items": {
+                    "enum": [
+                      "BeyondLimits",
+                      "NineOneSide",
+                      "SixTrend",
+                      "FourteenAlternating",
+                      "TwoOfThreeBeyond2Sigma",
+                      "FourOfFiveBeyond1Sigma",
+                      "FifteenWithin1Sigma",
+                      "EightBeyond1Sigma",
+                      "EightOneSide"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "xbar_s_chart.output": {
+      "$ref": "#/$defs/XbarSChartDto"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "u-analytics WebAssembly operations"
+}
