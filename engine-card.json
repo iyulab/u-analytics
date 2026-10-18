@@ -71,7 +71,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The control-chart constants (A2, d2, D3, D4) reproduce the published factor table.",
+            "reference_kind": "standard",
+            "reference": "ASTM E2587; Montgomery, Appendix VI; Duncan, Quality Control and Industrial Statistics",
+            "method": "compares the result with the reference's published or computed values",
+            "tolerance": "A2 5e-4, d2 5.5e-4, D3/D4 1e-3",
+            "test": "src/spc/variables.rs::tests::factor_tables_reproduce_the_published_table"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -106,7 +119,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The control-chart constants (A3, B3, B4, c4) reproduce the published factor table.",
+            "reference_kind": "standard",
+            "reference": "ASTM E2587; Montgomery, Appendix VI; Duncan, Quality Control and Industrial Statistics",
+            "method": "compares the result with the reference's published or computed values",
+            "tolerance": "A3/B3/B4 5e-4, c4 5e-5",
+            "test": "src/spc/variables.rs::tests::factor_tables_reproduce_the_published_table"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -141,7 +167,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The moving-range constants (d2, D3, D4 at n = 2) reproduce the published factor table.",
+            "reference_kind": "standard",
+            "reference": "ASTM E2587; Montgomery, Appendix VI",
+            "method": "compares the result with the reference's published or computed values",
+            "tolerance": "d2 5.5e-4, D3/D4 1e-3",
+            "test": "src/spc/variables.rs::tests::factor_tables_reproduce_the_published_table"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -211,7 +250,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Centre line and limits follow the textbook formula.",
+            "reference_kind": "literature",
+            "reference": "Montgomery (2019), Introduction to Statistical Quality Control, 8th ed., 7.2-7.3",
+            "method": "recomputes the reference's formula on a worked example and compares",
+            "tolerance": "1e-6",
+            "test": "src/spc/attributes.rs::tests::p_chart_montgomery_reference_formula"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The test re-derives the reference's formula; it does not compare with values the reference prints."
+        ]
       },
       "performance": {
         "status": "none"
@@ -246,7 +299,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Limits follow the published algorithm, steps 1-6.",
+            "reference_kind": "literature",
+            "reference": "Laney (2002), Quality Engineering 14(4), 3",
+            "method": "recomputes the reference's formula on a worked example and compares",
+            "tolerance": "1e-10",
+            "test": "src/spc/attributes.rs::tests::laney_p_numerical_reference"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The test re-derives the reference's formula; it does not compare with values the reference prints."
+        ]
       },
       "performance": {
         "status": "none"
@@ -281,7 +348,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Centre line and limits follow the textbook formula.",
+            "reference_kind": "literature",
+            "reference": "Montgomery (2020), 7.4",
+            "method": "recomputes the reference's formula on a worked example and compares",
+            "tolerance": "1e-6",
+            "test": "src/spc/attributes.rs::tests::u_chart_montgomery_reference"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The test re-derives the reference's formula; it does not compare with values the reference prints."
+        ]
       },
       "performance": {
         "status": "none"
@@ -351,7 +432,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Centre line and limits follow the textbook formula.",
+            "reference_kind": "literature",
+            "reference": "Montgomery (2019), 7.2-7.3",
+            "method": "recomputes the reference's formula on a worked example and compares",
+            "tolerance": "1e-6",
+            "test": "src/spc/attributes.rs::tests::np_chart_montgomery_reference"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The test re-derives the reference's formula; it does not compare with values the reference prints."
+        ]
       },
       "performance": {
         "status": "none"
@@ -386,7 +481,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Centre line and limits follow the textbook formula.",
+            "reference_kind": "literature",
+            "reference": "Montgomery (2020), 7.4",
+            "method": "recomputes the reference's formula on a worked example and compares",
+            "tolerance": "1e-6",
+            "test": "src/spc/attributes.rs::tests::c_chart_montgomery_reference"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The test re-derives the reference's formula; it does not compare with values the reference prints."
+        ]
       },
       "performance": {
         "status": "none"
@@ -421,7 +530,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Limits follow the geometric-distribution chart.",
+            "reference_kind": "literature",
+            "reference": "Kaminsky et al. (1992), 3; Benneyan (2001), 2",
+            "method": "recomputes the reference's formula on a worked example and compares",
+            "tolerance": "1e-10",
+            "test": "src/spc/attributes.rs::tests::g_chart_formula_verification"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The test re-derives the reference's formula; it does not compare with values the reference prints."
+        ]
       },
       "performance": {
         "status": "none"
@@ -456,7 +579,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Limits follow the exponential-time chart.",
+            "reference_kind": "literature",
+            "reference": "Borror, Keats & Montgomery (2003), 2",
+            "method": "recomputes the reference's formula on a worked example and compares",
+            "tolerance": "1e-10",
+            "test": "src/spc/attributes.rs::tests::t_chart_lcl_factor_verification"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The test re-derives the reference's formula; it does not compare with values the reference prints."
+        ]
       },
       "performance": {
         "status": "none"
@@ -491,7 +628,28 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Cp and Cpk of a centred process match the textbook example.",
+            "reference_kind": "literature",
+            "reference": "Montgomery (2019), Example 8.1",
+            "method": "compares the result with the reference's published or computed values",
+            "tolerance": "0.001",
+            "test": "src/capability/indices.rs::tests::textbook_centered_process"
+          },
+          {
+            "claim": "Confidence intervals use the chi-square and normal quantiles of the hand-worked example.",
+            "reference_kind": "literature",
+            "reference": "chi-square table, 29 df (16.047, 45.722); z = 1.960",
+            "method": "compares the result with the reference's published or computed values",
+            "tolerance": "Pp 1e-3, Ppk 1e-6",
+            "test": "src/capability/indices.rs::tests::intervals_match_hand_worked_values"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -526,7 +684,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The small-sample correction follows Stephens.",
+            "reference_kind": "literature",
+            "reference": "Stephens (1974), J. Amer. Statist. Assoc. 69(347)",
+            "method": "recomputes the reference's formula on a worked example and compares",
+            "tolerance": "1e-12",
+            "test": "src/testing.rs::tests::ad_correction_factor_formula"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The test re-derives the reference's formula; it does not compare with values the reference prints."
+        ]
       },
       "performance": {
         "status": "none"
@@ -561,7 +733,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The ADF statistic, lag count and observations used match the reference implementation.",
+            "reference_kind": "reference_implementation",
+            "reference": "statsmodels 0.15 tsa.stattools.adfuller",
+            "method": "compares the result with the reference's published or computed values",
+            "tolerance": "statistic 1e-8; lags and observations exact",
+            "test": "src/testing.rs::tests::adf_matches_statsmodels"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -596,7 +781,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The Pearson coefficient follows its definition.",
+            "reference_kind": "literature",
+            "reference": "Pearson (1895), Proc. Royal Society London",
+            "method": "recomputes the reference's formula on a worked example and compares",
+            "tolerance": "1e-3",
+            "test": "src/correlation.rs::tests::pearson_numeric_reference"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The test re-derives the reference's formula; it does not compare with values the reference prints."
+        ]
       },
       "performance": {
         "status": "none"
@@ -631,7 +830,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Slope, intercept and fitted values follow ordinary least squares.",
+            "reference_kind": "literature",
+            "reference": "Draper & Smith (1998), Applied Regression Analysis, 3rd ed.",
+            "method": "recomputes the reference's formula on a worked example and compares",
+            "tolerance": "1e-10 (R^2 1e-3)",
+            "test": "src/regression.rs::tests::simple_numeric_reference_ols"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The test re-derives the reference's formula; it does not compare with values the reference prints."
+        ]
       },
       "performance": {
         "status": "none"
@@ -806,7 +1019,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Small samples use the exact distribution of U.",
+            "reference_kind": "reference_implementation",
+            "reference": "exact p-value by enumerating every arrangement of the ranks",
+            "method": "compares the result with the reference's published or computed values",
+            "tolerance": "1e-4",
+            "test": "src/testing.rs::tests::mann_whitney_small_samples_use_the_exact_distribution"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -841,7 +1067,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Small samples use the exact distribution of the signed-rank statistic.",
+            "reference_kind": "reference_implementation",
+            "reference": "exact p-value by enumerating all 2^n sign assignments",
+            "method": "compares the result with the reference's published or computed values",
+            "tolerance": "1e-9",
+            "test": "src/testing.rs::tests::wilcoxon_small_samples_use_the_exact_distribution"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -911,7 +1150,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "JB is the moment-ratio form of the paper, the one SciPy, R and statsmodels report.",
+            "reference_kind": "literature",
+            "reference": "Jarque & Bera (1987)",
+            "method": "recomputes the reference's formula on a worked example and compares",
+            "tolerance": "1e-8",
+            "test": "src/testing.rs::tests::jb_is_the_moment_form_the_paper_defines"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The test re-derives the reference's formula; it does not compare with values the reference prints."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1086,7 +1339,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The Laplace statistic's p-value matches the published example.",
+            "reference_kind": "reference_implementation",
+            "reference": "Minitab 16 example (Rausand, NTNU TMA4275)",
+            "method": "compares the result with the reference's published or computed values",
+            "tolerance": "p 5e-4",
+            "test": "src/point_process.rs::tests::matches_the_published_example"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1121,7 +1387,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The MIL-HDBK-189 statistic and p-value match the published example.",
+            "reference_kind": "reference_implementation",
+            "reference": "Minitab 16 example (Rausand, NTNU TMA4275)",
+            "method": "compares the result with the reference's published or computed values",
+            "tolerance": "statistic 5e-3, p 5e-4",
+            "test": "src/point_process.rs::tests::matches_the_published_example"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1156,7 +1435,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The power-law process beta and theta match the published example.",
+            "reference_kind": "reference_implementation",
+            "reference": "Minitab 16 example (Rausand, NTNU TMA4275)",
+            "method": "compares the result with the reference's published or computed values",
+            "tolerance": "5e-6",
+            "test": "src/point_process.rs::tests::matches_the_published_example"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1543,7 +1835,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The range and average chart limits use the published factors.",
+            "reference_kind": "standard",
+            "reference": "AIAG Measurement Systems Analysis reference manual (D3 = 0, D4 = 2.575, A2 = 1.023 at 3 trials)",
+            "method": "compares the result with the reference's published or computed values",
+            "tolerance": "1e-12",
+            "test": "src/msa/mod.rs::tests::the_result_carries_the_charts_the_method_plots"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1648,7 +1953,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The tabular CUSUM sums follow the textbook procedure.",
+            "reference_kind": "literature",
+            "reference": "Montgomery (2020), 9.1",
+            "method": "recomputes the reference's formula on a worked example and compares",
+            "tolerance": "1e-10",
+            "test": "src/detection/cusum.rs::tests::test_cusum_numeric_reference_montgomery"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The test re-derives the reference's formula; it does not compare with values the reference prints."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1683,7 +2002,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The EWMA statistic and its converged limits follow the published definition.",
+            "reference_kind": "literature",
+            "reference": "Roberts (1959), Technometrics 1(3)",
+            "method": "recomputes the reference's formula on a worked example and compares",
+            "tolerance": "statistic 1e-10, limit 1e-6",
+            "test": "src/detection/ewma.rs::tests::test_ewma_numeric_reference_roberts"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The test re-derives the reference's formula; it does not compare with values the reference prints."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1823,7 +2156,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The defect rate keeps relative precision in the far tail (1.5-sigma shift).",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy scipy.stats.norm.sf(z) * 1e6",
+            "method": "compares the result with the reference's published or computed values",
+            "tolerance": "1e-12 relative",
+            "test": "src/capability/sigma_level.rs::tests::sigma_to_ppm_tail_relative_precision"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none",
@@ -1895,7 +2241,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The maximum-likelihood fit of the ball-bearing data matches the published estimates.",
+            "reference_kind": "dataset",
+            "reference": "Lawless (2003), Statistical Models and Methods for Lifetime Data, 4.2; cross-checked with R MASS::fitdistr",
+            "method": "compares the result with the reference's published or computed values",
+            "tolerance": "shape 0.01, scale 0.5",
+            "test": "src/weibull/mle.rs::tests::test_mle_lawless_ball_bearing"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1965,7 +2324,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Reliability, hazard and B-life follow the Weibull closed forms.",
+            "reference_kind": "literature",
+            "reference": "Nelson (1982), 2; Lawless (2003), ch. 2",
+            "method": "recomputes the reference's formula on a worked example and compares",
+            "tolerance": "1e-5",
+            "test": "src/weibull/reliability.rs::tests::test_reference_reliability_beta2_eta100"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The test re-derives the reference's formula; it does not compare with values the reference prints."
+        ]
       },
       "performance": {
         "status": "none"
