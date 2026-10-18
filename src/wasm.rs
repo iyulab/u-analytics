@@ -693,7 +693,10 @@ pub fn adf_test(
 struct CorrelationOptions {
     #[serde(default)]
     #[tsify(optional, type = "\"pearson\" | \"spearman\" | \"kendall\"")]
-    #[cfg_attr(test, schemars(extend("enum" = ["pearson", "spearman", "kendall"])))]
+    #[cfg_attr(
+        test,
+        schemars(schema_with = "crate::wire::card_schema::correlation_method_or_null")
+    )]
     method: Option<String>,
 }
 

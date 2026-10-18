@@ -639,16 +639,20 @@
       "description": "`{ method? }` for [`correlation_matrix`].",
       "properties": {
         "method": {
-          "default": null,
-          "enum": [
-            "pearson",
-            "spearman",
-            "kendall"
+          "anyOf": [
+            {
+              "enum": [
+                "pearson",
+                "spearman",
+                "kendall"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "type": [
-            "string",
-            "null"
-          ]
+          "default": null
         }
       },
       "type": "object"
@@ -1756,21 +1760,24 @@
           "type": "array"
         },
         "distribution": {
-          "default": null,
-          "description": "The family to fit, by the names `fit_best` reports; absent = the one it\nranks first.",
-          "enum": [
-            "Normal",
-            "LogNormal",
-            "Weibull",
-            "Gamma",
-            "Exponential",
-            "Beta",
-            null
+          "anyOf": [
+            {
+              "enum": [
+                "Normal",
+                "LogNormal",
+                "Weibull",
+                "Gamma",
+                "Exponential",
+                "Beta"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "type": [
-            "string",
-            "null"
-          ]
+          "default": null,
+          "description": "The family to fit, by the names `fit_best` reports; absent = the one it\nranks first."
         },
         "lsl": {
           "format": "double",

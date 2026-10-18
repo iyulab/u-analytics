@@ -147,6 +147,23 @@ pub(crate) struct LaneyPChartDto {
     pub(crate) points: Vec<AttributeChartPointDto>,
 }
 
+/// The value `table` gives `name`, or `unknown_option` at `parameter` listing
+/// the table's names -- the parser and its refusal read one list.
+pub(crate) fn named<T: Copy>(
+    parameter: &'static str,
+    name: &str,
+    table: &[(&'static str, T)],
+) -> Result<T, WireError> {
+    table
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, v)| *v)
+        .ok_or_else(|| {
+            let expected: Vec<&'static str> = table.iter().map(|(n, _)| *n).collect();
+            WireError::unknown_option(parameter, name, &expected)
+        })
+}
+
 /// Parse an optional `{ rules }` options object into a rule set.
 ///
 /// `rules` is the name of a set (`"shewhart"`, `"western_electric"`,
@@ -1710,7 +1727,10 @@ pub(crate) mod hypothesis {
             feature = "wasm",
             tsify(type = "\"none\" | \"constant\" | \"constant_trend\"")
         )]
-        #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["none", "constant", "constant_trend"])))]
+        #[cfg_attr(
+            all(test, feature = "wasm"),
+            schemars(schema_with = "crate::wire::card_schema::adf_model")
+        )]
         pub(crate) model: String,
         /// The largest number of lagged differences the AIC search considers;
         /// absent or `null`: Schwert's rule. Not with `lags`.
@@ -1754,21 +1774,19 @@ pub(crate) mod hypothesis {
     /// The fewest rows the test regression is run on.
     const ADF_MIN_REGRESSION_ROWS: usize = 5;
 
+    /// `adf_test`'s `model` names, each with the regression columns besides
+    /// the lags: the lagged level, plus the deterministic terms.
+    pub(crate) const ADF_MODELS: [(&str, (crate::testing::AdfModel, usize)); 3] = [
+        ("none", (crate::testing::AdfModel::None, 1)),
+        ("constant", (crate::testing::AdfModel::Constant, 2)),
+        (
+            "constant_trend",
+            (crate::testing::AdfModel::ConstantTrend, 3),
+        ),
+    ];
+
     pub(crate) fn adf_dto(input: AdfInputDto) -> Result<AdfDto, WireError> {
-        use crate::testing::AdfModel;
-        // Columns besides the lags: the lagged level, plus the deterministic terms.
-        let (model, fixed_columns) = match input.model.as_str() {
-            "none" => (AdfModel::None, 1),
-            "constant" => (AdfModel::Constant, 2),
-            "constant_trend" => (AdfModel::ConstantTrend, 3),
-            other => {
-                return Err(WireError::unknown_option(
-                    "model",
-                    other,
-                    &["none", "constant", "constant_trend"],
-                ))
-            }
-        };
+        let (model, fixed_columns) = super::named("model", &input.model, &ADF_MODELS)?;
         let data = at_least(input.data, 10, "data")?;
         // With p lags the regression keeps n - 1 - p rows (one value is lost to
         // differencing, p to the lags) and has fixed_columns + p columns. It
@@ -2238,7 +2256,10 @@ pub(crate) struct PercentileCapabilityInputDto {
             type = "\"Normal\" | \"LogNormal\" | \"Weibull\" | \"Gamma\" | \"Exponential\" | \"Beta\" | null"
         )
     )]
-    #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["Normal", "LogNormal", "Weibull", "Gamma", "Exponential", "Beta", null])))]
+    #[cfg_attr(
+        all(test, feature = "wasm"),
+        schemars(schema_with = "crate::wire::card_schema::capability_model_or_null")
+    )]
     pub(crate) distribution: Option<String>,
 }
 
@@ -2424,7 +2445,10 @@ pub(crate) struct PeltInputDto {
     #[serde(default = "default_cost")]
     #[cfg_attr(feature = "wasm", tsify(optional))]
     #[cfg_attr(feature = "wasm", tsify(type = "\"l2\" | \"normal\""))]
-    #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["l2", "normal"])))]
+    #[cfg_attr(
+        all(test, feature = "wasm"),
+        schemars(schema_with = "crate::wire::card_schema::pelt_cost")
+    )]
     pub(crate) cost: String,
     #[serde(default = "default_penalty")]
     #[cfg_attr(feature = "wasm", tsify(optional))]
@@ -2693,17 +2717,19 @@ pub(crate) fn gage_rr_anova_dto(dto: GageRRInputDto) -> Result<GageRRAnovaResult
 }
 
 /// A PELT detector from the wire options, naming the option a refusal is about.
+/// The PELT `cost` names.
+pub(crate) const PELT_COSTS: [(&str, crate::detection::CostFunction); 2] = [
+    ("l2", crate::detection::CostFunction::L2),
+    ("normal", crate::detection::CostFunction::Normal),
+];
+
 pub(crate) fn pelt_from(
     cost: &str,
     penalty: &PeltPenaltyDto,
     min_segment_len: Whole,
 ) -> Result<crate::detection::Pelt, WireError> {
-    use crate::detection::{CostFunction, Penalty};
-    let cost = match cost {
-        "l2" => CostFunction::L2,
-        "normal" => CostFunction::Normal,
-        other => return Err(WireError::unknown_option("cost", other, &["l2", "normal"])),
-    };
+    use crate::detection::Penalty;
+    let cost = named("cost", cost, &PELT_COSTS)?;
     let penalty = match *penalty {
         PeltPenaltyDto::Named(ref s) if s == "bic" => Penalty::Bic,
         PeltPenaltyDto::Named(ref s) => {
@@ -2761,7 +2787,10 @@ pub(crate) struct MultiPeltInputDto {
     #[serde(default = "default_cost")]
     #[cfg_attr(feature = "wasm", tsify(optional))]
     #[cfg_attr(feature = "wasm", tsify(type = "\"l2\" | \"normal\""))]
-    #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["l2", "normal"])))]
+    #[cfg_attr(
+        all(test, feature = "wasm"),
+        schemars(schema_with = "crate::wire::card_schema::pelt_cost")
+    )]
     pub(crate) cost: String,
     #[serde(default = "default_penalty")]
     #[cfg_attr(feature = "wasm", tsify(optional))]
@@ -3022,7 +3051,10 @@ pub(crate) struct CorrelationInputDto {
         feature = "wasm",
         tsify(type = "\"pearson\" | \"spearman\" | \"kendall\"")
     )]
-    #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["pearson", "spearman", "kendall"])))]
+    #[cfg_attr(
+        all(test, feature = "wasm"),
+        schemars(schema_with = "crate::wire::card_schema::correlation_method")
+    )]
     pub(crate) method: String,
 }
 
@@ -3045,22 +3077,20 @@ fn first_constant(variables: &[Vec<f64>]) -> Option<usize> {
     variables.iter().position(|v| v.iter().all(|&x| x == v[0]))
 }
 
+/// A correlation matrix of variables, or `None` when one does not vary.
+type MatrixFn = fn(&[&[f64]]) -> Option<u_numflow::matrix::Matrix>;
+
+/// `correlation_matrix`'s `method` names.
+pub(crate) const CORRELATION_METHODS: [(&str, MatrixFn); 3] = [
+    ("pearson", crate::correlation::correlation_matrix),
+    ("spearman", crate::correlation::spearman_matrix),
+    ("kendall", crate::correlation::kendall_matrix),
+];
+
 pub(crate) fn correlation_matrix_dto(
     input: CorrelationInputDto,
 ) -> Result<CorrelationMatrixDto, WireError> {
-    type MatrixFn = fn(&[&[f64]]) -> Option<u_numflow::matrix::Matrix>;
-    let compute: MatrixFn = match input.method.as_str() {
-        "pearson" => crate::correlation::correlation_matrix,
-        "spearman" => crate::correlation::spearman_matrix,
-        "kendall" => crate::correlation::kendall_matrix,
-        other => {
-            return Err(WireError::unknown_option(
-                "method",
-                other,
-                &["pearson", "spearman", "kendall"],
-            ))
-        }
-    };
+    let compute = named("method", &input.method, &CORRELATION_METHODS)?;
     let variables = input.variables;
     if variables.len() < 2 {
         return Err(WireError::too_few(
@@ -3744,7 +3774,10 @@ pub(crate) mod reliability {
     pub(crate) struct WeibullIntervalsDto {
         pub(crate) confidence: f64,
         #[cfg_attr(feature = "wasm", tsify(type = "\"wald\" | \"likelihood_ratio\""))]
-        #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["wald", "likelihood_ratio"])))]
+        #[cfg_attr(
+            all(test, feature = "wasm"),
+            schemars(schema_with = "crate::wire::card_schema::interval_method")
+        )]
         pub(crate) method: &'static str,
         pub(crate) shape: crate::wire::IntervalDto,
         pub(crate) scale: crate::wire::IntervalDto,
@@ -5653,6 +5686,42 @@ mod input_error_tests {
 #[cfg(all(test, feature = "wasm"))]
 pub(crate) mod card_schema {
     use schemars::{Schema, SchemaGenerator};
+
+    fn names<T>(table: &[(&'static str, T)]) -> Schema {
+        crate::engine_card::string_enum(table.iter().map(|(n, _)| *n))
+    }
+
+    fn or_null(schema: Schema) -> Schema {
+        Schema::try_from(serde_json::json!({ "anyOf": [schema.to_value(), { "type": "null" }] }))
+            .expect("an object is a schema")
+    }
+
+    pub(crate) fn adf_model(_: &mut SchemaGenerator) -> Schema {
+        names(&super::hypothesis::ADF_MODELS)
+    }
+
+    pub(crate) fn capability_model_or_null(_: &mut SchemaGenerator) -> Schema {
+        or_null(crate::engine_card::string_enum(
+            super::CAPABILITY_MODELS.iter().copied(),
+        ))
+    }
+
+    pub(crate) fn pelt_cost(_: &mut SchemaGenerator) -> Schema {
+        names(&super::PELT_COSTS)
+    }
+
+    pub(crate) fn correlation_method(_: &mut SchemaGenerator) -> Schema {
+        names(&super::CORRELATION_METHODS)
+    }
+
+    /// `correlation_matrix`'s optional `method`.
+    pub(crate) fn correlation_method_or_null(_: &mut SchemaGenerator) -> Schema {
+        or_null(names(&super::CORRELATION_METHODS))
+    }
+
+    pub(crate) fn interval_method(_: &mut SchemaGenerator) -> Schema {
+        crate::engine_card::string_enum(super::reliability::INTERVAL_METHODS)
+    }
 
     /// A PELT penalty: `"bic"` or a number.
     pub(crate) fn penalty(_: &mut SchemaGenerator) -> Schema {
