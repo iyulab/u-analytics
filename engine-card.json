@@ -914,7 +914,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The t statistic, df and two-sided p-value match the reference.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.ttest_1samp",
+            "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
+            "tolerance": "statistic 1e-12, p 1e-9 (relative)",
+            "test": "src/testing.rs::scipy_reference::t_tests_reproduce_scipy"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -949,7 +962,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The Welch t statistic, Welch-Satterthwaite df and two-sided p-value match the reference.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.ttest_ind(equal_var=False)",
+            "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
+            "tolerance": "statistic and df 1e-12, p 1e-9 (relative)",
+            "test": "src/testing.rs::scipy_reference::t_tests_reproduce_scipy"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -984,7 +1010,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The paired t statistic, df and two-sided p-value match the reference.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.ttest_rel",
+            "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
+            "tolerance": "statistic 1e-12, p 1e-9 (relative)",
+            "test": "src/testing.rs::scipy_reference::t_tests_reproduce_scipy"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1115,7 +1154,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The chi-squared statistic and p-value match the reference.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.chisquare",
+            "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
+            "tolerance": "statistic 1e-12, p 1e-9 (relative)",
+            "test": "src/testing.rs::scipy_reference::chi_squared_and_fisher_tests_reproduce_scipy"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1199,7 +1251,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "W and its p-value (Royston's AS R94) match the reference on a skewed and a near-normal sample.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.shapiro",
+            "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
+            "tolerance": "W and p 1e-9 (the reference runs AS R94 in its own arithmetic; the measured difference is about 3e-11)",
+            "test": "src/testing.rs::scipy_reference::shapiro_wilk_reproduces_scipy"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1234,7 +1299,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Kendall's tau and Sen's slope match the reference on a sample without ties (the Mann-Kendall Z and p-value are not compared: SciPy has no Mann-Kendall test).",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.kendalltau and SciPy 1.17.1, scipy.stats.theilslopes",
+            "method": "compares tau with Kendall's tau-b and the slope with the Theil-Sen estimate on the same series",
+            "tolerance": "1e-12 (relative)",
+            "test": "src/testing.rs::scipy_reference::mann_kendall_tau_and_sen_slope_reproduce_scipy"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1483,7 +1561,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The F statistic and p-value match the reference.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.f_oneway",
+            "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
+            "tolerance": "F 1e-12, p 1e-9 (relative)",
+            "test": "src/testing.rs::scipy_reference::anova_and_equal_variance_tests_reproduce_scipy"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1518,7 +1609,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The tie-corrected H statistic and p-value match the reference on data with ties.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.kruskal",
+            "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
+            "tolerance": "H 1e-12, p 1e-9 (relative)",
+            "test": "src/testing.rs::scipy_reference::kruskal_wallis_with_ties_reproduces_scipy"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1553,7 +1657,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The Brown-Forsythe (median-centred Levene) statistic and p-value match the reference.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.levene(center='median')",
+            "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
+            "tolerance": "statistic 1e-12, p 1e-9 (relative)",
+            "test": "src/testing.rs::scipy_reference::anova_and_equal_variance_tests_reproduce_scipy"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1588,7 +1705,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The Bartlett statistic and p-value match the reference.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.bartlett",
+            "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
+            "tolerance": "statistic 1e-12, p 1e-9 (relative)",
+            "test": "src/testing.rs::scipy_reference::anova_and_equal_variance_tests_reproduce_scipy"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1623,7 +1753,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The chi-squared statistic (no continuity correction), df and p-value match the reference on a 2x3 table.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.chi2_contingency(correction=False)",
+            "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
+            "tolerance": "statistic 1e-12, p 1e-9 (relative)",
+            "test": "src/testing.rs::scipy_reference::chi_squared_and_fisher_tests_reproduce_scipy"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1658,7 +1801,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The two-sided p-value matches the reference.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.fisher_exact",
+            "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
+            "tolerance": "p 1e-9 (relative)",
+            "test": "src/testing.rs::scipy_reference::chi_squared_and_fisher_tests_reproduce_scipy"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1729,7 +1885,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The adjusted p-values match the reference.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.false_discovery_control(method='bh')",
+            "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
+            "tolerance": "1e-12",
+            "test": "src/testing.rs::scipy_reference::benjamini_hochberg_reproduces_scipy"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared."
+        ]
       },
       "performance": {
         "status": "none",

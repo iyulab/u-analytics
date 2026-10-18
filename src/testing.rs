@@ -3637,6 +3637,137 @@ mod tests {
     }
 }
 
+/// The tests against values SciPy 1.17.1 computes for the same data and the
+/// same variant (`scipy.stats` call named at each value).
+#[cfg(test)]
+mod scipy_reference {
+    use super::*;
+
+    const A: [f64; 8] = [5.1, 4.9, 5.6, 5.8, 6.0, 5.2, 4.7, 5.5];
+    const B: [f64; 7] = [6.3, 5.9, 6.8, 7.1, 6.0, 6.6, 7.4];
+    const G1: [f64; 5] = [23.1, 25.4, 22.8, 26.0, 24.3];
+    const G2: [f64; 6] = [27.2, 28.9, 26.5, 29.4, 27.8, 28.1];
+    const G3: [f64; 4] = [22.0, 21.4, 24.9, 23.3];
+
+    /// `got` within `rel` of `want`, relative (absolute below 1).
+    fn close(got: f64, want: f64, rel: f64, what: &str) {
+        let scale = want.abs().max(1.0);
+        assert!(
+            (got - want).abs() <= rel * scale,
+            "{what}: got {got}, SciPy {want} (relative tolerance {rel})"
+        );
+    }
+
+    #[test]
+    fn t_tests_reproduce_scipy() {
+        // ttest_1samp(A, 5.0)
+        let r = one_sample_t_test(&A, 5.0).expect("valid");
+        close(r.statistic, 2.197950389679656, 1e-12, "one-sample t");
+        close(r.p_value, 0.06392412293886501, 1e-9, "one-sample p");
+        assert_eq!(r.df, 7.0);
+        // ttest_ind(A, B, equal_var=False)
+        let r = two_sample_t_test(&A, &B).expect("valid");
+        close(r.statistic, -4.67567567567568, 1e-12, "Welch t");
+        close(r.df, 11.56763357082458, 1e-12, "Welch df");
+        close(r.p_value, 0.0005912510074711228, 1e-9, "Welch p");
+        // ttest_rel(X, Y)
+        let x = [12.1, 13.4, 11.8, 14.2, 12.9, 13.0];
+        let y = [12.9, 13.9, 12.0, 15.1, 13.5, 13.2];
+        let r = paired_t_test(&x, &y).expect("valid");
+        close(r.statistic, -4.437601569801824, 1e-12, "paired t");
+        close(r.p_value, 0.006779965572779817, 1e-9, "paired p");
+        assert_eq!(r.df, 5.0);
+    }
+
+    #[test]
+    fn anova_and_equal_variance_tests_reproduce_scipy() {
+        let groups: [&[f64]; 3] = [&G1, &G2, &G3];
+        // f_oneway(G1, G2, G3)
+        let r = one_way_anova(&groups).expect("valid");
+        close(r.f_statistic, 20.526701958197258, 1e-12, "ANOVA F");
+        close(r.p_value, 0.00013390844134272023, 1e-9, "ANOVA p");
+        // levene(G1, G2, G3, center="median")
+        let r = levene_test(&groups).expect("valid");
+        close(r.statistic, 0.4752743705616534, 1e-12, "Brown-Forsythe W");
+        close(r.p_value, 0.6329340379295331, 1e-9, "Brown-Forsythe p");
+        // bartlett(G1, G2, G3)
+        let r = bartlett_test(&groups).expect("valid");
+        close(r.statistic, 0.5282298427149905, 1e-12, "Bartlett T");
+        close(r.p_value, 0.7678852881660961, 1e-9, "Bartlett p");
+    }
+
+    #[test]
+    fn kruskal_wallis_with_ties_reproduces_scipy() {
+        // kruskal([1, 2, 2, 3, 5], [4, 4, 6, 7], [5, 8, 8, 9, 10])
+        let r = kruskal_wallis_test(&[
+            &[1.0, 2.0, 2.0, 3.0, 5.0],
+            &[4.0, 4.0, 6.0, 7.0],
+            &[5.0, 8.0, 8.0, 9.0, 10.0],
+        ])
+        .expect("valid");
+        close(r.statistic, 9.22394678492239, 1e-12, "H (tie-corrected)");
+        close(r.p_value, 0.009932198829456881, 1e-9, "Kruskal-Wallis p");
+    }
+
+    #[test]
+    fn chi_squared_and_fisher_tests_reproduce_scipy() {
+        // chisquare([18, 22, 30, 30], [25, 25, 25, 25])
+        let r = chi_squared_goodness_of_fit(&[18.0, 22.0, 30.0, 30.0], &[25.0; 4]).expect("valid");
+        close(r.statistic, 4.32, 1e-12, "goodness-of-fit chi-squared");
+        close(r.p_value, 0.22891886433610517, 1e-9, "goodness-of-fit p");
+        // chi2_contingency([[12, 7, 9], [5, 14, 11]], correction=False)
+        let r = chi_squared_independence(&[12.0, 7.0, 9.0, 5.0, 14.0, 11.0], 2, 3).expect("valid");
+        close(
+            r.statistic,
+            5.353085901027075,
+            1e-12,
+            "independence chi-squared",
+        );
+        close(r.p_value, 0.06880059054935043, 1e-9, "independence p");
+        assert_eq!(r.df, 2.0);
+        // fisher_exact([[8, 2], [1, 5]]) -- two-sided
+        let r = fisher_exact_test(8, 2, 1, 5).expect("valid");
+        close(r.p_value, 0.034965034965034975, 1e-9, "Fisher p");
+    }
+
+    #[test]
+    fn shapiro_wilk_reproduces_scipy() {
+        // shapiro([148, 154, 158, 160, 161, 162, 166, 170, 182, 195, 236])
+        let r = shapiro_wilk_test(&[
+            148.0, 154.0, 158.0, 160.0, 161.0, 162.0, 166.0, 170.0, 182.0, 195.0, 236.0,
+        ])
+        .expect("valid");
+        close(r.w, 0.7888146948631716, 1e-9, "W, skewed");
+        close(r.p_value, 0.006703814061898823, 1e-9, "p, skewed");
+        // shapiro([2.1, 3.4, 1.9, 5.6, 4.4, 3.3, 2.8, 4.0, 3.9, 3.1, 2.6, 4.8, 3.6, 3.0, 4.2])
+        let r = shapiro_wilk_test(&[
+            2.1, 3.4, 1.9, 5.6, 4.4, 3.3, 2.8, 4.0, 3.9, 3.1, 2.6, 4.8, 3.6, 3.0, 4.2,
+        ])
+        .expect("valid");
+        close(r.w, 0.9864343014896592, 1e-9, "W, near normal");
+        close(r.p_value, 0.9958703691266937, 1e-9, "p, near normal");
+    }
+
+    #[test]
+    fn mann_kendall_tau_and_sen_slope_reproduce_scipy() {
+        // kendalltau(range(12), MK) and theilslopes(MK, range(12)) -- no ties,
+        // so Kendall's tau-b is the Mann-Kendall S over n(n-1)/2.
+        let mk = [4.2, 4.0, 4.6, 4.9, 4.7, 5.3, 5.1, 5.8, 5.6, 6.2, 6.0, 6.7];
+        let r = mann_kendall_test(&mk).expect("valid");
+        close(r.kendall_tau, 0.8484848484848484, 1e-12, "Kendall tau");
+        close(r.sen_slope, 0.22500000000000003, 1e-12, "Sen's slope");
+    }
+
+    #[test]
+    fn benjamini_hochberg_reproduces_scipy() {
+        // false_discovery_control([0.01, 0.04, 0.03, 0.005, 0.20, 0.50], method="bh")
+        let adjusted = benjamini_hochberg(&[0.01, 0.04, 0.03, 0.005, 0.20, 0.50]).expect("valid");
+        for (got, want) in adjusted.iter().zip([0.03, 0.06, 0.06, 0.03, 0.24, 0.5]) {
+            close(*got, want, 1e-12, "BH-adjusted p");
+        }
+    }
+}
+
 #[cfg(test)]
 mod proptests {
     use super::*;
