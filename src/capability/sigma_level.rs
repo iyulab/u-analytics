@@ -329,3 +329,32 @@ mod tests {
         }
     }
 }
+
+/// Against SciPy 1.17.1 (`scipy.stats.norm.isf(ppm / 1e6) + 1.5`).
+#[cfg(test)]
+mod scipy_reference {
+    use super::*;
+
+    #[test]
+    fn ppm_to_sigma_reproduces_scipy() {
+        // (ppm, norm.isf(ppm / 1e6) + 1.5) -- the 1.5-sigma-shifted convention
+        // from the extreme tail to a rate over one half.
+        let cases = [
+            (0.001, 7.4978070150076865),
+            (3.4, 5.9998544700250065),
+            (233.0, 4.999575280504999),
+            (6210.0, 3.9999809070915524),
+            (66_807.0, 3.000001553990341),
+            (308_538.0, 1.9999986898060476),
+            (500_000.0, 1.5),
+            (999_999.0, -3.2534243088170873),
+        ];
+        for (ppm, want) in cases {
+            let got = ppm_to_sigma(ppm).expect("ppm in range");
+            assert!(
+                (got - want).abs() <= 1e-9 * want.abs().max(1.0),
+                "ppm {ppm}: got {got}, SciPy {want}"
+            );
+        }
+    }
+}

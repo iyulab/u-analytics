@@ -3902,3 +3902,20 @@ mod proptests {
         }
     }
 }
+
+/// Bonferroni's adjustment is `min(p m, 1)` (Dunn 1961); the expected values
+/// are that definition worked by hand, not another library's output.
+#[cfg(test)]
+mod definition_reference {
+    use super::*;
+
+    #[test]
+    fn bonferroni_is_p_times_m_capped_at_one() {
+        let adjusted = bonferroni_correction(&[0.01, 0.02, 0.04, 0.3, 0.0004]).expect("valid");
+        let want = [0.05, 0.1, 0.2, 1.0, 0.002];
+        assert_eq!(adjusted.len(), want.len());
+        for (got, want) in adjusted.iter().zip(want) {
+            assert!((got - want).abs() <= 1e-15, "got {got}, want {want}");
+        }
+    }
+}

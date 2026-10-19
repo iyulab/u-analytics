@@ -455,3 +455,66 @@ mod tests {
         );
     }
 }
+
+/// Against Johnson's adjusted ranks and Benard's median ranks recomputed in
+/// Python 3 with SciPy 1.17.1 (`scipy.stats.linregress` of
+/// `ln(-ln(1 - F))` on `ln t`; `shape` = slope, `scale` = `exp(-intercept / slope)`,
+/// `r_squared` = `rvalue ** 2`).
+#[cfg(test)]
+mod scipy_reference {
+    use super::*;
+
+    fn check(fit: Option<WeibullMrrResult>, want: (f64, f64, f64), what: &str) {
+        let r = fit.expect("fits");
+        for (name, got, want) in [
+            ("shape", r.shape, want.0),
+            ("scale", r.scale, want.1),
+            ("r_squared", r.r_squared, want.2),
+        ] {
+            assert!(
+                (got - want).abs() <= 1e-9 * want.abs().max(1.0),
+                "{what} {name}: got {got}, SciPy {want}"
+            );
+        }
+    }
+
+    #[test]
+    fn uncensored_fits_reproduce_scipy() {
+        check(
+            weibull_mrr(&[55.0, 187.0, 216.0, 240.0, 244.0, 335.0]),
+            (1.5377497056805067, 259.77140279952795, 0.8380959661182655),
+            "six failures",
+        );
+        check(
+            weibull_mrr(&[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0]),
+            (1.541393435175759, 52.54491760626878, 0.9849252880906245),
+            "evenly spaced",
+        );
+        check(
+            weibull_mrr(&[37.0, 51.0, 52.0, 78.0, 113.0, 140.0, 190.0, 262.0, 301.0]),
+            (1.4126088617100814, 154.27762605393247, 0.9349554705608731),
+            "nine failures",
+        );
+    }
+
+    #[test]
+    fn suspensions_move_the_ranks_as_johnson_adjusts_them() {
+        check(
+            weibull_mrr_censored(
+                &[55.0, 187.0, 216.0, 240.0, 244.0, 335.0],
+                &[361.0, 373.0, 375.0, 386.0],
+            ),
+            (1.3230645186146017, 461.70788427887305, 0.8763600658552623),
+            "suspensions after every failure",
+        );
+        // A suspension at a failure's time sorts after it; others fall between.
+        check(
+            weibull_mrr_censored(
+                &[37.0, 51.0, 52.0, 78.0, 113.0, 140.0, 190.0, 262.0, 301.0],
+                &[78.0, 200.0, 400.0],
+            ),
+            (1.3403400442383264, 205.54499329275637, 0.9300385638418595),
+            "tied and interleaved suspensions",
+        );
+    }
+}

@@ -2231,3 +2231,67 @@ mod tests {
         }
     }
 }
+
+/// Against the five steps of Laney (2002) recomputed in Python 3 with NumPy
+/// 2.4.6 (`ubar = d.sum() / n.sum()`; `z = (u - ubar) / sqrt(ubar / n)`;
+/// `phi = mean(abs(diff(z))) / 1.128`; limits `ubar -+ 3 phi sqrt(ubar / n)`,
+/// the lower clamped at 0).
+#[cfg(test)]
+mod numpy_reference {
+    use super::*;
+
+    #[test]
+    fn laney_u_chart_reproduces_the_recomputed_steps() {
+        let samples: [(u64, f64); 8] = [
+            (12, 1.0),
+            (9, 0.8),
+            (21, 1.5),
+            (7, 0.6),
+            (30, 1.2),
+            (14, 1.0),
+            (5, 0.9),
+            (26, 2.0),
+        ];
+        let want_ucl = [
+            31.12055203116305,
+            33.167588852279096,
+            27.93809365946825,
+            36.16720306457643,
+            29.609492224942663,
+            31.12055203116305,
+            32.05866697338564,
+            26.04097105693397,
+        ];
+        let want_lcl = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.5145844986215877];
+        let want_z = [
+            -0.4789474720713999,
+            -0.6091079910843953,
+            0.07332355751067639,
+            -0.44055195097215977,
+            3.311920470708962,
+            0.059868434008924755,
+            -2.10145878671414,
+            -0.29633362966711146,
+        ];
+        let chart = laney_u_chart(&samples, None).expect("valid");
+        let close = |got: f64, want: f64, what: &str| {
+            assert!(
+                (got - want).abs() <= 1e-12 * want.abs().max(1.0),
+                "{what}: got {got}, NumPy {want}"
+            );
+        };
+        close(chart.u_bar, 13.777777777777779, "u_bar");
+        close(chart.phi, 1.5574271038807188, "phi");
+        for (i, p) in chart.points.iter().enumerate() {
+            close(p.ucl, want_ucl[i], &format!("ucl[{i}]"));
+            close(p.lcl, want_lcl[i], &format!("lcl[{i}]"));
+            // The point's z is on the scale of phi * sigma; the recomputed z is
+            // the plain standardized rate, which phi divides.
+            close(
+                p.z.expect("phi * sigma > 0") * chart.phi,
+                want_z[i],
+                &format!("z[{i}] * phi"),
+            );
+        }
+    }
+}
