@@ -521,7 +521,7 @@ fn correlation_p_value(r: f64, n: usize) -> f64 {
     }
 
     let t = r * (df / (1.0 - r2)).sqrt();
-    2.0 * (1.0 - special::t_distribution_cdf(t.abs(), df))
+    2.0 * special::t_distribution_sf(t.abs(), df)
 }
 
 /// Ranks data using the mid-rank method for ties.
@@ -1348,5 +1348,44 @@ mod proptests {
                 }
             }
         }
+    }
+}
+
+/// A p-value far in the tail against SciPy 1.17.1 (`scipy.stats.pearsonr`).
+#[cfg(test)]
+mod scipy_tail_reference {
+    use super::*;
+
+    #[test]
+    fn pearson_p_value_keeps_its_tail() {
+        let x: Vec<f64> = (1..=20).map(f64::from).collect();
+        let y = [
+            5.3999999999999995,
+            7.0,
+            9.4,
+            11.8,
+            13.2,
+            15.8,
+            17.6,
+            19.8,
+            22.250000000000004,
+            23.75,
+            26.25,
+            28.150000000000002,
+            30.55,
+            32.050000000000004,
+            34.55,
+            36.7,
+            38.550000000000004,
+            41.1,
+            42.699999999999996,
+            45.0,
+        ];
+        let got = pearson(&x, &y).expect("valid").p_value;
+        let want = 8.20335692044105e-33;
+        assert!(
+            (got - want).abs() <= 1e-9 * want,
+            "p: got {got:e}, SciPy {want:e}"
+        );
     }
 }

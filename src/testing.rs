@@ -68,7 +68,7 @@ pub fn one_sample_t_test(data: &[f64], mu0: f64) -> Option<TestResult> {
 
     let t = (mean - mu0) / (sd / (n as f64).sqrt());
     let df = (n - 1) as f64;
-    let p_value = 2.0 * (1.0 - special::t_distribution_cdf(t.abs(), df));
+    let p_value = 2.0 * special::t_distribution_sf(t.abs(), df);
 
     Some(TestResult {
         statistic: t,
@@ -133,7 +133,7 @@ pub fn two_sample_t_test(a: &[f64], b: &[f64]) -> Option<TestResult> {
     let v2 = var2 / n2f;
     let df = (v1 + v2).powi(2) / (v1 * v1 / (n1f - 1.0) + v2 * v2 / (n2f - 1.0));
 
-    let p_value = 2.0 * (1.0 - special::t_distribution_cdf(t.abs(), df));
+    let p_value = 2.0 * special::t_distribution_sf(t.abs(), df);
 
     Some(TestResult {
         statistic: t,
@@ -285,7 +285,7 @@ pub fn one_way_anova(groups: &[&[f64]]) -> Option<AnovaResult> {
     let p_value = if f_statistic.is_infinite() {
         0.0
     } else {
-        1.0 - special::f_distribution_cdf(f_statistic, df_between as f64, df_within as f64)
+        special::f_distribution_sf(f_statistic, df_between as f64, df_within as f64)
     };
 
     Some(AnovaResult {
@@ -351,7 +351,7 @@ pub fn chi_squared_goodness_of_fit(observed: &[f64], expected: &[f64]) -> Option
         .sum();
 
     let df = (k - 1) as f64;
-    let p_value = 1.0 - special::chi_squared_cdf(chi2, df);
+    let p_value = special::chi_squared_sf(chi2, df);
 
     Some(TestResult {
         statistic: chi2,
@@ -440,7 +440,7 @@ pub fn chi_squared_independence(table: &[f64], n_rows: usize, n_cols: usize) -> 
     }
 
     let df = ((n_rows - 1) * (n_cols - 1)) as f64;
-    let p_value = 1.0 - special::chi_squared_cdf(chi2, df);
+    let p_value = special::chi_squared_sf(chi2, df);
 
     Some(TestResult {
         statistic: chi2,
@@ -1303,7 +1303,7 @@ pub fn kruskal_wallis_test(groups: &[&[f64]]) -> Option<TestResult> {
     }
 
     let df = (k - 1) as f64;
-    let p_value = 1.0 - special::chi_squared_cdf(h, df);
+    let p_value = special::chi_squared_sf(h, df);
 
     Some(TestResult {
         statistic: h,
@@ -1538,7 +1538,7 @@ pub fn bartlett_test(groups: &[&[f64]]) -> Option<TestResult> {
 
     let statistic = num / c;
     let df = (k - 1) as f64;
-    let p_value = 1.0 - special::chi_squared_cdf(statistic, df);
+    let p_value = special::chi_squared_sf(statistic, df);
 
     Some(TestResult {
         statistic,
@@ -3917,5 +3917,55 @@ mod definition_reference {
         for (got, want) in adjusted.iter().zip(want) {
             assert!((got - want).abs() <= 1e-15, "got {got}, want {want}");
         }
+    }
+}
+
+/// P-values far in the upper tail against SciPy 1.17.1 -- sizes at which
+/// `1 - cdf` has no digits left (the smallest here is 3e-31).
+#[cfg(test)]
+mod scipy_tail_reference {
+    use super::*;
+
+    fn close(got: f64, want: f64, what: &str) {
+        assert!(
+            (got - want).abs() <= 1e-9 * want.abs(),
+            "{what}: got {got:e}, SciPy {want:e}"
+        );
+    }
+
+    #[test]
+    fn t_tests_keep_their_tail() {
+        let a = [100.2, 99.8, 100.5, 100.1, 99.9, 100.3, 100.0, 99.7];
+        let b = [120.1, 119.7, 120.4, 120.0, 119.8, 120.3];
+        // ttest_1samp(a, 90.0)
+        let r = one_sample_t_test(&a, 90.0).expect("valid");
+        close(r.p_value, 1.6824197797300066e-12, "one-sample p");
+        // ttest_ind(a, b, equal_var=False)
+        let r = two_sample_t_test(&a, &b).expect("valid");
+        close(r.p_value, 8.838218005160137e-19, "Welch p");
+    }
+
+    #[test]
+    fn f_and_chi_squared_tests_keep_their_tail() {
+        // f_oneway(g1, g2, g3)
+        let (g1, g2, g3) = (
+            [10.1, 10.3, 9.9, 10.0, 10.2],
+            [12.0, 12.2, 11.9, 12.1, 12.3],
+            [14.1, 13.9, 14.0, 14.2, 13.8],
+        );
+        let r = one_way_anova(&[&g1, &g2, &g3]).expect("valid");
+        close(r.p_value, 2.297566098988527e-13, "ANOVA p");
+        // chi2_contingency([[80, 20], [30, 70]], correction=False)
+        let r = chi_squared_independence(&[80.0, 20.0, 30.0, 70.0], 2, 2).expect("valid");
+        close(r.p_value, 1.1885852395646684e-12, "independence p");
+        // chisquare([90, 10, 5, 95], [50, 50, 50, 50])
+        let r = chi_squared_goodness_of_fit(&[90.0, 10.0, 5.0, 95.0], &[50.0; 4]).expect("valid");
+        close(r.p_value, 3.1567404374222543e-31, "goodness-of-fit p");
+        // kruskal(1..=10, 11..=20, 21..=30)
+        let low: Vec<f64> = (1..=10).map(f64::from).collect();
+        let mid: Vec<f64> = (11..=20).map(f64::from).collect();
+        let high: Vec<f64> = (21..=30).map(f64::from).collect();
+        let r = kruskal_wallis_test(&[&low, &mid, &high]).expect("valid");
+        close(r.p_value, 2.49000508218493e-06, "Kruskal-Wallis p");
     }
 }

@@ -8,6 +8,18 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Fixed
+
+- P-values far in the upper tail keep their digits: the t, F and chi-squared
+  tests, the regression and correlation tests and the Gage R&R ANOVA took
+  `1 - cdf`, which has nothing left below about 1e-16 (an ANOVA with F =
+  1,422 on 4 and 34 degrees of freedom reported a p-value of 0 or rounding
+  noise where it is 2.6e-37). They now use the survival functions of
+  u-numflow (`chi_squared_sf`, `f_distribution_sf`, `t_distribution_sf`) and
+  agree with SciPy's to a relative 1e-9 down to 1e-41. Values above about
+  1e-10 are unchanged to that precision. Needs u-numflow with those
+  functions (the next minor).
+
 ## [0.27.0] - 2026-10-16
 
 Depends on u-numflow 0.14. The .NET client is `UAnalytics` 0.22.0.

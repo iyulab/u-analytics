@@ -187,15 +187,15 @@ pub fn simple_linear_regression(x: &[f64], y: &[f64]) -> Option<SimpleRegression
     };
 
     // p-values via t-distribution
-    let slope_p = 2.0 * (1.0 - special::t_distribution_cdf(slope_t.abs(), df_res));
-    let intercept_p = 2.0 * (1.0 - special::t_distribution_cdf(intercept_t.abs(), df_res));
+    let slope_p = 2.0 * special::t_distribution_sf(slope_t.abs(), df_res);
+    let intercept_p = 2.0 * special::t_distribution_sf(intercept_t.abs(), df_res);
 
     // F-statistic (= t² for simple regression)
     let f_statistic = slope_t * slope_t;
     let f_p_value = if f_statistic.is_infinite() {
         0.0
     } else {
-        1.0 - special::f_distribution_cdf(f_statistic, 1.0, df_res)
+        special::f_distribution_sf(f_statistic, 1.0, df_res)
     };
 
     Some(SimpleRegressionResult {
@@ -346,7 +346,7 @@ pub fn multiple_linear_regression(
             f64::INFINITY
         };
         t_statistics.push(t);
-        let pv = 2.0 * (1.0 - special::t_distribution_cdf(t.abs(), df_res));
+        let pv = 2.0 * special::t_distribution_sf(t.abs(), df_res);
         p_values.push(pv);
     }
 
@@ -360,7 +360,7 @@ pub fn multiple_linear_regression(
     let f_p_value = if f_statistic.is_infinite() || f_statistic.is_nan() {
         0.0
     } else {
-        1.0 - special::f_distribution_cdf(f_statistic, pf, df_res)
+        special::f_distribution_sf(f_statistic, pf, df_res)
     };
 
     // VIF for each predictor: VIF_j = 1/(1 - R²_j) where R²_j is from
@@ -1050,5 +1050,51 @@ mod proptests {
                     "R² = {}", r.r_squared);
             }
         }
+    }
+}
+
+/// Slope, intercept and F p-values far in the tail against SciPy 1.17.1
+/// (`scipy.stats.linregress`; the intercept's and the F test's from `t.sf` and
+/// `f.sf`) -- the smallest is 8e-33.
+#[cfg(test)]
+mod scipy_tail_reference {
+    use super::*;
+
+    fn close(got: f64, want: f64, what: &str) {
+        assert!(
+            (got - want).abs() <= 1e-9 * want.abs(),
+            "{what}: got {got:e}, SciPy {want:e}"
+        );
+    }
+
+    #[test]
+    fn simple_regression_p_values_keep_their_tail() {
+        let x: Vec<f64> = (1..=20).map(f64::from).collect();
+        let y = [
+            5.3999999999999995,
+            7.0,
+            9.4,
+            11.8,
+            13.2,
+            15.8,
+            17.6,
+            19.8,
+            22.250000000000004,
+            23.75,
+            26.25,
+            28.150000000000002,
+            30.55,
+            32.050000000000004,
+            34.55,
+            36.7,
+            38.550000000000004,
+            41.1,
+            42.699999999999996,
+            45.0,
+        ];
+        let r = simple_linear_regression(&x, &y).expect("valid");
+        close(r.slope_p, 8.203356920391111e-33, "slope p");
+        close(r.intercept_p, 1.5689270135401997e-16, "intercept p");
+        close(r.f_p_value, 8.203356920397853e-33, "F p");
     }
 }

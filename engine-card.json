@@ -853,6 +853,14 @@
             "method": "recomputes the reference's formula on a worked example and compares",
             "tolerance": "1e-10 (R^2 1e-3)",
             "test": "src/regression.rs::tests::simple_numeric_reference_ols"
+          },
+          {
+            "claim": "The slope, intercept and F-test p-values in the far upper tail (8e-33, 1.6e-16) keep their digits.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.linregress, with the intercept's and the F test's p-values from scipy.stats.t.sf and f.sf",
+            "method": "compares the p-value of a case whose upper tail is below 1e-11 with the reference's",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/regression.rs::scipy_tail_reference::simple_regression_p_values_keep_their_tail"
           }
         ],
         "limits": [
@@ -937,6 +945,14 @@
             "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
             "tolerance": "statistic 1e-12, p 1e-9 (relative)",
             "test": "src/testing.rs::scipy_reference::t_tests_reproduce_scipy"
+          },
+          {
+            "claim": "A p-value in the far upper tail (1.7e-12) keeps its digits.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.ttest_1samp",
+            "method": "compares the p-value of a case whose upper tail is below 1e-11 with the reference's",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/testing.rs::scipy_tail_reference::t_tests_keep_their_tail"
           }
         ],
         "limits": [
@@ -985,6 +1001,14 @@
             "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
             "tolerance": "statistic and df 1e-12, p 1e-9 (relative)",
             "test": "src/testing.rs::scipy_reference::t_tests_reproduce_scipy"
+          },
+          {
+            "claim": "A p-value in the far upper tail (8.8e-19) keeps its digits.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.ttest_ind(equal_var=False)",
+            "method": "compares the p-value of a case whose upper tail is below 1e-11 with the reference's",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/testing.rs::scipy_tail_reference::t_tests_keep_their_tail"
           }
         ],
         "limits": [
@@ -1177,6 +1201,14 @@
             "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
             "tolerance": "statistic 1e-12, p 1e-9 (relative)",
             "test": "src/testing.rs::scipy_reference::chi_squared_and_fisher_tests_reproduce_scipy"
+          },
+          {
+            "claim": "A p-value in the far upper tail (3.2e-31) keeps its digits.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.chisquare",
+            "method": "compares the p-value of a case whose upper tail is below 1e-11 with the reference's",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/testing.rs::scipy_tail_reference::f_and_chi_squared_tests_keep_their_tail"
           }
         ],
         "limits": [
@@ -1584,6 +1616,14 @@
             "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
             "tolerance": "F 1e-12, p 1e-9 (relative)",
             "test": "src/testing.rs::scipy_reference::anova_and_equal_variance_tests_reproduce_scipy"
+          },
+          {
+            "claim": "A p-value in the far upper tail (2.3e-13) keeps its digits.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.f_oneway",
+            "method": "compares the p-value of a case whose upper tail is below 1e-11 with the reference's",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/testing.rs::scipy_tail_reference::f_and_chi_squared_tests_keep_their_tail"
           }
         ],
         "limits": [
@@ -1632,6 +1672,14 @@
             "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
             "tolerance": "H 1e-12, p 1e-9 (relative)",
             "test": "src/testing.rs::scipy_reference::kruskal_wallis_with_ties_reproduces_scipy"
+          },
+          {
+            "claim": "A p-value in the upper tail (2.5e-6) keeps its digits.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.kruskal",
+            "method": "compares the p-value of a case whose upper tail is below 1e-11 with the reference's",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/testing.rs::scipy_tail_reference::f_and_chi_squared_tests_keep_their_tail"
           }
         ],
         "limits": [
@@ -1776,6 +1824,14 @@
             "method": "compares the statistic, degrees of freedom and p-value with the reference implementation's on the same data and the same variant",
             "tolerance": "statistic 1e-12, p 1e-9 (relative)",
             "test": "src/testing.rs::scipy_reference::chi_squared_and_fisher_tests_reproduce_scipy"
+          },
+          {
+            "claim": "A p-value in the far upper tail (1.2e-12) keeps its digits.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.chi2_contingency(correction=False)",
+            "method": "compares the p-value of a case whose upper tail is below 1e-11 with the reference's",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/testing.rs::scipy_tail_reference::f_and_chi_squared_tests_keep_their_tail"
           }
         ],
         "limits": [
@@ -2079,7 +2135,29 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The ANOVA table (df, SS, MS, F, p), the variance components, EV, AV, GRR, PV, TV, %GRR and NDC equal an independent two-factor crossed ANOVA, with and without a significant interaction (the term pooled into the error).",
+            "reference_kind": "reference_implementation",
+            "reference": "statsmodels 0.15.0 (ols + anova_lm) and SciPy 1.17.1 (f.sf) for the table; AIAG MSA 4th ed., chap. III, expected-mean-square formulas for the components",
+            "method": "compares each table row and each reported quantity of two 5 x 3 x 3 studies with the reference's",
+            "tolerance": "1e-9 (relative); p-values 1e-8 (relative), the smallest 8e-41",
+            "test": "src/msa/mod.rs::statsmodels_reference::a_significant_interaction_keeps_its_own_row_and_tests_against_it"
+          },
+          {
+            "claim": "With the interaction pooled, the Part and Operator p-values far in the tail (8.2e-41, 4.9e-15) keep their digits.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.f.sf",
+            "method": "compares the p-values of a study whose parts differ by a factor of 1,000 in F with the reference's",
+            "tolerance": "1e-8 (relative)",
+            "test": "src/msa/mod.rs::statsmodels_reference::a_negligible_interaction_is_pooled_and_the_tail_p_values_survive"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The data are simulated, not a published study; the AIAG manual's own worked data are not compared."
+        ]
       },
       "performance": {
         "status": "none"

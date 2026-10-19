@@ -587,7 +587,7 @@ pub fn gage_rr_anova(input: &GageRRInput) -> Result<GageRRAnovaResult, &'static 
     // F statistics and p-values
     let (f_interaction, p_interaction) = if is_valid_denom(ms_error) && df_interaction > 0.0 {
         let f_val = ms_interaction / ms_error;
-        let p_val = 1.0 - special::f_distribution_cdf(f_val, df_interaction, df_error);
+        let p_val = special::f_distribution_sf(f_val, df_interaction, df_error);
         (Some(f_val), Some(p_val))
     } else {
         (None, None)
@@ -619,7 +619,7 @@ pub fn gage_rr_anova(input: &GageRRInput) -> Result<GageRRAnovaResult, &'static 
 
     let (f_part, p_part) = if is_valid_denom(denom_ms) {
         let f_val = ms_part / denom_ms;
-        let p_val = 1.0 - special::f_distribution_cdf(f_val, df_part, denom_df);
+        let p_val = special::f_distribution_sf(f_val, df_part, denom_df);
         (Some(f_val), Some(p_val))
     } else {
         (None, None)
@@ -627,7 +627,7 @@ pub fn gage_rr_anova(input: &GageRRInput) -> Result<GageRRAnovaResult, &'static 
 
     let (f_operator, p_operator) = if is_valid_denom(denom_ms) {
         let f_val = ms_operator / denom_ms;
-        let p_val = 1.0 - special::f_distribution_cdf(f_val, df_operator, denom_df);
+        let p_val = special::f_distribution_sf(f_val, df_operator, denom_df);
         (Some(f_val), Some(p_val))
     } else {
         (None, None)
@@ -1455,5 +1455,232 @@ mod tests {
             xr_pv_dominant, anova_pv_dominant,
             "X̄-R and ANOVA should agree on PV vs GRR dominance"
         );
+    }
+}
+
+/// The two-factor crossed ANOVA Gage R&R against the sums of squares, degrees
+/// of freedom and p-values recomputed in Python 3 with statsmodels 0.15.0
+/// (`ols("y ~ C(part) * C(op)")`, `anova_lm(typ=1)`) and SciPy 1.17.1
+/// (`f.sf`), and the AIAG expected-mean-square formulas applied to them:
+/// `s2_e = MSE`, `s2_po = (MS_po - MSE) / r`, `s2_o = (MS_o - MS_po) / (p r)`,
+/// `s2_p = (MS_p - MS_po) / (o r)`; with the interaction pooled into the error
+/// (p > 0.25) the pooled mean square replaces both `MSE` and `MS_po`.
+#[cfg(test)]
+mod statsmodels_reference {
+    use super::*;
+
+    fn close(got: f64, want: f64, rel: f64, what: &str) {
+        assert!(
+            (got - want).abs() <= rel * want.abs().max(1e-300),
+            "{what}: got {got:e}, reference {want:e}"
+        );
+    }
+
+    fn row<'a>(r: &'a GageRRAnovaResult, source: &str) -> &'a AnovaRow {
+        r.anova_table
+            .rows
+            .iter()
+            .find(|row| row.source == source)
+            .unwrap_or_else(|| panic!("no {source} row"))
+    }
+
+    /// Five parts, three operators, three trials; the operators differ part by part.
+    const WITH_INTERACTION: [[[f64; 3]; 3]; 5] = [
+        [
+            [9.175, 9.464, 9.278],
+            [10.431, 10.411, 10.349],
+            [9.97, 10.326, 10.414],
+        ],
+        [
+            [10.372, 10.076, 10.265],
+            [10.461, 10.492, 10.828],
+            [10.447, 10.587, 10.752],
+        ],
+        [
+            [9.525, 9.61, 9.65],
+            [9.866, 9.634, 9.868],
+            [8.981, 8.458, 8.891],
+        ],
+        [
+            [8.226, 8.089, 8.564],
+            [9.054, 8.701, 8.93],
+            [7.401, 7.263, 7.42],
+        ],
+        [
+            [8.85, 8.982, 9.121],
+            [8.368, 8.527, 8.407],
+            [8.219, 7.982, 8.092],
+        ],
+    ];
+
+    /// The same design with no interaction (p = 0.69): the term is pooled.
+    const NO_INTERACTION: [[[f64; 3]; 3]; 5] = [
+        [
+            [9.912, 9.796, 10.139],
+            [10.298, 10.073, 10.272],
+            [9.734, 9.604, 9.55],
+        ],
+        [
+            [12.726, 12.881, 12.678],
+            [12.936, 13.139, 13.199],
+            [12.415, 12.568, 12.657],
+        ],
+        [
+            [12.412, 12.303, 12.512],
+            [12.844, 12.997, 12.568],
+            [12.08, 12.049, 11.887],
+        ],
+        [
+            [9.002, 9.074, 8.846],
+            [9.579, 9.477, 9.442],
+            [8.802, 8.901, 8.49],
+        ],
+        [
+            [9.515, 9.513, 9.086],
+            [9.817, 9.709, 9.895],
+            [9.075, 9.151, 9.216],
+        ],
+    ];
+
+    fn study(data: &[[[f64; 3]; 3]; 5]) -> GageRRAnovaResult {
+        let measurements = data
+            .iter()
+            .map(|part| part.iter().map(|trials| trials.to_vec()).collect())
+            .collect();
+        gage_rr_anova(&GageRRInput {
+            measurements,
+            tolerance: None,
+        })
+        .expect("a valid balanced study")
+    }
+
+    #[test]
+    fn a_significant_interaction_keeps_its_own_row_and_tests_against_it() {
+        let r = study(&WITH_INTERACTION);
+        assert!(r.interaction_significant && !r.interaction_pooled);
+        for (source, df, ss, f, p) in [
+            (
+                "Part",
+                4.0,
+                33.57309724444448,
+                Some(11.06391548380456),
+                Some(0.0024102170377080408),
+            ),
+            (
+                "Operator",
+                2.0,
+                2.786838044444448,
+                Some(1.8367885671249295),
+                Some(0.22056881947791407),
+            ),
+            (
+                "Part×Operator",
+                8.0,
+                6.068935955555522,
+                Some(28.125305658219634),
+                Some(6.579056051488694e-12),
+            ),
+            ("Repeatability", 30.0, 0.809182666666665, None, None),
+        ] {
+            let row = row(&r, source);
+            assert_eq!(row.df, df, "{source} df");
+            close(row.ss, ss, 1e-9, &format!("{source} SS"));
+            close(row.ms, ss / df, 1e-9, &format!("{source} MS"));
+            assert_eq!(row.f_value.is_some(), f.is_some(), "{source} F present");
+            if let (Some(got), Some(want)) = (row.f_value, f) {
+                close(got, want, 1e-9, &format!("{source} F"));
+            }
+            if let (Some(got), Some(want)) = (row.p_value, p) {
+                close(got, want, 1e-8, &format!("{source} p"));
+            }
+        }
+        let c = &r.variance_components;
+        close(c.part, 0.848295257407409, 1e-9, "sigma2 part");
+        close(c.operator, 0.04232013518518559, 1e-9, "sigma2 operator");
+        close(
+            c.interaction,
+            0.2438814129629616,
+            1e-9,
+            "sigma2 interaction",
+        );
+        close(
+            c.repeatability,
+            0.026972755555555502,
+            1e-9,
+            "sigma2 repeatability",
+        );
+        close(
+            c.reproducibility,
+            0.2862015481481472,
+            1e-9,
+            "sigma2 reproducibility",
+        );
+        close(c.total, 1.1614695611111117, 1e-9, "sigma2 total");
+        close(r.ev, 0.16423384412341904, 1e-9, "EV");
+        close(r.av, 0.5349780819324724, 1e-9, "AV");
+        close(r.grr, 0.5596197849466213, 1e-9, "GRR");
+        close(r.pv, 0.9210294552333324, 1e-9, "PV");
+        close(r.tv, 1.0777149721104888, 1e-9, "TV");
+        close(r.percent_grr, 51.926511130370415, 1e-9, "%GRR");
+        assert_eq!(r.ndc, 2);
+    }
+
+    #[test]
+    fn a_negligible_interaction_is_pooled_and_the_tail_p_values_survive() {
+        let r = study(&NO_INTERACTION);
+        assert!(!r.interaction_significant && r.interaction_pooled);
+        assert!(r
+            .anova_table
+            .rows
+            .iter()
+            .all(|row| row.source != "Part×Operator"));
+        let part = row(&r, "Part");
+        close(part.f_value.expect("F"), 1422.410771043164, 1e-9, "Part F");
+        // statsmodels / SciPy f.sf: 8.18e-41 -- 1 - cdf cannot represent it.
+        close(
+            part.p_value.expect("p"),
+            8.177666854037245e-41,
+            1e-8,
+            "Part p",
+        );
+        let operator = row(&r, "Operator");
+        close(
+            operator.f_value.expect("F"),
+            88.62224500212629,
+            1e-9,
+            "Operator F",
+        );
+        close(
+            operator.p_value.expect("p"),
+            4.8998131777748826e-15,
+            1e-8,
+            "Operator p",
+        );
+        let error = row(&r, "Repeatability");
+        assert_eq!(error.df, 38.0);
+        close(
+            error.ss,
+            0.11419240000000108 + 0.6162759999999995,
+            1e-9,
+            "pooled SS",
+        );
+        let c = &r.variance_components;
+        close(c.part, 3.0359521978557518, 1e-9, "sigma2 part");
+        close(c.operator, 0.11228996686159866, 1e-9, "sigma2 operator");
+        assert_eq!(c.interaction, 0.0);
+        close(
+            c.repeatability,
+            0.01922285263157896,
+            1e-9,
+            "sigma2 repeatability",
+        );
+        close(c.total, 3.1674650173489294, 1e-9, "sigma2 total");
+        close(r.ev, 0.1386465024137968, 1e-9, "EV");
+        close(r.av, 0.3350969514358474, 1e-9, "AV");
+        close(r.grr, 0.3626469626140244, 1e-9, "GRR");
+        close(r.pv, 1.7423984038834952, 1e-9, "PV");
+        close(r.tv, 1.7797373450453102, 1e-9, "TV");
+        close(r.percent_grr, 20.37643159107794, 1e-9, "%GRR");
+        assert_eq!(r.ndc, 6);
     }
 }
