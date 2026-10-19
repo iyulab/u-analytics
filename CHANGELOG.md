@@ -10,6 +10,11 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Fixed
 
+- `Pelt::detect` and `detect_multi` give the same changepoints for a series
+  at any level. Their segment costs came from cumulative sums about zero, and
+  a series far from zero (a Unix timestamp in seconds, near 1.7e9, with a
+  mean shift of 5) lost its variation to rounding and was split at 20
+  points instead of 3; the sums are now taken about the series' mean.
 - P-values far in the upper tail keep their digits: the t, F and chi-squared
   tests, the regression and correlation tests and the Gage R&R ANOVA took
   `1 - cdf`, which has nothing left below about 1e-16 (an ANOVA with F =

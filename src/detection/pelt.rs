@@ -228,12 +228,7 @@ impl Pelt {
         // Precompute cumulative sums for O(1) segment cost evaluation.
         // cum_sum[i] = sum(data[0..i])
         // cum_sum_sq[i] = sum(data[0..i]^2)
-        let mut cum_sum = vec![0.0_f64; n + 1];
-        let mut cum_sum_sq = vec![0.0_f64; n + 1];
-        for i in 0..n {
-            cum_sum[i + 1] = cum_sum[i] + data[i];
-            cum_sum_sq[i + 1] = cum_sum_sq[i] + data[i] * data[i];
-        }
+        let (cum_sum, cum_sum_sq) = cumulative_sums(data);
 
         // F[t] = optimal cost for data[0..t]
         // F[0] = -penalty (so that the first segment cost + penalty = cost alone)
@@ -365,12 +360,7 @@ impl Pelt {
         let mut cum_sum_sqs: Vec<Vec<f64>> = Vec::with_capacity(n_channels);
 
         for signal in signals {
-            let mut cs = vec![0.0_f64; n + 1];
-            let mut css = vec![0.0_f64; n + 1];
-            for i in 0..n {
-                cs[i + 1] = cs[i] + signal[i];
-                css[i + 1] = css[i] + signal[i] * signal[i];
-            }
+            let (cs, css) = cumulative_sums(signal);
             cum_sums.push(cs);
             cum_sum_sqs.push(css);
         }
@@ -472,6 +462,27 @@ impl Pelt {
             }
         }
     }
+}
+
+/// The cumulative sums of `signal` and of its squares, taken about the
+/// signal's mean.
+///
+/// A segment's cost is `sum(y^2) - n * mean^2` (a difference of two sums),
+/// which is unchanged by shifting the signal. Taken about zero, a series that
+/// sits far from it (a Unix timestamp in seconds, an instrument with a large
+/// offset) loses the variance in that subtraction and is split at nearly every
+/// point; about its own mean the two terms are the size of the variation.
+fn cumulative_sums(signal: &[f64]) -> (Vec<f64>, Vec<f64>) {
+    let n = signal.len();
+    let center = signal.iter().sum::<f64>() / n as f64;
+    let mut cum_sum = vec![0.0_f64; n + 1];
+    let mut cum_sum_sq = vec![0.0_f64; n + 1];
+    for (i, &y) in signal.iter().enumerate() {
+        let y = y - center;
+        cum_sum[i + 1] = cum_sum[i] + y;
+        cum_sum_sq[i + 1] = cum_sum_sq[i] + y * y;
+    }
+    (cum_sum, cum_sum_sq)
 }
 
 #[cfg(test)]
@@ -924,5 +935,229 @@ mod tests {
         let b = [3.0, 4.0];
         let result = pelt.detect_multi(&[&a, &b]).expect("valid");
         assert!(result.changepoints.is_empty());
+    }
+}
+
+/// PELT against the optimum of its own objective -- the exact dynamic program
+/// `F(t) = min over tau of F(tau) + C(tau, t) + beta` over every allowed last
+/// changepoint, with segment costs from a two-pass mean and sum of squares --
+/// written in Python 3 with NumPy 2.4.6. PELT's pruning must not change the
+/// answer (Killick et al. 2012, Theorem 3.1).
+#[cfg(test)]
+mod exact_dp_reference {
+    use super::*;
+
+    /// L2 BIC two mean shifts.
+    const CASE_0: [f64; 60] = [
+        1.02, -1.278, 0.209, -0.284, -0.226, -0.108, -1.01, -0.116, -0.433, 1.661, 0.113, -0.176,
+        -0.141, -0.334, -0.528, -0.195, 0.241, -0.119, 0.479, -0.1, 3.012, 3.773, 3.273, 2.747,
+        2.909, 3.27, 3.968, 2.865, 2.878, 3.501, 2.557, 2.854, 3.441, 3.29, 3.046, 3.335, 1.586,
+        3.511, 2.52, 2.166, 3.138, 3.35, 2.778, 2.462, 3.013, 0.474, 1.203, 0.874, 0.597, 1.056,
+        0.397, 0.037, 0.792, 0.791, 0.393, 0.109, 0.615, -0.747, 0.845, 0.746,
+    ];
+
+    /// Normal BIC variance + mean shift, min seg 5.
+    const CASE_1: [f64; 80] = [
+        -0.656, 0.025, -0.386, 0.303, -0.814, -0.366, 0.284, 0.463, -0.863, -0.199, 0.131, -0.244,
+        0.636, -0.476, 0.142, -0.419, 0.562, -0.009, -0.149, -0.687, 0.673, 0.301, 0.301, 0.455,
+        0.14, -0.256, -0.32, -0.32, 0.548, -0.584, -0.239, -0.128, 0.09, 0.23, -0.5, -0.692,
+        -0.002, 0.485, 0.303, 0.086, 0.366, 1.586, 0.513, 2.634, -0.589, 1.268, 0.778, 2.087,
+        1.449, 6.1, 3.997, 3.993, -3.079, 0.319, -0.217, 2.065, -3.558, 3.349, 3.134, -1.604,
+        -0.957, -0.602, 1.087, 2.282, 5.096, 0.605, 2.535, 1.311, 4.52, 2.484, 3.737, -1.155,
+        0.616, -0.628, 4.01, 2.315, 0.39, 0.095, 1.969, -0.403,
+    ];
+
+    /// L2 custom penalty 5, min seg 5.
+    const CASE_2: [f64; 50] = [
+        -0.931, 0.481, 2.463, -0.246, -0.556, -1.171, -1.335, 0.525, 0.851, 0.009, 0.333, 0.116,
+        0.139, -1.526, -0.458, 0.111, -0.783, -0.476, -0.819, -0.333, 0.853, -0.407, -0.154, 0.814,
+        0.645, 2.895, -0.89, 2.057, 0.718, 1.335, 2.038, 2.283, 2.239, 1.355, 2.81, 0.917, 1.059,
+        1.999, 0.649, 3.361, 2.219, 3.376, 1.173, 0.817, 1.367, 1.935, 0.613, 1.58, 1.183, 2.816,
+    ];
+
+    /// L2 BIC large offset 1e7.
+    const CASE_3: [f64; 60] = [
+        9999999.337,
+        10000001.046,
+        9999999.356,
+        9999999.039,
+        9999999.29,
+        9999998.81,
+        10000000.146,
+        10000001.031,
+        10000000.164,
+        10000000.624,
+        10000001.632,
+        10000000.27,
+        10000000.195,
+        9999999.725,
+        9999998.392,
+        10000000.76,
+        9999998.244,
+        10000000.653,
+        9999999.986,
+        10000001.127,
+        9999999.932,
+        9999999.177,
+        10000000.358,
+        9999999.44,
+        9999999.819,
+        10000000.042,
+        9999999.865,
+        9999999.811,
+        9999999.168,
+        9999999.811,
+        10000001.862,
+        10000003.843,
+        10000002.802,
+        10000005.12,
+        10000005.27,
+        10000002.049,
+        10000004.145,
+        10000003.874,
+        10000002.953,
+        10000004.532,
+        10000003.538,
+        10000002.232,
+        10000003.733,
+        10000003.852,
+        10000004.106,
+        10000002.769,
+        10000004.616,
+        10000004.735,
+        10000002.854,
+        10000003.341,
+        10000003.92,
+        10000003.434,
+        10000005.744,
+        10000004.208,
+        10000002.989,
+        10000003.212,
+        10000003.943,
+        10000006.296,
+        10000003.822,
+        10000004.127,
+    ];
+
+    fn detect(cost: CostFunction, penalty: Penalty, min_len: usize, data: &[f64]) -> Vec<usize> {
+        Pelt::with_min_segment_len(cost, penalty, min_len)
+            .expect("valid settings")
+            .detect(data)
+            .changepoints
+    }
+
+    /// A mean shift at 40 on a level of 1.7e9 (a Unix timestamp in seconds).
+    const LARGE_LEVEL: [f64; 80] = [
+        1699999999.198,
+        1699999998.676,
+        1699999999.752,
+        1700000000.42,
+        1700000001.136,
+        1700000000.11,
+        1699999999.447,
+        1699999999.215,
+        1700000000.749,
+        1700000001.635,
+        1700000000.273,
+        1699999998.767,
+        1699999999.042,
+        1700000001.6,
+        1700000000.203,
+        1699999998.268,
+        1699999999.916,
+        1699999998.837,
+        1699999999.371,
+        1699999999.512,
+        1699999999.287,
+        1700000000.553,
+        1699999999.937,
+        1699999999.411,
+        1700000000.41,
+        1700000000.83,
+        1699999998.357,
+        1699999999.743,
+        1699999999.019,
+        1699999999.827,
+        1699999998.711,
+        1700000000.021,
+        1699999999.962,
+        1699999999.696,
+        1699999998.952,
+        1699999999.604,
+        1699999998.909,
+        1699999998.645,
+        1700000000.225,
+        1699999998.891,
+        1700000006.17,
+        1700000005.717,
+        1700000003.002,
+        1700000005.272,
+        1700000003.898,
+        1700000005.033,
+        1700000005.044,
+        1700000003.012,
+        1700000004.767,
+        1700000004.744,
+        1700000005.962,
+        1700000003.819,
+        1700000005.738,
+        1700000003.901,
+        1700000004.669,
+        1700000004.16,
+        1700000006.449,
+        1700000005.568,
+        1700000007.432,
+        1700000005.642,
+        1700000005.845,
+        1700000005.841,
+        1700000004.393,
+        1700000004.93,
+        1700000006.35,
+        1700000004.603,
+        1700000005.189,
+        1700000004.979,
+        1700000005.609,
+        1700000004.635,
+        1700000004.848,
+        1700000005.242,
+        1700000005.103,
+        1700000004.135,
+        1700000005.896,
+        1700000003.702,
+        1700000003.799,
+        1700000003.718,
+        1700000005.967,
+        1700000004.639,
+    ];
+
+    #[test]
+    fn a_large_level_does_not_move_the_optimum() {
+        // The same series minus 1.7e9: the segment costs are shift-invariant,
+        // so the changepoints must be the same, [40, 56, 62] by the dynamic program.
+        assert_eq!(
+            detect(CostFunction::L2, Penalty::Bic, 2, &LARGE_LEVEL),
+            vec![40, 56, 62]
+        );
+    }
+
+    #[test]
+    fn pruned_search_returns_the_exact_optimum() {
+        // L2 BIC two mean shifts
+        assert_eq!(
+            detect(CostFunction::L2, Penalty::Bic, 2, &CASE_0),
+            vec![20, 45]
+        );
+        // Normal BIC variance + mean shift, min seg 5
+        assert_eq!(
+            detect(CostFunction::Normal, Penalty::Bic, 5, &CASE_1),
+            vec![41]
+        );
+        // L2 custom penalty 5, min seg 5
+        assert_eq!(
+            detect(CostFunction::L2, Penalty::Custom(5.0), 5, &CASE_2),
+            vec![25]
+        );
+        // L2 BIC large offset 1e7
+        assert_eq!(detect(CostFunction::L2, Penalty::Bic, 2, &CASE_3), vec![31]);
     }
 }

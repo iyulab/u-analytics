@@ -2017,7 +2017,29 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The changepoints are those of the exact optimum of its penalized objective (every last changepoint tried, no pruning): L2 with the BIC penalty and a custom one, the Normal cost, and a minimum segment length above 2.",
+            "reference_kind": "reference_implementation",
+            "reference": "An exact dynamic program of the objective of Killick, Fearnhead and Eckley (2012), written in Python 3 with NumPy 2.4.6 (two-pass segment costs)",
+            "method": "compares the changepoint indices of four series of 50 to 80 points with the reference's",
+            "tolerance": "exact (indices)",
+            "test": "src/detection/pelt.rs::exact_dp_reference::pruned_search_returns_the_exact_optimum"
+          },
+          {
+            "claim": "A series far from zero (a level of 1.7e9) has the changepoints of the same series about zero.",
+            "reference_kind": "reference_implementation",
+            "reference": "The same exact dynamic program, on the series about zero and about 1.7e9",
+            "method": "compares the changepoint indices with the reference's",
+            "tolerance": "exact (indices)",
+            "test": "src/detection/pelt.rs::exact_dp_reference::a_large_level_does_not_move_the_optimum"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The reference is the cited objective solved exactly, not a published worked example; the multi-signal form (`detect_changepoints_multi`) is a separate operation and is not compared."
+        ]
       },
       "performance": {
         "status": "none"
