@@ -2214,7 +2214,29 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "With a log-normal fit, the 0.135 %, 50 % and 99.865 % quantiles and Cp*, Cpk*, Cpu* and Cpl* equal the reference's.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.lognorm.fit(floc=0) and ppf at norm.cdf(-3), 0.5, norm.cdf(3); ISO 22514-2 ratios",
+            "method": "compares the three quantiles and four ratios of one right-skewed sample of 40 with the reference's",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/capability/percentile.rs::scipy_reference::log_normal_percentile_capability_reproduces_scipy"
+          },
+          {
+            "claim": "With a Weibull fit, the same quantities equal those of the exact maximum-likelihood fit.",
+            "reference_kind": "reference_implementation",
+            "reference": "scipy.optimize.brentq on the shape's likelihood equation (to 1e-15), the scale from it, scipy.stats.weibull_min.ppf; SciPy's own weibull_min.fit stops short of the optimum (shape 2.413418 against 2.413394) and is not the reference",
+            "method": "compares the three quantiles and four ratios of the same sample with the reference's",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/capability/percentile.rs::scipy_reference::weibull_percentile_capability_reproduces_scipy"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "The quantiles are taken at the exact plus and minus 3-sigma tail probabilities (0.0013499 and 0.9986501), not at the rounded 0.135 % and 99.865 % of the standard's text; normal, gamma, exponential, beta and Auto are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -2347,7 +2369,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The estimated lambda, the transformed mean and standard deviation, and Pp, Ppk, Ppu and Ppl of a right-skewed sample of 40 with both limits equal SciPy's.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1: scipy.stats.boxcox_llf maximized on (-5, 5) with scipy.optimize.minimize_scalar (bounded, xatol 1e-12); scipy.special.boxcox for the data and the limits",
+            "method": "compares lambda and the five indices with the reference's, the indices taken from the sample standard deviation of the transformed data",
+            "tolerance": "1e-6 (relative)",
+            "test": "src/capability/nonnormal.rs::scipy_reference::boxcox_capability_reproduces_scipy"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases that test lists; other data are not compared.",
+          "One sample and one pair of limits; a limit below the data's range and the sample-size dependence of the estimate are not compared."
+        ]
       },
       "performance": {
         "status": "none"

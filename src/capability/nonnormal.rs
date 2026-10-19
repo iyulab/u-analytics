@@ -469,3 +469,41 @@ mod tests {
         assert!(result.lambda >= R.0 && result.lambda <= R.1);
     }
 }
+
+/// Against SciPy 1.17.1: the λ that maximizes `scipy.stats.boxcox_llf` on
+/// (-5, 5) (`scipy.optimize.minimize_scalar`, bounded, xatol 1e-12), the data
+/// and limits through `scipy.special.boxcox`, and Pp / Ppk from the sample
+/// standard deviation (ddof = 1) of the transformed data.
+#[cfg(test)]
+mod scipy_reference {
+    use super::*;
+
+    const DATA: [f64; 40] = [
+        3.195, 5.365, 1.217, 5.806, 2.661, 1.896, 1.894, 1.67, 2.458, 3.956, 3.535, 3.623, 1.268,
+        1.341, 5.47, 4.204, 7.26, 4.685, 1.714, 4.847, 3.607, 2.994, 1.88, 2.722, 2.544, 4.062,
+        2.875, 5.546, 1.918, 3.36, 3.402, 1.842, 1.597, 4.289, 3.431, 2.527, 3.246, 2.006, 3.026,
+        2.07,
+    ];
+
+    fn close(got: f64, want: f64, rel: f64, what: &str) {
+        assert!(
+            (got - want).abs() <= rel * want.abs().max(1.0),
+            "{what}: got {got}, SciPy {want}"
+        );
+    }
+
+    #[test]
+    fn boxcox_capability_reproduces_scipy() {
+        let r =
+            boxcox_capability(&DATA, Some(9.0), Some(0.9), DEFAULT_LAMBDA_RANGE).expect("valid");
+        assert!(!r.lambda_at_bound);
+        close(r.lambda, 0.06064666099396333, 1e-6, "lambda");
+        let i = r.indices.expect("limits given");
+        close(i.mean, 1.09883162618517, 1e-6, "transformed mean");
+        close(i.std_dev_overall, 0.482031954980488, 1e-6, "transformed s");
+        close(i.pp.expect("both limits"), 0.8489648625096261, 1e-6, "Pp");
+        close(i.ppk.expect("limits"), 0.8324871624763606, 1e-6, "Ppk");
+        close(i.ppu.expect("USL"), 0.8654425625428914, 1e-6, "Ppu");
+        close(i.ppl.expect("LSL"), 0.8324871624763606, 1e-6, "Ppl");
+    }
+}

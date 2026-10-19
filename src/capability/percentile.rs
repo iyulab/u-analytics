@@ -489,3 +489,79 @@ mod tests {
         );
     }
 }
+
+/// Against SciPy 1.17.1: the family fitted by maximum likelihood
+/// (`lognorm.fit(x, floc=0)`; the Weibull's from its likelihood equation), its
+/// `ppf` at `norm.cdf(-3)`, 0.5 and `norm.cdf(3)` -- the equivalents of
+/// ±3 sigma that ISO 22514-2 rounds to 0.135 % and 99.865 %, which this
+/// function takes exactly -- and the ISO 22514-2 ratios taken from them.
+#[cfg(test)]
+mod scipy_reference {
+    use super::*;
+
+    const DATA: [f64; 40] = [
+        3.195, 5.365, 1.217, 5.806, 2.661, 1.896, 1.894, 1.67, 2.458, 3.956, 3.535, 3.623, 1.268,
+        1.341, 5.47, 4.204, 7.26, 4.685, 1.714, 4.847, 3.607, 2.994, 1.88, 2.722, 2.544, 4.062,
+        2.875, 5.546, 1.918, 3.36, 3.402, 1.842, 1.597, 4.289, 3.431, 2.527, 3.246, 2.006, 3.026,
+        2.07,
+    ];
+
+    fn close(got: f64, want: f64, rel: f64, what: &str) {
+        assert!(
+            (got - want).abs() <= rel * want.abs(),
+            "{what}: got {got}, SciPy {want}"
+        );
+    }
+
+    fn check(model: CapabilityModel, rel: f64, want: [f64; 7]) {
+        let r = percentile_capability(&DATA, Some(0.9), Some(9.0), model).expect("valid");
+        assert_eq!(r.model, model);
+        let [lo, med, hi, cp, cpk, cpu, cpl] = want;
+        close(r.percentile_lower, lo, rel, "X0.135");
+        close(r.median, med, rel, "X50");
+        close(r.percentile_upper, hi, rel, "X99.865");
+        close(r.cp_star.expect("both limits"), cp, rel, "Cp*");
+        close(r.cpk_star.expect("limits"), cpk, rel, "Cpk*");
+        close(r.cpu_star.expect("USL"), cpu, rel, "Cpu*");
+        close(r.cpl_star.expect("LSL"), cpl, rel, "Cpl*");
+    }
+
+    #[test]
+    fn log_normal_percentile_capability_reproduces_scipy() {
+        // The log-normal MLE is closed form: tight.
+        check(
+            CapabilityModel::LogNormal,
+            1e-9,
+            [
+                0.7542968892328896,
+                2.8798090991738787,
+                10.994743006455773,
+                0.7909811650077455,
+                0.754188631817962,
+                0.754188631817962,
+                0.9314503534321473,
+            ],
+        );
+    }
+
+    #[test]
+    fn weibull_percentile_capability_reproduces_scipy() {
+        // The exact MLE: the shape's likelihood equation solved to 1e-15
+        // (`scipy.optimize.brentq`), the scale from it. `weibull_min.fit` stops
+        // short of it -- its shape is 2.413418 against 2.413394 -- so its
+        // quantiles are not the reference.
+        check(
+            CapabilityModel::Weibull,
+            1e-9,
+            [
+                0.23258289429884546,
+                3.0872615285886305,
+                7.858145308508201,
+                1.0622167336676158,
+                0.7662023676906101,
+                1.2393381906090049,
+                0.7662023676906101,
+            ],
+        );
+    }
+}
