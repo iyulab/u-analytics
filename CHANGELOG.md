@@ -10,6 +10,16 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Fixed
 
+- The spectral residual scores (`SpectralResidual::analyze`) extend the series
+  as the published method does: the estimated next point is the value `m`
+  places before it plus `m` times the average gradient (Ren et al. 2019,
+  equation 9), `x[n-m]` in zero-based indexing. The base was taken one place
+  too far back, so the appended points sat near the last value instead of one
+  step on, which moved the saliency, and with it the scores, near both ends of
+  a series (the extension is circular). Saliency and scores now agree with a
+  NumPy implementation of the equations to a relative 1e-8; the flags in the
+  body of a series are unchanged in the cases checked, those within five
+  places of an end can differ.
 - `Pelt::detect` and `detect_multi` give the same changepoints for a series
   at any level. Their segment costs came from cumulative sums about zero, and
   a series far from zero (a Unix timestamp in seconds, near 1.7e9, with a

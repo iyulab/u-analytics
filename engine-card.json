@@ -2485,7 +2485,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The periodogram (linear detrend, zero padding to the power of two at least four times the length, |FFT|^2 / n) equals NumPy's, and the dominant period is the period the series was generated with, or none for white noise.",
+            "reference_kind": "reference_implementation",
+            "reference": "NumPy 2.4.6 (numpy.fft.rfft, least-squares detrend) for the periodogram; series generated from a sine of known period with a seeded generator for the period",
+            "method": "compares every ordinate of the periodogram of a 30-point series with NumPy's, and the estimated period of four generated series (periods 12, 7 not dividing the length 100, 24 on a trend, and noise) with the generating one",
+            "tolerance": "1e-9 of the largest ordinate (periodogram); exact (period)",
+            "test": "src/seasonality.rs::numpy_reference::the_dominant_period_is_the_one_the_series_was_made_with"
+          }
+        ],
+        "limits": [
+          "The permutation threshold and the autocorrelation refinement are not compared with a second implementation (the permutations are seeded, so the threshold is deterministic but specific to this crate's generator); series with several periods are covered by unit tests only."
+        ]
       },
       "performance": {
         "status": "none"
@@ -2520,7 +2533,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The saliency map and the scores equal those of the published method: the series extended by five copies of x[n-m] + m times the average gradient of the last m points (m = 5), the log amplitude spectrum less its trailing average over q bins, the original phase, the inverse transform; and the flagged points are those whose score exceeds the threshold and that clear the z-score gate.",
+            "reference_kind": "literature",
+            "reference": "Ren et al. (2019), 'Time-Series Anomaly Detection Service at Microsoft', KDD, section 4.1, equations 7 to 9, restated in Python 3 with NumPy 2.4.6",
+            "method": "compares the saliency and score of each of 64 points, and the flagged indices, of a noisy sine with one spike",
+            "tolerance": "1e-8 (relative)",
+            "test": "src/detection/spectral_residual.rs::numpy_reference::saliency_and_scores_reproduce_the_published_method"
+          }
+        ],
+        "limits": [
+          "One series, default settings (q = 3, z = 40, threshold 3, z-score gate 1.5); batching, the expected value and its band are not compared.",
+          "The reference restates the paper's equations, not Microsoft's code, whose extension leaves out the last point of the series; the two give different saliency near the ends."
+        ]
       },
       "performance": {
         "status": "none"
