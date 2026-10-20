@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-10-20
+
+Depends on u-numflow 0.15.
+
 ### Fixed
 
 - The spectral residual scores (`SpectralResidual::analyze`) extend the series
