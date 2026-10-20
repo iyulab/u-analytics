@@ -1421,7 +1421,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Every pair of readings is classified (normal, wrap at the modulus, declared replacement, unexplained fall) and its increase equals the consumption that produced the readings, including a wrap refused because the counter cannot advance that fast.",
+            "reference_kind": "dataset",
+            "reference": "A generated meter: a 400-count register read hourly for three days (a 3 h gap included), the consumption of each hour drawn first (seeded NumPy generator) and the readings derived from it",
+            "method": "compares the kind and the increase of all 70 pairs with the consumption the generator drew (exact in counts)",
+            "tolerance": "exact",
+            "test": "src/counter.rs::generated_meter::every_pair_is_classified_and_counted_as_the_process_made_it"
+          }
+        ],
+        "limits": [
+          "One generated register with three wraps, one declared replacement and one undeclared reset; other moduli, replacement without the old register's last reading, and readings at non-integer times are covered by unit tests, not by the generator."
+        ]
       },
       "performance": {
         "status": "none"
@@ -1456,7 +1469,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The increments are summed over the half-open intervals between the edges by the time of the later reading, with the number of pairs and of unexplained pairs in each; a pair ending at the last edge belongs to no interval.",
+            "reference_kind": "dataset",
+            "reference": "The same generated meter, totals summed from the consumption the generator drew over three daily intervals",
+            "method": "compares start, end, increase, pairs and unexplained of the three days with the sums of the drawn consumption",
+            "tolerance": "exact",
+            "test": "src/counter.rs::generated_meter::daily_totals_sum_the_pairs_ending_in_each_day"
+          }
+        ],
+        "limits": [
+          "Daily intervals over hourly readings only; intervals narrower than the reading spacing are covered by unit tests."
+        ]
       },
       "performance": {
         "status": "none"
@@ -2102,7 +2128,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The changepoints are those of the exact optimum of the multi-channel penalized objective (every last changepoint tried, no pruning), whose segment cost is the sum over channels and whose penalty is the single-channel penalty times the number of channels: L2 with the BIC penalty and a custom one, the Normal cost, a minimum segment length above 2, and a channel far from zero.",
+            "reference_kind": "reference_implementation",
+            "reference": "An exact dynamic program of the objective of Killick, Fearnhead and Eckley (2012) summed over channels, written in Python 3 with NumPy 2.4.6 (two-pass segment costs)",
+            "method": "compares the changepoint indices of four sets of two or three channels of 60 points with the reference's",
+            "tolerance": "exact (indices)",
+            "test": "src/detection/pelt.rs::exact_dp_reference_multi::the_pruned_multi_channel_search_returns_the_exact_optimum"
+          }
+        ],
+        "limits": [
+          "Four generated cases; the penalty scaling by the number of channels is this crate's documented convention, which the reference restates rather than derives."
+        ]
       },
       "performance": {
         "status": "none"

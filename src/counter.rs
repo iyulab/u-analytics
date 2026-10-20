@@ -664,3 +664,223 @@ mod tests {
         assert!(counter_totals(&s, &[10.0, 5.0]).is_err());
     }
 }
+
+/// The counter functions against the process that makes the readings: a
+/// 400-count register read hourly for three days (a 3 h gap included), with
+/// the consumption of every hour drawn first and the readings derived from it,
+/// so the increase of each pair is known exactly. The register wraps three
+/// times, the meter is replaced once (declared, with the old register's last
+/// reading), and the register drops to 5 once with nothing declared -- a fall
+/// that the modulus would explain as a wrap only if the counter could advance
+/// 45.0 counts in an hour. Generated with a seeded NumPy generator.
+#[cfg(test)]
+mod generated_meter {
+    use super::*;
+
+    const TIMES: [f64; 71] = [
+        0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
+        17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0,
+        32.0, 33.0, 34.0, 35.0, 36.0, 37.0, 38.0, 39.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0, 48.0,
+        49.0, 50.0, 51.0, 52.0, 53.0, 54.0, 55.0, 56.0, 57.0, 58.0, 59.0, 60.0, 61.0, 62.0, 63.0,
+        64.0, 65.0, 66.0, 67.0, 68.0, 69.0, 70.0, 71.0, 72.0,
+    ];
+    const VALUES: [f64; 71] = [
+        380.0, 382.0, 391.0, 23.0, 48.0, 65.0, 77.0, 108.0, 142.0, 149.0, 174.0, 183.0, 217.0,
+        250.0, 282.0, 320.0, 348.0, 363.0, 380.0, 9.0, 45.0, 56.0, 68.0, 100.0, 127.0, 144.0,
+        159.0, 178.0, 210.0, 230.0, 267.0, 17.0, 30.0, 35.0, 62.0, 78.0, 109.0, 114.0, 114.0,
+        148.0, 219.0, 239.0, 267.0, 279.0, 298.0, 310.0, 320.0, 353.0, 393.0, 15.0, 54.0, 5.0,
+        11.0, 40.0, 46.0, 58.0, 64.0, 79.0, 88.0, 90.0, 93.0, 132.0, 140.0, 148.0, 182.0, 211.0,
+        234.0, 247.0, 286.0, 300.0, 303.0,
+    ];
+    /// The consumption of each pair; `NAN` where the register was reset without a word.
+    const CONSUMED: [f64; 70] = [
+        2.0,
+        9.0,
+        32.0,
+        25.0,
+        17.0,
+        12.0,
+        31.0,
+        34.0,
+        7.0,
+        25.0,
+        9.0,
+        34.0,
+        33.0,
+        32.0,
+        38.0,
+        28.0,
+        15.0,
+        17.0,
+        29.0,
+        36.0,
+        11.0,
+        12.0,
+        32.0,
+        27.0,
+        17.0,
+        15.0,
+        19.0,
+        32.0,
+        20.0,
+        37.0,
+        15.0,
+        13.0,
+        5.0,
+        27.0,
+        16.0,
+        31.0,
+        5.0,
+        0.0,
+        34.0,
+        71.0,
+        20.0,
+        28.0,
+        12.0,
+        19.0,
+        12.0,
+        10.0,
+        33.0,
+        40.0,
+        22.0,
+        39.0,
+        f64::NAN,
+        6.0,
+        29.0,
+        6.0,
+        12.0,
+        6.0,
+        15.0,
+        9.0,
+        2.0,
+        3.0,
+        39.0,
+        8.0,
+        8.0,
+        34.0,
+        29.0,
+        23.0,
+        13.0,
+        39.0,
+        14.0,
+        3.0,
+    ];
+    const KINDS: [IncrementKind; 70] = [
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Wrap,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Wrap,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Declared,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Wrap,
+        IncrementKind::Normal,
+        IncrementKind::Unexplained,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+        IncrementKind::Normal,
+    ];
+
+    fn options() -> CounterOptions {
+        CounterOptions {
+            modulus: Some(400.0),
+            max_rate: Some(45.0),
+            discontinuities: vec![Discontinuity {
+                time: 30.5,
+                start: 7.0,
+                last: Some(272.0),
+            }],
+        }
+    }
+
+    #[test]
+    fn every_pair_is_classified_and_counted_as_the_process_made_it() {
+        let steps = counter_increments(&TIMES, &VALUES, &options()).expect("valid readings");
+        assert_eq!(steps.len(), CONSUMED.len());
+        for (i, step) in steps.iter().enumerate() {
+            assert_eq!(step.kind, KINDS[i], "pair {i}");
+            if CONSUMED[i].is_nan() {
+                assert_eq!(step.increase, None, "pair {i}");
+            } else {
+                assert_eq!(step.increase, Some(CONSUMED[i]), "pair {i}");
+            }
+        }
+    }
+
+    #[test]
+    fn daily_totals_sum_the_pairs_ending_in_each_day() {
+        let steps = counter_increments(&TIMES, &VALUES, &options()).expect("valid readings");
+        // The pair ending at 24 belongs to the second day, the one ending at 72
+        // (the last edge) to none.
+        let totals = counter_totals(&steps, &[0.0, 24.0, 48.0, 72.0]).expect("valid edges");
+        let want: [(f64, f64, f64, usize, usize); 3] = [
+            (0.0, 24.0, 520.0, 23, 0),
+            (24.0, 48.0, 475.0, 22, 0),
+            (48.0, 72.0, 439.0, 24, 1),
+        ];
+        assert_eq!(totals.len(), want.len());
+        for (t, (start, end, increase, pairs, unexplained)) in totals.iter().zip(want) {
+            assert_eq!(
+                (t.start, t.end, t.increase, t.pairs, t.unexplained),
+                (start, end, increase, pairs, unexplained)
+            );
+        }
+    }
+}
