@@ -1684,3 +1684,74 @@ mod statsmodels_reference {
         assert_eq!(r.ndc, 6);
     }
 }
+
+/// The K factors are `1 / d2*`, and `d2*` is a moment of the range of `m`
+/// standard normal values -- so each table entry is derived here from the
+/// definition, by integrating the joint density of the minimum and maximum
+/// (`n (n-1) phi(x) phi(y) [Phi(y) - Phi(x)]^(n-2)`, `x < y`), and not read
+/// from a table.
+///
+/// - `K1` (trials): the mean range `d2(m)`, since the average of many
+///   ranges (parts x operators of them) is what R-bar estimates;
+/// - `K2` (operators), `K3` (parts): one range, whose estimate of sigma is
+///   `sqrt(E[R^2])` -- the root mean square of the range, `d2*(m, 1)`.
+#[cfg(test)]
+mod k_factor_definitions {
+    use super::*;
+
+    /// `(E[R], E[R^2])` of the range of `n` standard normal values, by the
+    /// midpoint rule on a grid of 0.02 over [-7, 7] squared.
+    fn range_moments(n: usize) -> (f64, f64) {
+        let (h, lo, steps) = (0.02_f64, -7.0_f64, 700_usize);
+        let phi: Vec<f64> = (0..steps)
+            .map(|i| special::standard_normal_pdf(lo + (i as f64 + 0.5) * h))
+            .collect();
+        let cdf: Vec<f64> = (0..steps)
+            .map(|i| special::standard_normal_cdf(lo + (i as f64 + 0.5) * h))
+            .collect();
+        let (mut m1, mut m2) = (0.0, 0.0);
+        let c = (n * (n - 1)) as f64;
+        for i in 0..steps {
+            for j in i + 1..steps {
+                let density = c * phi[i] * phi[j] * (cdf[j] - cdf[i]).powi(n as i32 - 2);
+                let r = (j - i) as f64 * h;
+                m1 += r * density;
+                m2 += r * r * density;
+            }
+        }
+        (m1 * h * h, m2 * h * h)
+    }
+
+    #[test]
+    fn the_k_tables_are_one_over_the_range_moments_of_the_normal() {
+        // Four decimals, as the table prints them: half a unit in the last place.
+        let tol = 6e-5;
+        for (i, &k1) in K1.iter().enumerate() {
+            let (mean, _) = range_moments(i + 2);
+            assert!(
+                (k1 - 1.0 / mean).abs() <= tol,
+                "K1[{} trials] = {k1}, 1/d2 = {}",
+                i + 2,
+                1.0 / mean
+            );
+        }
+        for (i, &k2) in K2.iter().enumerate() {
+            let (_, second) = range_moments(i + 2);
+            assert!(
+                (k2 - 1.0 / second.sqrt()).abs() <= tol,
+                "K2[{} operators] = {k2}, 1/d2* = {}",
+                i + 2,
+                1.0 / second.sqrt()
+            );
+        }
+        for (i, &k3) in K3.iter().enumerate() {
+            let (_, second) = range_moments(i + 2);
+            assert!(
+                (k3 - 1.0 / second.sqrt()).abs() <= tol,
+                "K3[{} parts] = {k3}, 1/d2* = {}",
+                i + 2,
+                1.0 / second.sqrt()
+            );
+        }
+    }
+}
