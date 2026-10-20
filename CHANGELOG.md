@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.27.2] - 2026-10-20
+
+Depends on u-numflow 0.15.
+
 ### Fixed
 
 - `condition_number` reported infinity for any data whose covariance eigenvalues
