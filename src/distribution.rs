@@ -1815,3 +1815,169 @@ mod proptests {
         }
     }
 }
+
+/// `fit_best` against the maximum-likelihood fits of an independent
+/// computation: closed forms for Normal, Exponential and LogNormal, and the
+/// score equations solved to 1e-15 (SciPy `brentq` / `root`, digamma from
+/// SciPy) for Gamma, Weibull and Beta, with the log-likelihood summed from
+/// SciPy's own `logpdf`. `scipy.stats.<family>.fit` is not the reference — it
+/// stops short of the optimum (Weibull, Gamma).
+#[cfg(test)]
+mod scipy_reference {
+    use super::*;
+
+    type Want = (&'static str, &'static [f64], f64, f64, f64);
+
+    fn close(got: f64, want: f64) -> bool {
+        (got - want).abs() <= 1e-9 * want.abs().max(1.0)
+    }
+
+    fn check(data: &[f64], want: &[Want], what: &str) {
+        let got = fit_best(data);
+        let names: Vec<&str> = got.iter().map(|f| f.distribution.as_str()).collect();
+        let wanted: Vec<&str> = want.iter().map(|w| w.0).collect();
+        assert_eq!(names, wanted, "{what}: families in AIC order");
+        for (f, w) in got.iter().zip(want) {
+            let name = &f.distribution;
+            assert_eq!(f.parameters.len(), w.1.len(), "{what} {name}: parameters");
+            for ((pname, p), q) in f.parameters.iter().zip(w.1) {
+                assert!(
+                    close(*p, *q),
+                    "{what} {name} {pname}: got {p}, reference {q}"
+                );
+            }
+            assert!(
+                close(f.log_likelihood, w.2),
+                "{what} {name} log-likelihood: got {}, reference {}",
+                f.log_likelihood,
+                w.2
+            );
+            assert!(
+                close(f.aic, w.3),
+                "{what} {name} AIC: got {}, reference {}",
+                f.aic,
+                w.3
+            );
+            assert!(
+                close(f.bic, w.4),
+                "{what} {name} BIC: got {}, reference {}",
+                f.bic,
+                w.4
+            );
+        }
+    }
+
+    #[test]
+    fn data_inside_the_unit_interval_is_fitted_by_all_six_families() {
+        check(
+            &[
+                0.12, 0.23, 0.31, 0.38, 0.44, 0.52, 0.57, 0.63, 0.71, 0.78, 0.86, 0.93,
+            ],
+            &[
+                (
+                    "Beta",
+                    &[1.8438565181620945, 1.5583703583443078],
+                    1.035200520768992,
+                    1.929598958462016,
+                    2.8994122580380166,
+                ),
+                (
+                    "Weibull",
+                    &[2.391258961247938, 0.6091890535880672],
+                    0.10397825424951779,
+                    3.7920434915009644,
+                    4.761856791076966,
+                ),
+                (
+                    "Normal",
+                    &[0.54, 0.24348168993444524],
+                    -0.0746999829213777,
+                    4.149399965842756,
+                    5.119213265418756,
+                ),
+                (
+                    "Gamma",
+                    &[3.7996792156263166, 7.036442991900586],
+                    -0.4996467398561213,
+                    4.999293479712243,
+                    5.969106779288243,
+                ),
+                (
+                    "LogNormal",
+                    &[-0.7535094301720809, 0.5764955804748335],
+                    -1.3756979711767767,
+                    6.751395942353554,
+                    7.721209241929554,
+                ),
+                (
+                    "Exponential",
+                    &[1.8518518518518516],
+                    -4.605766326914196,
+                    11.211532653828392,
+                    11.696439303616392,
+                ),
+            ],
+            "unit interval",
+        );
+    }
+
+    #[test]
+    fn positive_data_is_fitted_by_the_five_positive_families() {
+        check(
+            &[2.1, 3.5, 1.8, 4.2, 2.9, 3.1, 2.5, 3.8, 1.5, 2.7, 6.4, 9.8],
+            &[
+                (
+                    "LogNormal",
+                    &[1.1668644506389008, 0.5022892551220499],
+                    -22.766686368395682,
+                    49.533372736791364,
+                    50.50318603636737,
+                ),
+                (
+                    "Gamma",
+                    &[3.7501260541767762, 1.0158355000027386],
+                    -23.629758495985087,
+                    51.25951699197017,
+                    52.22933029154618,
+                ),
+                (
+                    "Weibull",
+                    &[1.8208938249614839, 4.190960652455631],
+                    -24.62416845020696,
+                    53.24833690041392,
+                    54.21815019998992,
+                ),
+                (
+                    "Normal",
+                    &[3.6916666666666664, 2.2220329780531065],
+                    -26.60833279104041,
+                    57.21666558208082,
+                    58.186478881656825,
+                ),
+                (
+                    "Exponential",
+                    &[0.2708803611738149],
+                    -27.672936327157075,
+                    57.34587265431415,
+                    57.83077930410215,
+                ),
+            ],
+            "positive",
+        );
+    }
+
+    #[test]
+    fn data_of_mixed_sign_is_fitted_by_the_normal_alone() {
+        check(
+            &[-1.2, 0.4, 2.3, -0.7, 1.9, 0.8, -2.1, 3.1],
+            &[(
+                "Normal",
+                &[0.5625, 1.6999540434964704],
+                -15.596318005312547,
+                35.192636010625094,
+                35.35151909398476,
+            )],
+            "mixed sign",
+        );
+    }
+}

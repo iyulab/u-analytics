@@ -215,7 +215,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Each of the nine run tests (the 3-sigma test, Nelson's eight with nine points on one side, and Western Electric's eight on one side) flags the points the test's definition gives, each at the last point that completes the pattern.",
+            "reference_kind": "reference_implementation",
+            "reference": "The tests as defined by Nelson (1984) and the Western Electric handbook (1956), written separately in Python 3 with pandas 3 rolling counts and itertools.groupby runs",
+            "method": "compares the flagged indices of each test on one 133-point series built to trip every test (limits 3 / 0 / -3)",
+            "tolerance": "exact (indices)",
+            "test": "src/spc/rules.rs::reference_series::every_test_flags_the_points_the_reference_flags"
+          }
+        ],
+        "limits": [
+          "One series; a point exactly on the centre line, a ragged tie in a trend, and a series shorter than a test's window are covered by unit tests, not compared with the reference.",
+          "The reference is written from the cited definitions, so it checks the implementation against them, not against a published worked example; the point a pattern is reported at is this crate's documented convention (the last point of the window)."
+        ]
       },
       "performance": {
         "status": "none"
@@ -901,7 +915,21 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Each family's maximum-likelihood parameters, log-likelihood, AIC and BIC, and the AIC order, equal those of an independent computation: closed forms for Normal, Exponential and LogNormal, and the score equations solved to 1e-15 for Gamma, Weibull and Beta.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1: scipy.optimize.brentq and root on the score equations (scipy.special.digamma), the log-likelihood summed from scipy.stats logpdf; scipy.stats .fit is not the reference because it stops short of the optimum",
+            "method": "compares the family order and every parameter, log-likelihood, AIC and BIC of three samples (data inside (0, 1), positive data, data of mixed sign) with the reference's",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/distribution.rs::scipy_reference::data_inside_the_unit_interval_is_fitted_by_all_six_families"
+          }
+        ],
+        "limits": [
+          "Checked for three samples of 8 to 12 values; the fit of a heavily tied or near-degenerate sample, and the convergence refusal, are not compared with the reference.",
+          "The reference solves the same likelihood equations, so it checks the numerical solution, not the choice of the families offered."
+        ]
       },
       "performance": {
         "status": "none"

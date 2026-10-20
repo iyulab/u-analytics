@@ -1056,3 +1056,79 @@ mod tests {
         assert!(violations.is_empty());
     }
 }
+
+/// The nine tests against a reference written from their definitions, on one
+/// 133-point series built to trip every test (a trend, an alternation,
+/// stratification, a mixture, a shift, runs of the 2-of-3 and 4-of-5 zones, and
+/// points beyond the limits). The limits are 3 / 0 / -3, so one sigma is
+/// exactly 1. The reference (Python 3, pandas rolling counts and
+/// `itertools.groupby` runs) reports each pattern at the last point that
+/// completes it -- the convention of the crate's own documentation.
+#[cfg(test)]
+mod reference_series {
+    use super::*;
+
+    const SERIES: [f64; 133] = [
+        -1.725, -0.116, -1.893, 1.374, 1.252, -0.385, 0.488, -0.322, 1.538, -1.142, -1.863, -0.127,
+        -0.32, 0.158, 0.354, 0.857, 0.146, -0.333, 0.43, 0.818, -1.928, -1.528, -0.649, 0.149,
+        0.238, -0.307, 0.039, 1.497, -0.915, -0.491, -1.026, -0.545, -0.283, 0.178, 0.445, 1.023,
+        1.278, 1.56, 1.211, -0.737, 1.334, -0.93, 1.263, -1.182, 1.312, -1.213, 0.899, -1.252,
+        1.321, -1.165, 1.007, -1.225, 1.638, -1.43, 0.46, 0.089, 0.07, 0.279, -0.267, 0.166,
+        -0.038, -0.162, 0.463, 0.151, -0.342, -0.21, -0.017, 0.011, -0.31, 0.454, -0.204, 0.391,
+        2.289, -2.067, 2.108, 1.699, 1.295, -1.441, -1.264, -1.284, -1.578, -1.502, 1.214, 1.574,
+        0.301, 1.513, 0.604, 1.029, -0.174, 0.048, -0.016, 1.713, 1.714, 1.078, 0.794, 1.252, 2.4,
+        2.6, 0.1, 2.3, -0.3, 0.2, -2.5, -2.2, 0.001, 3.4, -3.2, 0.001, -0.396, 0.113, -0.124,
+        0.332, 1.388, 0.993, 0.712, -1.562, -0.198, -1.316, -2.364, 1.513, 1.232, -0.062, 0.393,
+        -0.067, -0.173, 0.224, -1.541, 0.207, -0.038, -0.534, 1.171, 0.427, 0.243,
+    ];
+
+    fn flagged(rule: ViolationType) -> Vec<usize> {
+        let points: Vec<ChartPoint> = SERIES
+            .iter()
+            .enumerate()
+            .map(|(index, &value)| ChartPoint {
+                value,
+                index,
+                violations: vec![],
+            })
+            .collect();
+        let limits = ControlLimits {
+            ucl: 3.0,
+            cl: 0.0,
+            lcl: -3.0,
+        };
+        RuleSet::none()
+            .with(rule)
+            .check(&points, &limits)
+            .into_iter()
+            .map(|(index, found)| {
+                assert_eq!(found, rule, "a one-test set reports only that test");
+                index
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_test_flags_the_points_the_reference_flags() {
+        let want: [(ViolationType, &[usize]); 9] = [
+            (ViolationType::BeyondLimits, &[105, 106]),
+            (ViolationType::NineOneSide, &[99]),
+            (ViolationType::EightOneSide, &[98, 99]),
+            (ViolationType::SixTrend, &[35, 36, 37]),
+            (ViolationType::FourteenAlternating, &[51, 52, 53, 54, 55]),
+            (
+                ViolationType::TwoOfThreeBeyond2Sigma,
+                &[74, 97, 98, 99, 103, 104],
+            ),
+            (
+                ViolationType::FourOfFiveBeyond1Sigma,
+                &[38, 39, 40, 76, 80, 81, 82, 95, 96, 97, 99],
+            ),
+            (ViolationType::FifteenWithin1Sigma, &[68, 69, 70, 71]),
+            (ViolationType::EightBeyond1Sigma, &[79, 80, 81, 82, 83]),
+        ];
+        for (rule, indices) in want {
+            assert_eq!(flagged(rule), indices, "{rule:?}");
+        }
+    }
+}
