@@ -8,6 +8,21 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Fixed
+
+- `condition_number` reported infinity for any data whose covariance eigenvalues
+  were below 1e-15 -- a well-conditioned matrix in a unit a billion times smaller
+  looked singular. Singular is now judged against the matrix's own scale (the
+  smallest eigenvalue at most `p * f64::EPSILON` times the largest, the tolerance
+  NumPy's `matrix_rank` uses).
+- `multiple_linear_regression` (and so `vif`, which regresses each predictor on
+  the others) refused a fit when a predictor was in a small unit: the intercept
+  column of ones and a column of 1e-9 made `X'X` span eighteen orders of
+  magnitude and the Cholesky factorisation failed, so `vif` returned `NaN`. The
+  normal equations are now solved on the design with each column scaled to unit
+  length and mapped back, so coefficients, standard errors and p-values no longer
+  depend on the unit.
+
 ## [0.27.1] - 2026-10-20
 
 Depends on u-numflow 0.15.

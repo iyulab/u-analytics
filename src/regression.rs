@@ -293,15 +293,43 @@ pub fn multiple_linear_regression(
     }
     let x_mat = Matrix::new(n, ncols, x_data).ok()?;
 
-    // X'X (ncols × ncols)
-    let xt = x_mat.transpose();
-    let xtx = xt.mul_mat(&x_mat).ok()?;
+    // Normal equations on the design with each column scaled to unit length.
+    // The intercept column is all ones, so a predictor in a small unit (1e-9)
+    // makes X'X span eighteen orders of magnitude and the Cholesky factor
+    // refuses it; the scaled X'X is the correlation-like matrix of the same
+    // problem, whose conditioning does not depend on the units. With
+    // S = diag(1/‖column‖): β = S·β̃ and (X'X)⁻¹ = S·(X̃'X̃)⁻¹·S.
+    let mut col_scale = vec![0.0_f64; ncols];
+    for (j, c) in col_scale.iter_mut().enumerate() {
+        let norm = (0..n).map(|i| x_mat.get(i, j).powi(2)).sum::<f64>().sqrt();
+        if !norm.is_finite() || norm == 0.0 {
+            return None;
+        }
+        *c = 1.0 / norm;
+    }
+    let mut scaled_data = Vec::with_capacity(n * ncols);
+    for i in 0..n {
+        for (j, c) in col_scale.iter().enumerate() {
+            scaled_data.push(x_mat.get(i, j) * c);
+        }
+    }
+    let x_scaled = Matrix::new(n, ncols, scaled_data).ok()?;
 
-    // X'y (ncols × 1)
+    // X̃'X̃ (ncols × ncols)
+    let xt = x_scaled.transpose();
+    let xtx = xt.mul_mat(&x_scaled).ok()?;
+
+    // X̃'y (ncols × 1)
     let xty = xt.mul_vec(y).ok()?;
 
-    // Solve via Cholesky: β = (X'X)⁻¹ X'y
-    let coefficients = xtx.cholesky_solve(&xty).ok()?;
+    // Solve via Cholesky: β̃ = (X̃'X̃)⁻¹ X̃'y, then back to the original units
+    let coefficients: Vec<f64> = xtx
+        .cholesky_solve(&xty)
+        .ok()?
+        .iter()
+        .zip(&col_scale)
+        .map(|(b, c)| b * c)
+        .collect();
 
     // Fitted values and residuals
     let fitted = x_mat.mul_vec(&coefficients).ok()?;
@@ -338,7 +366,7 @@ pub fn multiple_linear_regression(
     let mut p_values = Vec::with_capacity(ncols);
 
     for (j, &coeff_j) in coefficients.iter().enumerate() {
-        let se = (xtx_inv.get(j, j) * mse).sqrt();
+        let se = (xtx_inv.get(j, j) * col_scale[j] * col_scale[j] * mse).sqrt();
         std_errors.push(se);
         let t = if se > 1e-300 {
             coeff_j / se
@@ -532,8 +560,8 @@ pub fn vif(predictors: &[&[f64]]) -> Option<Vec<f64>> {
 ///
 /// `None` for empty input, length mismatch, fewer than `p+1` observations,
 /// non-finite values, or eigenvalue decomposition failure. Returns
-/// `f64::INFINITY` when the smallest eigenvalue is below `1e-15`
-/// (numerically singular).
+/// `f64::INFINITY` when the smallest eigenvalue is at most
+/// `p * f64::EPSILON` times the largest (numerically singular).
 ///
 /// # References
 ///
@@ -601,7 +629,11 @@ pub fn condition_number(predictors: &[&[f64]]) -> Option<f64> {
     if !lambda_max.is_finite() || lambda_max <= 0.0 {
         return None;
     }
-    if lambda_min < 1e-15 {
+    // Numerically singular is judged against the matrix's own scale (the
+    // tolerance NumPy's `matrix_rank` uses), not against a fixed number: the
+    // same data in a smaller unit has a covariance 1e-18 as large and is no
+    // less well conditioned.
+    if lambda_min <= lambda_max * p as f64 * f64::EPSILON {
         return Some(f64::INFINITY);
     }
     Some(lambda_max / lambda_min)
@@ -1096,5 +1128,47 @@ mod scipy_tail_reference {
         close(r.slope_p, 8.203356920391111e-33, "slope p");
         close(r.intercept_p, 1.5689270135401997e-16, "intercept p");
         close(r.f_p_value, 8.203356920397853e-33, "F p");
+    }
+    /// A fit and a condition number are properties of the data, not of the unit
+    /// it is written in: the predictors in a unit a billion times smaller give
+    /// the same R², p-values and conditioning, and coefficients that scale
+    /// with the unit.
+    #[test]
+    fn multiple_regression_and_conditioning_do_not_depend_on_the_unit() {
+        let n = 24;
+        let x1: Vec<f64> = (0..n)
+            .map(|i| (i as f64 * 0.7).sin() * 3.0 + i as f64 * 0.1)
+            .collect();
+        let x2: Vec<f64> = (0..n)
+            .map(|i| (i as f64 * 1.3).cos() + 0.5 * x1[i])
+            .collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| 1.0 + 2.0 * x1[i] - 0.5 * x2[i] + (i as f64 * 2.1).sin() * 0.3)
+            .collect();
+        let base = multiple_linear_regression(&[&x1, &x2], &y).expect("valid");
+        let cond = condition_number(&[&x1, &x2]).expect("valid");
+        for factor in [1e-9, 1e6] {
+            let s1: Vec<f64> = x1.iter().map(|v| v * factor).collect();
+            let s2: Vec<f64> = x2.iter().map(|v| v * factor).collect();
+            let r = multiple_linear_regression(&[&s1, &s2], &y)
+                .unwrap_or_else(|| panic!("a fit in units of {factor:e} was refused"));
+            close(r.r_squared, base.r_squared, "R2");
+            close(r.f_p_value, base.f_p_value, "F p");
+            close(r.coefficients[0], base.coefficients[0], "intercept");
+            for j in 0..2 {
+                close(
+                    r.coefficients[j + 1] * factor,
+                    base.coefficients[j + 1],
+                    "slope",
+                );
+                close(r.p_values[j + 1], base.p_values[j + 1], "slope p");
+                close(r.vif[j], base.vif[j], "vif");
+            }
+            close(
+                condition_number(&[&s1, &s2]).expect("valid"),
+                cond,
+                "condition number",
+            );
+        }
     }
 }
