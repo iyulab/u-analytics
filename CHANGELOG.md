@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-28
+
+Depends on u-numflow 0.15. The .NET client is `UAnalytics` 0.24.0.
+
 ### Added
 
 - `decomposition::Stl` -- seasonal-trend decomposition by Loess (STL; Cleveland
