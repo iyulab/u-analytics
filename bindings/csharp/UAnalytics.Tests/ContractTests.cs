@@ -134,6 +134,7 @@ public class ContractTests
         ["Pacf"] = c => Out(c.Pacf(Seasonal(84, 7)), AnalyticsJson.Default.PacfResult),
         ["EstimatePeriod(none)"] = c => Out(c.EstimatePeriod(Series), AnalyticsJson.Default.PeriodResult),
         ["SpectralResidual"] = c => Out(c.SpectralResidual(Seasonal(64, 8)), AnalyticsJson.Default.SpectralResidualResult),
+        ["Stl"] = c => Out(c.Stl(Seasonal(64, 8), 8, robust: true), AnalyticsJson.Default.StlResult),
         ["CorrelationMatrix"] = c => Out(c.CorrelationMatrix([Series, Positive.Concat(Positive).Take(20).ToArray(), Step()[..20]], CorrelationMethod.Kendall), AnalyticsJson.Default.CorrelationMatrixResult),
         ["SimpleRegression"] = c => Out(c.SimpleRegression(Positive, Positive.Select((v, i) => 2 * v + i % 3).ToArray()), AnalyticsJson.Default.RegressionResult),
         ["SimpleRegression(exact)"] = c => Out(c.SimpleRegression([1, 2, 3, 4], [3, 5, 7, 9]), AnalyticsJson.Default.RegressionResult),

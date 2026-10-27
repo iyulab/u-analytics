@@ -42,7 +42,7 @@ use crate::wire::{
     CapabilityInputDto, CorrelationInputDto, CusumInputDto, EwmaInputDto, GageRRInputDto,
     GoodnessOfFitInputDto, LimitsInputDto, MultiPeltInputDto, PeltInputDto,
     PercentileCapabilityInputDto, RegressionInputDto, SeasonalityInputDto,
-    SpectralResidualInputDto, WireError,
+    SpectralResidualInputDto, StlInputDto, WireError,
 };
 
 // ---------------------------------------------------------------------------
@@ -1636,6 +1636,35 @@ pub fn spectral_residual(
     to_js(&crate::wire::spectral_residual_dto(input).map_err(js_err)?)
 }
 
+/// Seasonal-trend decomposition by Loess (STL; Cleveland et al. 1990):
+/// `data = trend + seasonal + residual` for a known `period` (at least 2, with
+/// at least two full cycles of data — [`estimate_period`] finds one).
+///
+/// # Input JSON
+///
+/// `{ data, period, seasonal?, trend?, low_pass?, seasonal_degree?, trend_degree?,
+/// low_pass_degree?, robust?, inner_iterations?, outer_iterations? }`. The spans
+/// are odd (`seasonal` at least 3, default 7; `trend` and `low_pass` above the
+/// period, defaults as statsmodels' `STL`), the degrees 0 or 1 (default 1).
+/// `robust` adds the outer loop that down-weights outliers; the iteration
+/// counts default to 5 inner / 0 outer, or 2 / 15 when robust. An even span is
+/// `invalid_option`.
+///
+/// # Output JSON
+///
+/// `{ trend, seasonal, residual, weights, trend_strength, seasonal_strength,
+/// period, seasonal_span, trend_span, low_pass_span }`: the three components,
+/// the last pass's robustness weights (all 1 without the outer loop), the
+/// strengths `max(0, 1 − Var(R)/Var(C + R))` of trend and seasonality, and the
+/// spans used. As statsmodels' `STL`.
+#[wasm_bindgen(unchecked_return_type = "StlDto")]
+pub fn stl(
+    #[wasm_bindgen(unchecked_param_type = "StlInputDto")] input: JsValue,
+) -> Result<JsValue, JsValue> {
+    let input: StlInputDto = from_js(input, "input")?;
+    to_js(&crate::wire::stl_dto(input).map_err(js_err)?)
+}
+
 /// Converts a sigma quality level to a defect rate in parts per million.
 ///
 /// ```js
@@ -3180,7 +3209,8 @@ mod engine_card_tests {
         CorrelationMatrixDto, CusumDto, DistributionFitDto, EwmaDto, FixedLimitChartDto, GChartDto,
         GageRRAnovaResultDto, GageRRResultDto, GoodnessOfFitResultDto, ImrChartDto, LaneyPChartDto,
         LaneyUChartDto, PChartDto, PacfDto, PeltResultDto, PercentileCapabilityDto, RegressionDto,
-        SeasonalityDto, SpectralResidualDto, TChartDto, UChartDto, XbarRChartDto, XbarSChartDto,
+        SeasonalityDto, SpectralResidualDto, StlDto, TChartDto, UChartDto, XbarRChartDto,
+        XbarSChartDto,
     };
 
     fn schemas() -> Schemas {
@@ -3439,6 +3469,11 @@ mod engine_card_tests {
             "spectral_residual",
             vec![arg("input", s.of::<SpectralResidualInputDto>())],
             s.of::<SpectralResidualDto>(),
+        );
+        s.op(
+            "stl",
+            vec![arg("input", s.of::<StlInputDto>())],
+            s.of::<StlDto>(),
         );
         s.op("sigma_to_ppm", vec![arg("sigma", num())], num());
         s.op("ppm_to_sigma", vec![arg("ppm", num())], num());

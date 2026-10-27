@@ -21,6 +21,7 @@ hypothesis testing for industrial quality engineering.
 | `detection` | Change-point detection (CUSUM, EWMA, PELT) and one-shot anomaly scoring by spectral residual saliency (Ren et al. 2019) |
 | `smoothing` | Time series smoothing (SES, Holt linear trend, Holt-Winters seasonal) |
 | `seasonality` | Periodogram (zero-padded FFT) and dominant-period estimation — AutoPeriod: permutation-thresholded peaks refined on the ACF |
+| `decomposition` | Seasonal-trend decomposition by Loess (STL, Cleveland et al. 1990) into trend, seasonal and remainder, with robust outlier weights and the strengths of trend and seasonality |
 | `correlation` | Correlation analysis (Pearson, Spearman, Kendall, partial, correlation matrices) |
 | `regression` | Regression analysis (simple OLS, multiple OLS, VIF multicollinearity) |
 | `distribution` | Distribution analysis (ECDF, histogram bins — Sturges/Scott/FD/Fixed, QQ-plot, KS test) |
@@ -263,6 +264,31 @@ and a series shorter than 8 points is refused (`None` from the function, as
 opposed to `period: None` inside a result). Series under ~16 points rarely beat
 the permutation threshold: too few orderings differ from the observed one.
 
+### Decomposition — trend, season and remainder (STL)
+
+With the period known, `decomposition::Stl` splits the series additively,
+`data = trend + seasonal + residual`, by the Loess procedure of Cleveland,
+Cleveland, McRae & Terpenning (1990), with the defaults of statsmodels' `STL`
+(seasonal span 7, trend and low-pass spans from the period, degree 1). `robust`
+adds the outer loop: each point gets a bisquare weight from its remainder, so an
+outlier lands in `residual` (weight near 0) instead of bending the components.
+The result also gives the strength of trend and seasonality,
+`max(0, 1 − Var(R)/Var(C + R))` (Wang, Smith & Hyndman 2006).
+
+```rust
+use u_analytics::decomposition::Stl;
+
+let pattern = [2.0, -1.0, 0.5, -1.5];
+let y: Vec<f64> = (0..48).map(|i| 0.3 * i as f64 + pattern[i % 4]).collect();
+let r = Stl::new(4).robust(true).decompose(&y).unwrap();
+assert!((r.seasonal[20] - 2.0).abs() < 1e-6);
+assert!(r.seasonal_strength > 0.99 && r.trend_strength > 0.99);
+assert_eq!((r.trend_span, r.low_pass_span), (9, 5)); // statsmodels' defaults
+```
+
+Spans are odd (a Loess span is centred on its point); at least two full cycles
+of data are needed.
+
 ## JavaScript / WASM (npm)
 
 ```bash
@@ -324,7 +350,7 @@ the .NET package from `AnalyticsClient.GetCodes()`.
 |---|---|
 | `count_not_whole` | a defect or defective count is not a whole number ≥ 0 |
 | `non_positive_data` | a value that must be `> 0` is not — Box-Cox `data`, Weibull `failure_times`, `percentile_capability` `data` under a `distribution` on (0, ∞) (`index`, `got`) |
-| `invalid_option` | a setting refused for a reason a range cannot state — a `lambda_range` with `min >= max` (`parameter`) |
+| `invalid_option` | a setting refused for a reason a range cannot state — a `lambda_range` with `min >= max`, an even `stl` smoother span (`parameter`) |
 | `sample_size_not_whole` | a sample size is not a whole number ≥ 1 — zero, negative, fractional and not-a-number alike |
 | `defectives_exceed_sample` | more defectives than the sample has items |
 | `units_not_positive` | units inspected that are not a positive number |
@@ -917,6 +943,30 @@ estimate_period(input: { data: number[] }): {
 // `acf_threshold` reaches the same verdict the crate did. The period is exact
 // whether or not the series is a whole number of cycles long.
 
+// STL decomposition — Cleveland et al. (1990), statsmodels' STL defaults. With ACF,
+// ADF and KPSS it answers what a series is made of: data = trend + seasonal + residual.
+// period >= 2 and at least two full cycles (insufficient_data). Spans are odd: an even
+// one is invalid_option; one too small is parameter_out_of_range (trend and low_pass
+// must be above the period: exclusive_min = period). Degrees 0 or 1.
+stl(input: {
+  data: number[],
+  period: number,                 // the cycle length (estimate_period finds one)
+  seasonal?: number | null,       // default 7; odd, >= 3
+  trend?: number | null,          // default: smallest odd >= 1.5 period / (1 - 1.5 / seasonal)
+  low_pass?: number | null,       // default: smallest odd > period
+  seasonal_degree?: number | null, trend_degree?: number | null,
+  low_pass_degree?: number | null, // 0 or 1, default 1
+  robust?: boolean,               // default false: outer loop with bisquare weights
+  inner_iterations?: number | null, // default 5 (2 when robust), >= 1
+  outer_iterations?: number | null, // default 0 (15 when robust)
+}): {
+  trend: number[], seasonal: number[], residual: number[],
+  weights: number[],              // last pass's robustness weights, all 1 without robust
+  trend_strength: number,         // max(0, 1 - Var(R)/Var(T + R))
+  seasonal_strength: number,      // max(0, 1 - Var(R)/Var(S + R))
+  period: number, seasonal_span: number, trend_span: number, low_pass_span: number,
+}
+
 // Spectral residual anomaly scoring — Ren et al. (2019); >= 12 finite values
 spectral_residual(input: {
   data: number[],
@@ -1049,6 +1099,7 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_acf` | `acf(input)` | `input` as is |
 | `uanalytics_pacf` | `pacf(input)` | `input` as is |
 | `uanalytics_spectral_residual` | `spectral_residual(input)` | `input` as is |
+| `uanalytics_stl` | `stl(input)` | `input` as is |
 
 The composition documented for JavaScript holds here too: `imr_chart` (or
 `xbar_s_chart`) returns `sigma_hat`, which is what `process_capability` needs as

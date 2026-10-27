@@ -4093,6 +4093,229 @@ pub(crate) fn spectral_residual_dto(
     })
 }
 
+// ── STL decomposition ────────────────────────────────────────────────────────
+
+/// Input for `stl`. Every option but `period` is optional; absent or `null`
+/// takes statsmodels' default.
+#[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct StlInputDto {
+    pub(crate) data: Vec<f64>,
+    /// Length of the seasonal cycle, at least 2; at least two full cycles of
+    /// data.
+    #[cfg_attr(feature = "wasm", tsify(type = "number"))]
+    pub(crate) period: Whole,
+    /// Span of the seasonal smoother: odd, at least 3 (default 7).
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) seasonal: Option<Whole>,
+    /// Span of the trend smoother: odd, above the period (default the smallest
+    /// odd integer at least `1.5 · period / (1 − 1.5 / seasonal)`).
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) trend: Option<Whole>,
+    /// Span of the low-pass smoother: odd, above the period (default the
+    /// smallest odd integer above it).
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) low_pass: Option<Whole>,
+    /// Degree of the seasonal Loess, 0 or 1 (default 1).
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) seasonal_degree: Option<Whole>,
+    /// Degree of the trend Loess, 0 or 1 (default 1).
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) trend_degree: Option<Whole>,
+    /// Degree of the low-pass Loess, 0 or 1 (default 1).
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) low_pass_degree: Option<Whole>,
+    /// Down-weight outliers with the outer loop (default false).
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    pub(crate) robust: bool,
+    /// Passes of the inner loop, at least 1 (default 5, or 2 when robust).
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) inner_iterations: Option<Whole>,
+    /// Passes of the outer loop, at least 0 (default 0, or 15 when robust).
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) outer_iterations: Option<Whole>,
+}
+
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct StlDto {
+    pub(crate) trend: Vec<f64>,
+    pub(crate) seasonal: Vec<f64>,
+    /// `data − trend − seasonal`.
+    pub(crate) residual: Vec<f64>,
+    /// Robustness weight of each point in the last pass, in `[0, 1]` (all 1
+    /// without the outer loop); near 0 marks an outlier.
+    pub(crate) weights: Vec<f64>,
+    /// `max(0, 1 − Var(R)/Var(T + R))`.
+    pub(crate) trend_strength: f64,
+    /// `max(0, 1 − Var(R)/Var(S + R))`.
+    pub(crate) seasonal_strength: f64,
+    pub(crate) period: usize,
+    pub(crate) seasonal_span: usize,
+    pub(crate) trend_span: usize,
+    pub(crate) low_pass_span: usize,
+}
+
+impl From<crate::decomposition::StlError> for WireError {
+    fn from(error: crate::decomposition::StlError) -> Self {
+        use crate::decomposition::StlError as E;
+        let message = error.to_string();
+        match error {
+            E::OptionOutOfRange {
+                option,
+                got,
+                min,
+                exclusive_min,
+                max,
+                ..
+            } => WireError::out_of_range(
+                option,
+                Bound::from_pair(min, exclusive_min),
+                Bound::from_pair(max, None),
+                got,
+                message,
+            ),
+            // Oddness is not an interval: the refusal names the option only.
+            E::EvenSpan { option, .. } => {
+                WireError::new(code::INVALID_OPTION, None, message).about(option)
+            }
+            E::TooFewObservations { needed, got } => {
+                WireError::too_few("data", needed, got, message)
+            }
+            E::ValueNotFinite { index } => {
+                WireError::new(code::VALUE_NOT_FINITE, Some(index), message).about("data")
+            }
+        }
+    }
+}
+
+pub(crate) fn stl_dto(input: StlInputDto) -> Result<StlDto, WireError> {
+    use crate::decomposition::{Stl, StlError};
+    type Set = fn(Stl, usize) -> Stl;
+    // The builder holds counts, so a negative one cannot reach its checks. It
+    // is refused with the domain those checks state: `probe` is the builder
+    // with a value it refuses on the same side (`0`, or `2` for a degree), and
+    // its refusal is reported with the value the caller sent. A refusal of an
+    // option checked earlier comes first, as it would from the builder.
+    let below_zero = |probe: Stl, option: &'static str, got: f64| -> WireError {
+        match probe.decompose(&[]) {
+            Err(StlError::OptionOutOfRange {
+                option: o,
+                requirement,
+                min,
+                exclusive_min,
+                max,
+                ..
+            }) if o == option => StlError::OptionOutOfRange {
+                option,
+                requirement,
+                got,
+                min,
+                exclusive_min,
+                max,
+            }
+            .into(),
+            Err(other @ (StlError::OptionOutOfRange { .. } | StlError::EvenSpan { .. })) => {
+                other.into()
+            }
+            _ => StlError::OptionOutOfRange {
+                option,
+                requirement: "at least 0",
+                got,
+                min: Some(0.0),
+                exclusive_min: None,
+                max: None,
+            }
+            .into(),
+        }
+    };
+    let Whole(period) = input.period;
+    if period < 0.0 {
+        return Err(below_zero(Stl::new(0), "period", period));
+    }
+    // In the order the builder checks them; the value it refuses below its
+    // domain (`None`: every count is in it).
+    let options: [(&'static str, Option<Whole>, Set, Option<usize>); 8] = [
+        ("seasonal", input.seasonal, Stl::seasonal, Some(0)),
+        ("trend", input.trend, Stl::trend, Some(0)),
+        ("low_pass", input.low_pass, Stl::low_pass, Some(0)),
+        (
+            "seasonal_degree",
+            input.seasonal_degree,
+            Stl::seasonal_degree,
+            Some(2),
+        ),
+        (
+            "trend_degree",
+            input.trend_degree,
+            Stl::trend_degree,
+            Some(2),
+        ),
+        (
+            "low_pass_degree",
+            input.low_pass_degree,
+            Stl::low_pass_degree,
+            Some(2),
+        ),
+        (
+            "inner_iterations",
+            input.inner_iterations,
+            Stl::inner_iterations,
+            Some(0),
+        ),
+        (
+            "outer_iterations",
+            input.outer_iterations,
+            Stl::outer_iterations,
+            None,
+        ),
+    ];
+    // Every count the caller sent first, so a negative one is judged against
+    // the builder as configured (a trend span's floor is the period).
+    let mut stl = Stl::new(Whole(period).count()).robust(input.robust);
+    for (_, value, set, _) in &options {
+        if let Some(v) = value.filter(|Whole(v)| *v >= 0.0) {
+            stl = set(stl, v.count());
+        }
+    }
+    for (option, value, set, refused) in options {
+        if let Some(Whole(v)) = value.filter(|Whole(v)| *v < 0.0) {
+            let probe = match refused {
+                Some(r) => set(stl.clone(), r),
+                None => stl.clone(),
+            };
+            return Err(below_zero(probe, option, v));
+        }
+    }
+    let r = stl.decompose(&input.data)?;
+    Ok(StlDto {
+        trend: r.trend,
+        seasonal: r.seasonal,
+        residual: r.residual,
+        weights: r.weights,
+        trend_strength: r.trend_strength,
+        seasonal_strength: r.seasonal_strength,
+        period: r.period,
+        seasonal_span: r.seasonal_span,
+        trend_span: r.trend_span,
+        low_pass_span: r.low_pass_span,
+    })
+}
+
 /// Weibull fits and reliability metrics, Box-Cox capability, and the sigma
 /// level ↔ PPM conversion — the reliability and non-normal capability surface
 /// both transports carry.

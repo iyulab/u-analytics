@@ -2509,6 +2509,166 @@
       ],
       "type": "object"
     },
+    "StlDto": {
+      "properties": {
+        "low_pass_span": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "period": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "residual": {
+          "description": "`data − trend − seasonal`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "seasonal": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "seasonal_span": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "seasonal_strength": {
+          "description": "`max(0, 1 − Var(R)/Var(S + R))`.",
+          "format": "double",
+          "type": "number"
+        },
+        "trend": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "trend_span": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "trend_strength": {
+          "description": "`max(0, 1 − Var(R)/Var(T + R))`.",
+          "format": "double",
+          "type": "number"
+        },
+        "weights": {
+          "description": "Robustness weight of each point in the last pass, in `[0, 1]` (all 1\nwithout the outer loop); near 0 marks an outlier.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "trend",
+        "seasonal",
+        "residual",
+        "weights",
+        "trend_strength",
+        "seasonal_strength",
+        "period",
+        "seasonal_span",
+        "trend_span",
+        "low_pass_span"
+      ],
+      "type": "object"
+    },
+    "StlInputDto": {
+      "additionalProperties": false,
+      "description": "Input for `stl`. Every option but `period` is optional; absent or `null`\ntakes statsmodels' default.",
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "inner_iterations": {
+          "description": "Passes of the inner loop, at least 1 (default 5, or 2 when robust).",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "low_pass": {
+          "description": "Span of the low-pass smoother: odd, above the period (default the\nsmallest odd integer above it).",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "low_pass_degree": {
+          "description": "Degree of the low-pass Loess, 0 or 1 (default 1).",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "outer_iterations": {
+          "description": "Passes of the outer loop, at least 0 (default 0, or 15 when robust).",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "period": {
+          "description": "Length of the seasonal cycle, at least 2; at least two full cycles of\ndata.",
+          "type": "integer"
+        },
+        "robust": {
+          "default": false,
+          "description": "Down-weight outliers with the outer loop (default false).",
+          "type": "boolean"
+        },
+        "seasonal": {
+          "description": "Span of the seasonal smoother: odd, at least 3 (default 7).",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "seasonal_degree": {
+          "description": "Degree of the seasonal Loess, 0 or 1 (default 1).",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "trend": {
+          "description": "Span of the trend smoother: odd, above the period (default the smallest\nodd integer at least `1.5 · period / (1 − 1.5 / seasonal)`).",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "trend_degree": {
+          "description": "Degree of the trend Loess, 0 or 1 (default 1).",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data",
+        "period"
+      ],
+      "type": "object"
+    },
     "TChartDto": {
       "properties": {
         "points": {
@@ -4389,6 +4549,22 @@
     },
     "spectral_residual.output": {
       "$ref": "#/$defs/SpectralResidualDto"
+    },
+    "stl.input": {
+      "additionalProperties": false,
+      "description": "The arguments of stl(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/StlInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "stl.output": {
+      "$ref": "#/$defs/StlDto"
     },
     "t_chart.input": {
       "additionalProperties": false,

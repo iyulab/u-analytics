@@ -481,6 +481,21 @@
         "threshold": {}
       }
     },
+    "uanalytics_stl": {
+      "properties": {
+        "data": {},
+        "inner_iterations": {},
+        "low_pass": {},
+        "low_pass_degree": {},
+        "outer_iterations": {},
+        "period": {},
+        "robust": {},
+        "seasonal": {},
+        "seasonal_degree": {},
+        "trend": {},
+        "trend_degree": {}
+      }
+    },
     "uanalytics_t_chart": {
       "properties": {
         "times": {}

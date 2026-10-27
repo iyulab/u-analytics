@@ -159,6 +159,8 @@ public class RequestContractTests
         ["EstimatePeriod"] = c => c.EstimatePeriod(Seasonal(84, 7)),
         ["SpectralResidual"] = c => c.SpectralResidual(Seasonal(64, 8), averagingWindow: 3, judgementWindow: 21,
             threshold: 3, minZscore: 1.5, sensitivity: 0.7, batchSize: 32),
+        ["Stl"] = c => c.Stl(Seasonal(64, 8), 8, seasonal: 9, trend: 15, lowPass: 9, seasonalDegree: 0,
+            trendDegree: 1, lowPassDegree: 1, robust: true, innerIterations: 2, outerIterations: 5),
         ["CorrelationMatrix(pearson)"] = c => c.CorrelationMatrix([Series, Step()[..20]], CorrelationMethod.Pearson),
         ["CorrelationMatrix(spearman)"] = c => c.CorrelationMatrix([Series, Step()[..20]], CorrelationMethod.Spearman),
         ["CorrelationMatrix(kendall)"] = c => c.CorrelationMatrix([Series, Step()[..20]], CorrelationMethod.Kendall),

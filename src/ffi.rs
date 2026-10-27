@@ -1402,6 +1402,17 @@ pub unsafe extern "C" fn uanalytics_spectral_residual(
     })
 }
 
+wire_export!(
+    /// STL seasonal-trend decomposition: `{data, period, seasonal?, trend?, low_pass?,
+    /// seasonal_degree?, trend_degree?, low_pass_degree?, robust?, inner_iterations?,
+    /// outer_iterations?}` → `{trend, seasonal, residual, weights, trend_strength,
+    /// seasonal_strength, period, seasonal_span, trend_span, low_pass_span}`, the
+    /// WebAssembly binding's `stl`.
+    uanalytics_stl,
+    crate::wire::StlInputDto,
+    |r| crate::wire::stl_dto(r)
+);
+
 // ── Correlation, simple regression, distribution fitting ─────
 
 wire_export!(
@@ -1824,6 +1835,117 @@ mod tests {
         assert_eq!(
             (b["code"].as_str(), b["parameter"].as_str()),
             (Some("invalid_input"), Some("data"))
+        );
+    }
+
+    #[test]
+    fn stl_round_trips_and_names_what_it_refuses() {
+        let pattern = [2.0, -1.0, 0.5, -1.5];
+        let data: Vec<f64> = (0..48).map(|i| 0.3 * i as f64 + pattern[i % 4]).collect();
+        let req = serde_json::json!({ "data": data, "period": 4, "robust": true });
+        let (code, b) = call(uanalytics_stl, &req.to_string());
+        assert_eq!(code, 0, "{b}");
+        let wire = crate::wire::stl_dto(serde_json::from_value(req).unwrap()).unwrap();
+        assert_eq!(b, serde_json::to_value(&wire).unwrap());
+        assert_eq!(
+            (&b["seasonal_span"], &b["trend_span"], &b["low_pass_span"]),
+            (&7.into(), &9.into(), &5.into()),
+            "{b}"
+        );
+        assert_eq!(b["trend"].as_array().unwrap().len(), 48);
+
+        let refuse = |body: serde_json::Value| {
+            let (code, b) = call(uanalytics_stl, &body.to_string());
+            assert_eq!(code, ERR_COMPUTE, "{b}");
+            b
+        };
+        // An open bound is `exclusive_min`, never `min`.
+        let b = refuse(serde_json::json!({ "data": data, "period": 4, "trend": 3 }));
+        assert_eq!(
+            (
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["min"].is_null(),
+                b["exclusive_min"].as_f64(),
+                b["got"].as_f64()
+            ),
+            (
+                Some("parameter_out_of_range"),
+                Some("trend"),
+                true,
+                Some(4.0),
+                Some(3.0)
+            ),
+            "{b}"
+        );
+        // A negative count is a range refusal with the builder's domain.
+        let b = refuse(serde_json::json!({ "data": data, "period": 4, "trend": -1 }));
+        assert_eq!(
+            (
+                b["parameter"].as_str(),
+                b["exclusive_min"].as_f64(),
+                b["got"].as_f64()
+            ),
+            (Some("trend"), Some(4.0), Some(-1.0)),
+            "{b}"
+        );
+        let b = refuse(serde_json::json!({ "data": data, "period": -2 }));
+        assert_eq!(
+            (
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["min"].as_f64(),
+                b["got"].as_f64()
+            ),
+            (
+                Some("parameter_out_of_range"),
+                Some("period"),
+                Some(2.0),
+                Some(-2.0)
+            ),
+            "{b}"
+        );
+        let b = refuse(serde_json::json!({ "data": data, "period": 4, "trend_degree": -1 }));
+        assert_eq!(
+            (
+                b["parameter"].as_str(),
+                b["min"].as_f64(),
+                b["max"].as_f64(),
+                b["got"].as_f64()
+            ),
+            (Some("trend_degree"), Some(0.0), Some(1.0), Some(-1.0)),
+            "{b}"
+        );
+        let b = refuse(serde_json::json!({ "data": data, "period": 4, "outer_iterations": -3 }));
+        assert_eq!(
+            (
+                b["parameter"].as_str(),
+                b["min"].as_f64(),
+                b["got"].as_f64()
+            ),
+            (Some("outer_iterations"), Some(0.0), Some(-3.0)),
+            "{b}"
+        );
+        let b = refuse(serde_json::json!({ "data": data, "period": 4, "seasonal": 8 }));
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("invalid_option"), Some("seasonal")),
+            "{b}"
+        );
+        let b = refuse(serde_json::json!({ "data": [1, 2, 3, 4, 5, 6, 7], "period": 4 }));
+        assert_eq!(
+            (b["code"].as_str(), b["min"].as_f64(), b["got"].as_f64()),
+            (Some("insufficient_data"), Some(8.0), Some(7.0)),
+            "{b}"
+        );
+        let (_, b) = call(
+            uanalytics_stl,
+            &serde_json::json!({ "data": data, "period": 4.5 }).to_string(),
+        );
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("malformed_input"), Some("period")),
+            "{b}"
         );
     }
 

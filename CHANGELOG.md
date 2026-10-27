@@ -8,6 +8,17 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- `decomposition::Stl` -- seasonal-trend decomposition by Loess (STL; Cleveland
+  et al. 1990): trend, seasonal and remainder of a series with a known period,
+  statsmodels' `STL` defaults (spans, degrees, iterations), an optional robust
+  outer loop with bisquare weights, and the strengths of trend and seasonality
+  (Wang, Smith & Hyndman 2006). Matches statsmodels' `STL` on plain, robust,
+  explicit-span and degree-0 settings. Robustness weights stay 1 when the
+  remainder is at the data's rounding level, where statsmodels marks that noise
+  as outliers. WASM `stl`, C ABI `uanalytics_stl`, .NET `AnalyticsClient.Stl`.
+
 ## [0.28.0] - 2026-10-27
 
 Depends on u-numflow 0.15. The .NET client is `UAnalytics` 0.23.0.

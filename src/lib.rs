@@ -15,6 +15,7 @@
 //! - [`detection`] — Change-point detection (CUSUM, EWMA, PELT)
 //! - [`smoothing`] — Time series smoothing (SES, Holt, Holt-Winters)
 //! - [`seasonality`] — Periodogram and dominant-period estimation (AutoPeriod)
+//! - [`decomposition`] — Seasonal-trend decomposition by Loess (STL)
 //! - [`correlation`] — Correlation analysis (Pearson, Spearman, Kendall, matrices)
 //! - [`regression`] — Regression analysis (simple, multiple OLS, VIF)
 //! - [`distribution`] — Distribution analysis (ECDF, histogram bins, QQ-plot, KS test)

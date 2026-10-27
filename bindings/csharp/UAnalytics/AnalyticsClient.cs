@@ -716,6 +716,30 @@ public sealed class AnalyticsClient : IDisposable
             ("sensitivity", Request.Num("sensitivity", sensitivity)),
             ("batch_size", batchSize is { } b ? JsonValue.Create(b) : null));
 
+    /// <summary>
+    /// Seasonal-trend decomposition by Loess (STL; Cleveland et al. 1990) of a series with a
+    /// known <paramref name="period"/> (at least 2, with at least two full cycles of data):
+    /// <c>data = trend + seasonal + residual</c>. Spans are odd — <paramref name="seasonal"/>
+    /// at least 3, <paramref name="trend"/> and <paramref name="lowPass"/> above the period —
+    /// and degrees 0 or 1; arguments left <c>null</c> take statsmodels' <c>STL</c> defaults.
+    /// <paramref name="robust"/> adds the outer loop that down-weights outliers.
+    /// </summary>
+    public StlResult Stl(double[] data, int period, int? seasonal = null, int? trend = null,
+        int? lowPass = null, int? seasonalDegree = null, int? trendDegree = null, int? lowPassDegree = null,
+        bool robust = false, int? innerIterations = null, int? outerIterations = null)
+        => Call(NativeInterop.uanalytics_stl, AnalyticsJson.Default.StlResult,
+            ("data", Request.Nums("data", data)),
+            ("period", JsonValue.Create(period)),
+            ("seasonal", seasonal is { } s ? JsonValue.Create(s) : null),
+            ("trend", trend is { } t ? JsonValue.Create(t) : null),
+            ("low_pass", lowPass is { } l ? JsonValue.Create(l) : null),
+            ("seasonal_degree", seasonalDegree is { } sd ? JsonValue.Create(sd) : null),
+            ("trend_degree", trendDegree is { } td ? JsonValue.Create(td) : null),
+            ("low_pass_degree", lowPassDegree is { } ld ? JsonValue.Create(ld) : null),
+            ("robust", JsonValue.Create(robust)),
+            ("inner_iterations", innerIterations is { } i ? JsonValue.Create(i) : null),
+            ("outer_iterations", outerIterations is { } o ? JsonValue.Create(o) : null));
+
     // ── Correlation ──
 
     /// <summary>

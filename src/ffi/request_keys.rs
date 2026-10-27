@@ -635,6 +635,11 @@ fn entry_points() -> Vec<(&'static str, Entry, Value)> {
             json!({ "data": seasonal(64, 8) }),
         ),
         ep(
+            "uanalytics_stl",
+            uanalytics_stl,
+            json!({ "data": seasonal(64, 8), "period": 8, "robust": true }),
+        ),
+        ep(
             "uanalytics_correlation_matrix",
             uanalytics_correlation_matrix,
             json!({ "variables": [[1, 2, 3, 4, 5], [2, 1, 4, 3, 5]] }),

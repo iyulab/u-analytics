@@ -2773,6 +2773,63 @@
       }
     },
     {
+      "id": "stl",
+      "summary": "Seasonal-trend decomposition by Loess (STL) of a series with a known period into trend, seasonal and remainder components, with the robustness weights of the outer loop, the strengths of trend and seasonality and the smoother spans used.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/stl.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/stl.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The trend, seasonal component and robustness weights equal the reference's: default options, robust with outliers, explicit spans, degree-0 smoothers, a robust random walk and a seasonal span longer than the subseries.",
+            "reference_kind": "reference_implementation",
+            "reference": "statsmodels 0.15.0, statsmodels.tsa.seasonal.STL(y, period, ...).fit()",
+            "method": "compares six seeded series of 24 to 60 values rounded to three places, periods 4 to 12, every value of each component",
+            "tolerance": "trend and seasonal 1e-10 times the series' largest magnitude; weights 1e-10",
+            "test": "src/decomposition.rs::statsmodels_reference::matches_statsmodels"
+          },
+          {
+            "claim": "The components add up to the series, the default spans follow Cleveland et al. (1990) as statsmodels sets them, the robust pass gives an outlier a weight near 0, and a change of unit or offset leaves the shape and the weights unchanged.",
+            "reference_kind": "literature",
+            "reference": "Cleveland, Cleveland, McRae & Terpenning (1990), 'STL: A seasonal-trend decomposition procedure based on Loess', Journal of Official Statistics 6(1)",
+            "method": "definition checks on a seeded seasonal line: the sum identity, the default trend and low-pass spans, an injected outlier, scaling by 1e-9 and 1e9",
+            "tolerance": "sum 1e-12; scaled seasonal 1e-6, scaled weights and strength 1e-9",
+            "test": "src/decomposition.rs::tests::components_add_up_to_the_series"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for six series; the trend and seasonal strengths are not compared with an implementation.",
+          "When the remainder is at the data's rounding level (for example two full cycles, which the seasonal smoother interpolates) the robustness weights stay 1; statsmodels marks that rounding noise as outliers, so the weights differ from the reference's there."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
       "id": "sigma_to_ppm",
       "summary": "A sigma quality level as a defect rate in parts per million, by the Motorola convention with the 1.5-sigma shift: 10^6 (1 - Phi(sigma - 1.5)).",
       "input": {

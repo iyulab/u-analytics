@@ -520,6 +520,17 @@ public sealed record SpectralResidualPoint(
 /// <summary>Spectral residual scores; <see cref="Anomalies"/> lists the flagged indices.</summary>
 public sealed record SpectralResidualResult(IReadOnlyList<SpectralResidualPoint> Points, IReadOnlyList<int> Anomalies);
 
+/// <summary>
+/// STL decomposition: <c>data[i] = Trend[i] + Seasonal[i] + Residual[i]</c>; <see cref="Weights"/>
+/// are the last pass's robustness weights (all 1 without the outer loop, near 0 for an outlier);
+/// the strengths are <c>max(0, 1 − Var(R)/Var(C + R))</c> of trend and seasonality; and the
+/// spans are those used.
+/// </summary>
+public sealed record StlResult(
+    IReadOnlyList<double> Trend, IReadOnlyList<double> Seasonal, IReadOnlyList<double> Residual,
+    IReadOnlyList<double> Weights, double TrendStrength, double SeasonalStrength,
+    int Period, int SeasonalSpan, int TrendSpan, int LowPassSpan);
+
 // ── Correlation, regression, distributions ──
 
 /// <summary>Correlation coefficient.</summary>
