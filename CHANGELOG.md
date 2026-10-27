@@ -10,6 +10,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Added
 
+- `VERSION`: the crate's own version (`CARGO_PKG_VERSION`) as a constant at the
+  crate root, so a consumer can report what it was built against without
+  reading a lock file -- which names the wrong version once the crate is linked
+  from another package.
 - `goodness_of_fit(data, fit, replicates, seed)` -- whether a fitted family
   describes the data: the Anderson-Darling statistic A² against the fitted
   distribution and its parametric-bootstrap p-value (refit on `replicates`

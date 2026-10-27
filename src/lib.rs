@@ -27,6 +27,14 @@
 //! - **Numerical stability**: Leverages `u-numflow` for stable statistics
 //! - **Research-backed**: All algorithms reference academic literature
 
+/// This crate's version, as published (`CARGO_PKG_VERSION`) — for a consumer
+/// that reports what it was built against without reading a lock file.
+///
+/// ```
+/// assert!(!u_analytics::VERSION.is_empty());
+/// ```
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub mod capability;
 pub mod correlation;
 pub mod counter;
