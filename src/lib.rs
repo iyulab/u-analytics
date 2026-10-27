@@ -38,6 +38,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub mod capability;
 pub mod correlation;
 pub mod counter;
+pub mod decomposition;
 pub mod detection;
 pub mod distribution;
 pub mod msa;
