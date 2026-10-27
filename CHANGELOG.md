@@ -19,6 +19,23 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   remainder is at the data's rounding level, where statsmodels marks that noise
   as outliers. WASM `stl`, C ABI `uanalytics_stl`, .NET `AnalyticsClient.Stl`.
 
+### Changed
+
+- **Breaking:** data without the variation or information a statistic needs is
+  refused as `degenerate_data` (`parameter`, and `index` for one of several
+  variables) instead of `invalid_input` -- every value the same (t, F, rank,
+  normality and stationarity tests, ACF/PACF, regression slope, distribution and
+  Weibull fits, capability spread, a constant variable in `correlation_matrix`),
+  a singular ADF test regression, and a contingency-table row or column, or the
+  observed counts, summing to 0. A host that reports "no variation" can branch on
+  the code; `invalid_input` now means only a refusal without a more specific
+  reason.
+
+### Fixed
+
+- README: the C ABI's status `-4` (a caught panic) carries `code: "internal"`, as
+  the library returns, not `invalid_input`.
+
 ## [0.28.0] - 2026-10-27
 
 Depends on u-numflow 0.15. The .NET client is `UAnalytics` 0.23.0.

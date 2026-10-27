@@ -364,8 +364,8 @@ the .NET package from `AnalyticsClient.GetCodes()`.
 | `unknown_option` | an option given a name the function does not know — `parameter` names it (`rules`, `cost`, `penalty`, `observation.truncation`), `got` the name and `expected` the names it knows |
 | `events_unordered` | an event time earlier than the one before it (`index`) |
 | `event_after_end` | an event time after the end of observation (`index`) |
-| `invalid_input` | any other refusal of the input, without a more specific reason (`index`, `parameter`) |
-| `invalid_input` | any other refusal; the message says what |
+| `degenerate_data` | data without the variation or information the statistic needs — every value the same (`parameter`, and `index` for one of several variables), a test regression that is singular, a table row or column that sums to 0 |
+| `invalid_input` | any other refusal of the input, without a more specific reason (`index`, `parameter`); the message says what |
 | `internal` | A result the package could not hand back — a fault in the package, not in the input; please report it |
 
 `message` is written for people and may change between releases; `code` does not.
@@ -792,7 +792,7 @@ anderson_darling_test(data: number[] | Float64Array):
 // rule), every candidate fitted on the same observations, then refitted on all
 // it leaves — as statsmodels' adfuller(autolag="AIC"); `lags` fixes it instead
 // (not both: invalid_option). A deterministic series whose differences the
-// lags fit exactly is refused (invalid_input), not tested.
+// lags fit exactly is refused (degenerate_data), not tested.
 adf_test(input: { data: number[], model?: "none" | "constant" | "constant_trend",
                   max_lags?: number | null, lags?: number | null }):
   { statistic: number, n_lags: number, n_obs: number,
@@ -811,7 +811,7 @@ kpss_test(input: { data: number[], model?: "level" | "trend",
 
 // Association and fitting
 correlation_matrix(variables: number[][], options?: { method?: "pearson" | "spearman" | "kendall" } | null):
-  { matrix: number[][] }        // >= 2 variables of one length >= 3; a constant one -> invalid_input at its index
+  { matrix: number[][] }        // >= 2 variables of one length >= 3; a constant one -> degenerate_data at its index
 simple_regression(x: number[] | Float64Array, y: number[] | Float64Array):
   { slope, intercept, r_squared, adjusted_r_squared, slope_se, intercept_se,
     slope_t: number | null, intercept_t: number | null, slope_p, intercept_p, residual_se,
@@ -839,7 +839,7 @@ goodness_of_fit(input: {
 // Hypothesis tests. Samples are number[] | Float64Array; groups and tables are
 // number[][], refused where the value sits (`groups[1][2]` null -> parameter
 // "groups[1]", index 2). Too few values -> insufficient_data; a sample with no variation,
-// for which the statistic is undefined -> invalid_input.
+// for which the statistic is undefined -> degenerate_data.
 type TestResult = { statistic: number, df: number, p_value: number }
 one_sample_t_test(data, mu0: number): TestResult          // >= 2 values
 two_sample_t_test(a, b): TestResult                       // Welch; >= 2 each
@@ -1049,7 +1049,7 @@ char   *uanalytics_version(void);            // crate version; free with uanalyt
 | `-1` | `request_json` or `result_ptr` was null | null |
 | `-2` | the request did not parse into the expected shape | `{"error": "...", "code": "malformed_input", "index": ..., "parameter": ...}` — `parameter` the path to a value of the wrong type (`max_lags`, `signals[1]`), `index` its array position; both `null` for text that is not JSON or a missing field |
 | `-3` | the request parsed, and the computation rejected it | `{"error": "...", "code": "...", "index": ..., "parameter": ...}` |
-| `-4` | internal panic (caught; never unwinds across the boundary) | `{"error": "...", "code": "invalid_input", "index": null, "parameter": null}` |
+| `-4` | internal panic (caught; never unwinds across the boundary) | `{"error": "internal panic", "code": "internal", "index": null, "parameter": null}` |
 
 `code`, `index` and `parameter` are the same values the JavaScript `Error`
 carries (see **Errors** in the JavaScript section).

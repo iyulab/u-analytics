@@ -538,6 +538,7 @@ pub(crate) fn code_catalog() -> Codes {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Code {
     InvalidInput,
+    DegenerateData,
     MalformedInput,
     CountNotWhole,
     SampleSizeNotWhole,
@@ -559,8 +560,9 @@ pub(crate) enum Code {
 }
 
 impl Code {
-    pub(crate) const ALL: [Code; 18] = [
+    pub(crate) const ALL: [Code; 19] = [
         Code::InvalidInput,
+        Code::DegenerateData,
         Code::MalformedInput,
         Code::CountNotWhole,
         Code::SampleSizeNotWhole,
@@ -583,6 +585,7 @@ impl Code {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Code::InvalidInput => "invalid_input",
+            Code::DegenerateData => "degenerate_data",
             Code::MalformedInput => "malformed_input",
             Code::CountNotWhole => "count_not_whole",
             Code::SampleSizeNotWhole => "sample_size_not_whole",
@@ -609,6 +612,7 @@ impl Code {
     pub(crate) fn fields(self) -> &'static [&'static str] {
         match self {
             Code::InvalidInput => &["index", "parameter"],
+            Code::DegenerateData => &["index", "parameter"],
             Code::MalformedInput => &["index", "parameter"],
             Code::CountNotWhole => &["index", "parameter"],
             Code::SampleSizeNotWhole => &["index", "parameter"],
@@ -655,6 +659,9 @@ impl PartialEq<Code> for &str {
 pub(crate) mod code {
     /// Any refusal without a more specific code.
     pub(crate) const INVALID_INPUT: super::Code = super::Code::InvalidInput;
+    /// The data lack the variation or information the statistic needs: every
+    /// value the same, a singular regression, a table margin of 0.
+    pub(crate) const DEGENERATE_DATA: super::Code = super::Code::DegenerateData;
     /// The input is not the shape the function takes (not an array, a pair
     /// with the wrong arity, a value of the wrong type).
     pub(crate) const MALFORMED_INPUT: super::Code = super::Code::MalformedInput;
@@ -801,6 +808,11 @@ impl WireError {
     /// A refusal without a more specific code.
     pub(crate) fn invalid_input(message: impl Into<String>) -> Self {
         Self::new(code::INVALID_INPUT, None, message)
+    }
+
+    /// Data without the variation or information the statistic needs.
+    pub(crate) fn degenerate_data(message: impl Into<String>) -> Self {
+        Self::new(code::DEGENERATE_DATA, None, message)
     }
 
     /// Too few samples, with the message naming how many are needed.
@@ -1542,14 +1554,14 @@ pub(crate) mod hypothesis {
     }
 
     fn no_variation(test: &str, param: &'static str) -> WireError {
-        WireError::invalid_input(format!(
+        WireError::degenerate_data(format!(
             "{test}: {param} has no variation (every value is the same), so the statistic is undefined"
         ))
         .about(param)
     }
 
     fn both_constant(test: &str) -> WireError {
-        WireError::invalid_input(format!(
+        WireError::degenerate_data(format!(
             "{test}: a and b together have no variation, so the statistic is undefined"
         ))
     }
@@ -1633,7 +1645,7 @@ pub(crate) mod hypothesis {
         crate::testing::paired_t_test(&x, y)
             .map(Into::into)
             .ok_or_else(|| {
-                WireError::invalid_input(
+                WireError::degenerate_data(
                     "paired_t_test: every difference y - x is the same, so the statistic is undefined",
                 )
                 .about("y")
@@ -1823,7 +1835,7 @@ pub(crate) mod hypothesis {
             (max, None) => crate::testing::AdfLags::Aic { max },
         };
         let r = crate::testing::adf_test(&data, model, lags).ok_or_else(|| {
-            WireError::invalid_input(
+            WireError::degenerate_data(
                 "adf_test: the test regression is degenerate -- singular, or an exact \
                  fit of the differences (a deterministic series), so the t-ratio is \
                  undefined",
@@ -1966,7 +1978,7 @@ pub(crate) mod hypothesis {
             (None, None) => crate::testing::KpssLags::Hobijn,
         };
         let r = crate::testing::kpss_test(&data, model, lags).ok_or_else(|| {
-            WireError::invalid_input(
+            WireError::degenerate_data(
                 "kpss_test: the series has no variation about its level (or trend), so \
                  the statistic is undefined",
             )
@@ -2048,7 +2060,7 @@ pub(crate) mod hypothesis {
         crate::testing::chi_squared_goodness_of_fit(&observed, expected)
             .map(Into::into)
             .ok_or_else(|| {
-                WireError::invalid_input(
+                WireError::degenerate_data(
                     "chi_squared_goodness_of_fit: no statistic -- the observed counts sum to 0",
                 )
                 .about("observed")
@@ -2104,7 +2116,7 @@ pub(crate) mod hypothesis {
         crate::testing::chi_squared_independence(&flat, table.len(), cols)
             .map(Into::into)
             .ok_or_else(|| {
-                WireError::invalid_input(
+                WireError::degenerate_data(
                     "chi_squared_independence: a row or a column sums to 0, so its expected counts are 0",
                 )
                 .about("table")
@@ -2155,7 +2167,7 @@ pub(crate) mod hypothesis {
         crate::testing::fisher_exact_test(cells[0], cells[1], cells[2], cells[3])
             .map(Into::into)
             .ok_or_else(|| {
-                WireError::invalid_input(
+                WireError::degenerate_data(
                     "fisher_exact_test: a row or a column of the table sums to 0",
                 )
                 .about("table")
@@ -2334,7 +2346,7 @@ pub(crate) fn capability_dto(input: CapabilityInputDto) -> Result<CapabilityDto,
         None => spec.compute_overall(&data),
     }
     .ok_or_else(|| {
-        WireError::invalid_input("data: every value is the same, so no spread to measure against")
+        WireError::degenerate_data("data: every value is the same, so no spread to measure against")
             .about("data")
     })?;
 
@@ -2575,7 +2587,7 @@ pub(crate) fn goodness_of_fit_dto(
     let seed = gof_seed(input.seed)?;
     let data = at_least(input.data, MIN_GOF_DATA, "data")?;
     if first_constant(std::slice::from_ref(&data)).is_some() {
-        return Err(WireError::invalid_input(
+        return Err(WireError::degenerate_data(
             "data: every value is the same, so no distribution can be fitted",
         )
         .about("data"));
@@ -3453,7 +3465,7 @@ pub(crate) fn correlation_matrix_dto(
     }
     if let Some(i) = first_constant(&variables) {
         return Err(WireError::new(
-            code::INVALID_INPUT,
+            code::DEGENERATE_DATA,
             Some(i),
             format!("variables[{i}]: every value is the same, so its correlation is undefined"),
         )
@@ -3461,7 +3473,7 @@ pub(crate) fn correlation_matrix_dto(
     }
     let refs: Vec<&[f64]> = variables.iter().map(Vec::as_slice).collect();
     let m = compute(&refs).ok_or_else(|| {
-        WireError::invalid_input(format!(
+        WireError::degenerate_data(format!(
             "correlation_matrix: the {} correlation is undefined for these variables",
             input.method
         ))
@@ -3529,10 +3541,10 @@ pub(crate) fn simple_regression_dto(input: RegressionInputDto) -> Result<Regress
     }
     let x = at_least(x, 3, "x")?;
     if first_constant(std::slice::from_ref(&x)).is_some() {
-        return Err(
-            WireError::invalid_input("x: every value is the same, so no slope is defined")
-                .about("x"),
-        );
+        return Err(WireError::degenerate_data(
+            "x: every value is the same, so no slope is defined",
+        )
+        .about("x"));
     }
     let r = crate::regression::simple_linear_regression(&x, &y)
         .expect("lengths, size and variation of x were checked above; values are finite");
@@ -3585,7 +3597,7 @@ pub(crate) struct DistributionFitDto {
 pub(crate) fn fit_best_dto(data: &[f64]) -> Result<Vec<DistributionFitDto>, WireError> {
     let data = at_least(data.to_vec(), 2, "data")?;
     if first_constant(std::slice::from_ref(&data)).is_some() {
-        return Err(WireError::invalid_input(
+        return Err(WireError::degenerate_data(
             "data: every value is the same, so no distribution can be fitted",
         )
         .about("data"));
@@ -3842,8 +3854,10 @@ fn max_lag(value: Option<Whole>, n: usize, highest: usize) -> Result<usize, Wire
 }
 
 fn no_autocorrelation() -> WireError {
-    WireError::invalid_input("data: the series does not vary, so its autocorrelation is undefined")
-        .about("data")
+    WireError::degenerate_data(
+        "data: the series does not vary, so its autocorrelation is undefined",
+    )
+    .about("data")
 }
 
 pub(crate) fn acf_dto(input: AutocorrelationInputDto) -> Result<AcfDto, WireError> {
@@ -4460,7 +4474,7 @@ pub(crate) mod reliability {
     }
 
     fn degenerate(method: &str) -> WireError {
-        WireError::invalid_input(format!(
+        WireError::degenerate_data(format!(
             "{method}: failure_times has no spread (every value is the same), so the shape is undefined"
         ))
         .about("failure_times")
@@ -4926,7 +4940,7 @@ pub(crate) mod reliability {
                 vec![("min", Detail::Num(2.0)), ("got", Detail::Num(1.0))]
             );
             let e = weibull_mle_dto(&[5.0, 5.0, 5.0], &[], None, None, &[]).unwrap_err();
-            assert_eq!(e.code, "invalid_input");
+            assert_eq!(e.code, "degenerate_data");
             let ok = weibull_mrr_dto(&[150.0, 200.0, 250.0, 300.0, 350.0, 400.0], &[]).unwrap();
             assert!(ok.shape > 0.0 && ok.r_squared > 0.9);
             let censored =

@@ -1716,7 +1716,7 @@ mod tests {
         );
         assert_eq!(
             (code, b["code"].as_str(), b["parameter"].as_str()),
-            (-3, Some("invalid_input"), Some("data"))
+            (-3, Some("degenerate_data"), Some("data"))
         );
         // Below 8 values the correction is not tabulated: refused, not extrapolated.
         let (code, b) = call(uanalytics_anderson_darling_test, r#"{"data": [1, 2, 3]}"#);
@@ -1753,7 +1753,7 @@ mod tests {
         );
         assert_eq!(
             (code, b["code"].as_str(), b["index"].as_u64()),
-            (-3, Some("invalid_input"), Some(1)),
+            (-3, Some("degenerate_data"), Some(1)),
             "{b}"
         );
         let (_, b) = call(
@@ -1803,7 +1803,7 @@ mod tests {
         );
         assert_eq!(
             (b["code"].as_str(), b["parameter"].as_str()),
-            (Some("invalid_input"), Some("x"))
+            (Some("degenerate_data"), Some("x"))
         );
 
         let (code, b) = call(
@@ -1834,7 +1834,7 @@ mod tests {
         let (_, b) = call(uanalytics_fit_best, r#"{"data": [3, 3, 3]}"#);
         assert_eq!(
             (b["code"].as_str(), b["parameter"].as_str()),
-            (Some("invalid_input"), Some("data"))
+            (Some("degenerate_data"), Some("data"))
         );
     }
 
@@ -1984,7 +1984,7 @@ mod tests {
         let b = refuse(serde_json::json!({ "data": walk, "model": "drift" }));
         assert_eq!(b["code"], "unknown_option", "{b}");
         let b = refuse(serde_json::json!({ "data": vec![5.0; 12] }));
-        assert_eq!(b["code"], "invalid_input", "{b}");
+        assert_eq!(b["code"], "degenerate_data", "{b}");
         let b = refuse(serde_json::json!({ "data": [1, 2, 3] }));
         assert_eq!(b["code"], "insufficient_data", "{b}");
     }
@@ -2028,7 +2028,7 @@ mod tests {
             ("parameter_out_of_range".into(), 1.0.into())
         );
         let (_, b) = call(uanalytics_acf, r#"{"data": [2, 2, 2, 2]}"#);
-        assert_eq!(b["code"], "invalid_input", "{b}");
+        assert_eq!(b["code"], "degenerate_data", "{b}");
         let (_, b) = call(uanalytics_pacf, r#"{"data": [1, 2, 3]}"#);
         assert_eq!(b["code"], "insufficient_data", "{b}");
     }

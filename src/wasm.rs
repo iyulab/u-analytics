@@ -1931,7 +1931,7 @@ mod binding_contract_tests {
         let e = one_sample_t_dto(&[2.0, 2.0, 2.0], 1.0).unwrap_err();
         assert_eq!(
             (e.code, e.parameter.as_deref()),
-            (crate::wire::code::INVALID_INPUT.name(), Some("data"))
+            (crate::wire::code::DEGENERATE_DATA.name(), Some("data"))
         );
 
         let e = chi_squared_gof_dto(&[3.0, 4.0], &[3.5, 0.0]).unwrap_err();
