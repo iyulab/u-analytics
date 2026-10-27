@@ -781,6 +781,54 @@
       }
     },
     {
+      "id": "kpss_test",
+      "summary": "The KPSS stationarity test: the statistic with a level or trend null, the Newey-West truncation lag (Hobijn, Schwert or fixed), the p-value interpolated in the critical-value table and the 1, 2.5, 5 and 10 % levels.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/kpss_test.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/kpss_test.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The statistic, the truncation lag and the p-value equal the reference's for both models and all three lag rules.",
+            "reference_kind": "reference_implementation",
+            "reference": "statsmodels 0.15.0, statsmodels.tsa.stattools.kpss(x, regression='c'|'ct', nlags='auto'|'legacy'|4)",
+            "method": "compares a stationary AR(1) and a random walk of 60 values, twelve cases",
+            "tolerance": "statistic 1e-10 (relative); p-value 1e-12",
+            "test": "src/testing.rs::kpss_reference::statistic_lag_and_p_value_reproduce_statsmodels"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for two series; the critical values are the paper's asymptotic table (no finite-sample correction), and a p-value beyond it is reported as its bound."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
       "id": "correlation_matrix",
       "summary": "The Pearson, Spearman or Kendall (tau-b) correlation matrix of two or more variables of equal length, at least 3 values each.",
       "input": {

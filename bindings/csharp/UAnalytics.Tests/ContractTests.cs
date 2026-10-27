@@ -106,6 +106,7 @@ public class ContractTests
         ["ShapiroWilkTest"] = c => Out(c.ShapiroWilkTest(Series), AnalyticsJson.Default.ShapiroWilkResult),
         ["AndersonDarlingTest"] = c => Out(c.AndersonDarlingTest(Series), AnalyticsJson.Default.AndersonDarlingResult),
         ["AdfTest"] = c => Out(c.AdfTest(Walk(), AdfModel.ConstantTrend, 2), AnalyticsJson.Default.AdfResult),
+        ["KpssTest"] = c => Out(c.KpssTest(Walk(), KpssModel.Trend), AnalyticsJson.Default.KpssResult),
         ["MannKendallTest"] = c => Out(c.MannKendallTest(Series), AnalyticsJson.Default.MannKendallResult),
         ["OneWayAnova"] = c => Out(c.OneWayAnova(Subgroups), AnalyticsJson.Default.AnovaResult),
         ["KruskalWallisTest"] = c => Out(c.KruskalWallisTest(Subgroups), AnalyticsJson.Default.TestResult),

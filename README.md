@@ -771,6 +771,17 @@ adf_test(input: { data: number[], model?: "none" | "constant" | "constant_trend"
                   max_lags?: number | null, lags?: number | null }):
   { statistic: number, n_lags: number, n_obs: number,
     levels: { level: number, critical_value: number, rejected: boolean }[] }  // 1 %, 5 %, 10 %
+// KPSS — the complement: H0 stationary around a level ("level", default) or a
+// trend ("trend"). >= 10 values. The long-run variance's truncation lag is chosen
+// by lag_rule ("hobijn", default — Hobijn et al. 1998; "schwert") or fixed by lags
+// (0..n-1; not both: invalid_option). ADF not rejecting and KPSS rejecting = a unit
+// root: difference once and test again (the usual way to choose d).
+kpss_test(input: { data: number[], model?: "level" | "trend",
+                   lag_rule?: "hobijn" | "schwert" | null, lags?: number | null }):
+  { statistic: number, n_lags: number,
+    p_value: number,                                    // interpolated, within [0.01, 0.10]
+    p_value_bound: "interpolated" | "at_most" | "at_least",  // beyond the table: a bound
+    levels: { level: number, critical_value: number, rejected: boolean }[] }  // 1, 2.5, 5, 10 %
 
 // Association and fitting
 correlation_matrix(variables: number[][], options?: { method?: "pearson" | "spearman" | "kendall" } | null):
@@ -1029,6 +1040,7 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_ewma` | `ewma(input)` | `input` as is |
 | `uanalytics_anderson_darling_test` | `anderson_darling_test(data)` | `{ data: [...] }` |
 | `uanalytics_adf_test` | `adf_test(input)` | `input` as is |
+| `uanalytics_kpss_test` | `kpss_test(input)` | `input` as is |
 | `uanalytics_correlation_matrix` | `correlation_matrix(variables, { method? })` | `{ variables, method? }` |
 | `uanalytics_simple_regression` | `simple_regression(x, y)` | `{ x, y }` |
 | `uanalytics_fit_best` | `fit_best(data)` | `{ data: [...] }` |

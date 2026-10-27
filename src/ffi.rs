@@ -1095,6 +1095,14 @@ wire_export!(
 );
 
 wire_export!(
+    /// KPSS stationarity test: `{data, model?, lag_rule?, lags?}` → `{statistic,
+    /// n_lags, p_value, p_value_bound, levels[{level, critical_value, rejected}]}`.
+    uanalytics_kpss_test,
+    crate::wire::hypothesis::KpssInputDto,
+    |r| crate::wire::hypothesis::kpss_dto(r)
+);
+
+wire_export!(
     /// Mann-Kendall trend test with Sen's slope: → `{s_statistic, variance, z_statistic, p_value, kendall_tau, sen_slope}`, the WebAssembly binding's result.
     uanalytics_mann_kendall_test,
     DataReq,
@@ -1817,6 +1825,46 @@ mod tests {
             (b["code"].as_str(), b["parameter"].as_str()),
             (Some("invalid_input"), Some("data"))
         );
+    }
+
+    #[test]
+    fn kpss_round_trips_and_names_what_it_refuses() {
+        let walk: Vec<f64> = (0..40)
+            .scan(0.0, |y, i| {
+                *y += 1.0 + 0.3 * (((i * 7919) % 13) as f64 - 6.0);
+                Some(*y)
+            })
+            .collect();
+        let req = serde_json::json!({ "data": walk });
+        let (code, b) = call(uanalytics_kpss_test, &req.to_string());
+        assert_eq!(code, 0, "{b}");
+        let wire = crate::wire::hypothesis::kpss_dto(serde_json::from_value(req).unwrap()).unwrap();
+        assert_eq!(b, serde_json::to_value(&wire).unwrap());
+        let levels: Vec<f64> = b["levels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l["level"].as_f64().unwrap())
+            .collect();
+        assert_eq!(levels, vec![0.01, 0.025, 0.05, 0.10]);
+
+        let refuse = |body: serde_json::Value| call(uanalytics_kpss_test, &body.to_string()).1;
+        let b = refuse(serde_json::json!({ "data": walk, "lags": 2, "lag_rule": "schwert" }));
+        assert_eq!(
+            (b["code"].clone(), b["parameter"].clone()),
+            ("invalid_option".into(), "lags".into())
+        );
+        let b = refuse(serde_json::json!({ "data": walk, "lags": 40 }));
+        assert_eq!(
+            (b["code"].clone(), b["max"].clone()),
+            ("parameter_out_of_range".into(), 39.0.into())
+        );
+        let b = refuse(serde_json::json!({ "data": walk, "model": "drift" }));
+        assert_eq!(b["code"], "unknown_option", "{b}");
+        let b = refuse(serde_json::json!({ "data": vec![5.0; 12] }));
+        assert_eq!(b["code"], "invalid_input", "{b}");
+        let b = refuse(serde_json::json!({ "data": [1, 2, 3] }));
+        assert_eq!(b["code"], "insufficient_data", "{b}");
     }
 
     #[test]

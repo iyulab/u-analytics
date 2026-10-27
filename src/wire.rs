@@ -1846,6 +1846,152 @@ pub(crate) mod hypothesis {
         })
     }
 
+    /// KPSS stationarity test input.
+    #[derive(Deserialize)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    #[serde(deny_unknown_fields)]
+    pub(crate) struct KpssInputDto {
+        pub(crate) data: Vec<f64>,
+        /// What the null says the series is stationary around.
+        #[serde(default = "default_kpss_model")]
+        #[cfg_attr(feature = "wasm", tsify(optional))]
+        #[cfg_attr(feature = "wasm", tsify(type = "\"level\" | \"trend\""))]
+        #[cfg_attr(
+            all(test, feature = "wasm"),
+            schemars(schema_with = "crate::wire::card_schema::kpss_model")
+        )]
+        pub(crate) model: String,
+        /// How the long-run variance's truncation lag is chosen. Not with `lags`.
+        #[serde(default)]
+        #[cfg_attr(feature = "wasm", tsify(optional))]
+        #[cfg_attr(feature = "wasm", tsify(type = "\"hobijn\" | \"schwert\" | null"))]
+        #[cfg_attr(
+            all(test, feature = "wasm"),
+            schemars(schema_with = "crate::wire::card_schema::kpss_lag_rule_or_null")
+        )]
+        pub(crate) lag_rule: Option<String>,
+        /// Exactly this truncation lag, 0 to n − 1. Not with `lag_rule`.
+        #[serde(default)]
+        #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+        pub(crate) lags: Option<Whole>,
+    }
+
+    fn default_kpss_model() -> String {
+        "level".to_owned()
+    }
+
+    /// One significance level of the KPSS test.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct KpssLevelDto {
+        pub(crate) level: f64,
+        pub(crate) critical_value: f64,
+        /// `statistic > critical_value`: stationarity is rejected at this level.
+        pub(crate) rejected: bool,
+    }
+
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct KpssDto {
+        pub(crate) statistic: f64,
+        pub(crate) n_lags: usize,
+        /// Interpolated in the table of critical values, clamped to [0.01, 0.10].
+        pub(crate) p_value: f64,
+        /// `"interpolated"`, or `"at_most"` / `"at_least"` when the statistic
+        /// is beyond the table and `p_value` is its bound.
+        #[cfg_attr(
+            feature = "wasm",
+            tsify(type = "\"interpolated\" | \"at_most\" | \"at_least\"")
+        )]
+        #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["interpolated", "at_most", "at_least"])))]
+        pub(crate) p_value_bound: &'static str,
+        /// 1 %, 2.5 %, 5 % and 10 %, in that order (Kwiatkowski et al. 1992, Table 1).
+        pub(crate) levels: Vec<KpssLevelDto>,
+    }
+
+    /// `kpss_test`'s `model` names.
+    pub(crate) const KPSS_MODELS: [(&str, crate::testing::KpssModel); 2] = [
+        ("level", crate::testing::KpssModel::Level),
+        ("trend", crate::testing::KpssModel::Trend),
+    ];
+
+    /// `kpss_test`'s `lag_rule` names.
+    pub(crate) const KPSS_LAG_RULES: [(&str, crate::testing::KpssLags); 2] = [
+        ("hobijn", crate::testing::KpssLags::Hobijn),
+        ("schwert", crate::testing::KpssLags::Schwert),
+    ];
+
+    pub(crate) fn kpss_dto(input: KpssInputDto) -> Result<KpssDto, WireError> {
+        use crate::testing::KpssPValue as P;
+        let model = super::named("model", &input.model, &KPSS_MODELS)?;
+        let rule = input
+            .lag_rule
+            .as_deref()
+            .map(|name| super::named("lag_rule", name, &KPSS_LAG_RULES))
+            .transpose()?;
+        let data = at_least(input.data, 10, "data")?;
+        let n = data.len();
+        let fixed = match input.lags {
+            Some(Whole(l)) if !(0.0..=(n - 1) as f64).contains(&l) => {
+                return Err(WireError::out_of_range(
+                    "lags",
+                    Bound::Closed(0.0),
+                    Bound::Closed((n - 1) as f64),
+                    l,
+                    format!(
+                        "lags: {n} values allow a truncation lag of 0 to {}, got {l}",
+                        n - 1
+                    ),
+                ))
+            }
+            l => l.map(Whole::count),
+        };
+        let lags = match (rule, fixed) {
+            (Some(_), Some(_)) => {
+                return Err(WireError::new(
+                    code::INVALID_OPTION,
+                    None,
+                    "lags fixes the truncation lag and lag_rule chooses it -- give one",
+                )
+                .about("lags"))
+            }
+            (_, Some(l)) => crate::testing::KpssLags::Fixed(l),
+            (Some(rule), None) => rule,
+            (None, None) => crate::testing::KpssLags::Hobijn,
+        };
+        let r = crate::testing::kpss_test(&data, model, lags).ok_or_else(|| {
+            WireError::invalid_input(
+                "kpss_test: the series has no variation about its level (or trend), so \
+                 the statistic is undefined",
+            )
+            .about("data")
+        })?;
+        Ok(KpssDto {
+            statistic: r.statistic,
+            n_lags: r.n_lags,
+            p_value: r.p_value,
+            p_value_bound: match r.p_value_bound {
+                P::Interpolated => "interpolated",
+                P::AtMost => "at_most",
+                P::AtLeast => "at_least",
+            },
+            levels: (0..4)
+                .rev()
+                .map(|k| KpssLevelDto {
+                    level: crate::testing::KPSS_LEVELS[k],
+                    critical_value: r.critical_values[k],
+                    rejected: r.rejected[k],
+                })
+                .collect(),
+        })
+    }
+
     pub(crate) fn mann_kendall_dto(data: &[f64]) -> Result<MannKendallDto, WireError> {
         let data = at_least(data.to_vec(), 4, "data")?;
         crate::testing::mann_kendall_test(&data)
@@ -5972,6 +6118,16 @@ pub(crate) mod card_schema {
 
     pub(crate) fn adf_model(_: &mut SchemaGenerator) -> Schema {
         names(&super::hypothesis::ADF_MODELS)
+    }
+
+    pub(crate) fn kpss_model(_: &mut SchemaGenerator) -> Schema {
+        names(&super::hypothesis::KPSS_MODELS)
+    }
+
+    pub(crate) fn kpss_lag_rule_or_null(_: &mut SchemaGenerator) -> Schema {
+        or_null(crate::engine_card::string_enum(
+            super::hypothesis::KPSS_LAG_RULES.iter().map(|(n, _)| *n),
+        ))
     }
 
     pub(crate) fn capability_model_or_null(_: &mut SchemaGenerator) -> Schema {

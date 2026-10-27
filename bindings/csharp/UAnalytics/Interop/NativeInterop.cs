@@ -157,6 +157,9 @@ internal static partial class NativeInterop
     public static partial int uanalytics_adf_test(string requestJson, out IntPtr resultPtr);
 
     [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int uanalytics_kpss_test(string requestJson, out IntPtr resultPtr);
+
+    [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
     public static partial int uanalytics_estimate_period(string requestJson, out IntPtr resultPtr);
 
     [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]

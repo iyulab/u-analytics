@@ -22,9 +22,9 @@ use crate::wire::{
     gage_rr_anova_dto, gage_rr_xbar_r_dto, goodness_of_fit_dto,
     hypothesis::{
         adf_dto, anderson_darling_dto, chi_squared_gof_dto, chi_squared_independence_dto,
-        fisher_exact_dto, groups_test_dto, jarque_bera_dto, mann_kendall_dto, mann_whitney_dto,
-        one_sample_t_dto, one_way_anova_dto, p_adjust_dto, paired_t_dto, shapiro_wilk_dto,
-        two_sample_t_dto, wilcoxon_dto, AdfInputDto,
+        fisher_exact_dto, groups_test_dto, jarque_bera_dto, kpss_dto, mann_kendall_dto,
+        mann_whitney_dto, one_sample_t_dto, one_way_anova_dto, p_adjust_dto, paired_t_dto,
+        shapiro_wilk_dto, two_sample_t_dto, wilcoxon_dto, AdfInputDto, KpssInputDto,
     },
     imr_dto, laney_p_dto, laney_u_dto, multi_pelt_dto, np_chart_dto, p_chart_dto, pacf_dto,
     pelt_dto, percentile_capability_dto,
@@ -680,6 +680,27 @@ pub fn adf_test(
 ) -> Result<JsValue, JsValue> {
     let input: AdfInputDto = from_js(input, "input")?;
     to_js(&adf_dto(input).map_err(js_err)?)
+}
+
+/// KPSS stationarity test (Kwiatkowski et al. 1992): H₀ the series is
+/// stationary around a level (`model: "level"`, default) or a trend
+/// (`"trend"`) — the complement of [`adf_test`], whose null is the unit root.
+/// At least 10 values. The Newey-West truncation lag is chosen by `lag_rule`
+/// (`"hobijn"`, default — Hobijn et al. 1998; `"schwert"`) or fixed by `lags`
+/// (0 to n − 1; not both).
+///
+/// # Output JSON
+///
+/// `{ statistic, n_lags, p_value, p_value_bound, levels: [{ level, critical_value,
+/// rejected }] }` for 1 %, 2.5 %, 5 % and 10 %; `p_value` is interpolated in that
+/// table, and `p_value_bound` says `"at_most"` / `"at_least"` when the statistic
+/// lies beyond it. As statsmodels' `kpss`.
+#[wasm_bindgen(unchecked_return_type = "KpssDto")]
+pub fn kpss_test(
+    #[wasm_bindgen(unchecked_param_type = "KpssInputDto")] input: JsValue,
+) -> Result<JsValue, JsValue> {
+    let input: KpssInputDto = from_js(input, "input")?;
+    to_js(&kpss_dto(input).map_err(js_err)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -3251,6 +3272,11 @@ mod engine_card_tests {
             "adf_test",
             vec![arg("input", s.of::<AdfInputDto>())],
             s.of::<hypothesis::AdfDto>(),
+        );
+        s.op(
+            "kpss_test",
+            vec![arg("input", s.of::<KpssInputDto>())],
+            s.of::<hypothesis::KpssDto>(),
         );
         s.op(
             "correlation_matrix",

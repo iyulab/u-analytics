@@ -441,6 +441,21 @@ public sealed class AnalyticsClient : IDisposable
             ("max_lags", maxLags is { } m ? JsonValue.Create(m) : null),
             ("lags", lags is { } l ? JsonValue.Create(l) : null));
 
+    /// <summary>
+    /// KPSS stationarity test (H₀: the series is stationary around a level, or a trend with
+    /// <see cref="KpssModel.Trend"/>) — the complement of <see cref="AdfTest"/>. At least 10
+    /// values. The truncation lag of the long-run variance is chosen by
+    /// <paramref name="lagRule"/> (<c>null</c>: Hobijn et al.) or fixed by
+    /// <paramref name="lags"/> — give at most one. As statsmodels' <c>kpss</c>.
+    /// </summary>
+    public KpssResult KpssTest(double[] data, KpssModel model = KpssModel.Level,
+        KpssLagRule? lagRule = null, int? lags = null)
+        => Call(NativeInterop.uanalytics_kpss_test, AnalyticsJson.Default.KpssResult,
+            ("data", Request.Nums("data", data)),
+            ("model", Request.Option(model, AnalyticsJson.Default.KpssModel)),
+            ("lag_rule", lagRule is { } r ? Request.Option(r, AnalyticsJson.Default.KpssLagRule) : null),
+            ("lags", lags is { } l ? JsonValue.Create(l) : null));
+
     /// <summary>Mann-Kendall trend test with Kendall's tau and Sen's slope.</summary>
     public MannKendallResult MannKendallTest(double[] data)
         => Call(NativeInterop.uanalytics_mann_kendall_test, AnalyticsJson.Default.MannKendallResult,

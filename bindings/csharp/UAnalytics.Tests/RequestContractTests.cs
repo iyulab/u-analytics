@@ -127,6 +127,9 @@ public class RequestContractTests
         ["AdfTest(constant)"] = c => c.AdfTest(Walk(), AdfModel.Constant, maxLags: 2),
         ["AdfTest(constant_trend)"] = c => c.AdfTest(Walk(), AdfModel.ConstantTrend, maxLags: 2),
         ["AdfTest(lags)"] = c => c.AdfTest(Walk(), AdfModel.Constant, lags: 2),
+        ["KpssTest(level)"] = c => c.KpssTest(Walk(), KpssModel.Level, KpssLagRule.Hobijn),
+        ["KpssTest(trend)"] = c => c.KpssTest(Walk(), KpssModel.Trend, KpssLagRule.Schwert),
+        ["KpssTest(lags)"] = c => c.KpssTest(Walk(), lags: 3),
         ["MannKendallTest"] = c => c.MannKendallTest(Series),
         ["OneWayAnova"] = c => c.OneWayAnova(Subgroups),
         ["KruskalWallisTest"] = c => c.KruskalWallisTest(Subgroups),
@@ -259,6 +262,8 @@ public class RequestContractTests
         Assert.Equal(RequestKeys.Names("uanalytics_xbar_r_chart", "$.rules[]"), Names(AllRules, AnalyticsJson.Default.RunRule));
         Assert.Equal(RequestKeys.Names("uanalytics_xbar_r_chart", "$.rules"), Names(Enum.GetValues<RunRuleSet>(), AnalyticsJson.Default.RunRuleSet));
         Assert.Equal(RequestKeys.Names("uanalytics_adf_test", "$.model"), Names(Enum.GetValues<AdfModel>(), AnalyticsJson.Default.AdfModel));
+        Assert.Equal(RequestKeys.Names("uanalytics_kpss_test", "$.model"), Names(Enum.GetValues<KpssModel>(), AnalyticsJson.Default.KpssModel));
+        Assert.Equal(RequestKeys.Names("uanalytics_kpss_test", "$.lag_rule"), Names(Enum.GetValues<KpssLagRule>(), AnalyticsJson.Default.KpssLagRule));
         Assert.Equal(RequestKeys.Names("uanalytics_detect_changepoints", "$.cost"), Names(Enum.GetValues<PeltCost>(), AnalyticsJson.Default.PeltCost));
         Assert.Equal(RequestKeys.Names("uanalytics_correlation_matrix", "$.method"), Names(Enum.GetValues<CorrelationMethod>(), AnalyticsJson.Default.CorrelationMethod));
         Assert.Equal(RequestKeys.Names("uanalytics_percentile_capability", "$.distribution"), Names(Enum.GetValues<DistributionFamily>(), AnalyticsJson.Default.DistributionFamily));

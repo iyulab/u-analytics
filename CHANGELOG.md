@@ -10,6 +10,12 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Added
 
+- `kpss_test` -- the KPSS stationarity test (Kwiatkowski et al. 1992), the
+  complement of `adf_test`: H0 stationary around a level or a trend, the Newey-West
+  long-run variance with a truncation lag by Hobijn et al. (1998), Schwert's rule
+  or fixed, and the p-value interpolated in the paper's table (with whether it is
+  the table's bound). Matches statsmodels' `kpss` on every model and lag rule.
+  WASM `kpss_test`, C ABI `uanalytics_kpss_test`, .NET `AnalyticsClient.KpssTest`.
 - `acf` and `pacf` through every transport (WASM, C ABI `uanalytics_acf` /
   `uanalytics_pacf`, .NET `AnalyticsClient.Acf` / `Pacf`): lags up to `max_lag`
   (default statsmodels' `min(10 log10 n, n - 1)`, below `n / 2` for the partial

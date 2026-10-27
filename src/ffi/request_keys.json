@@ -245,6 +245,24 @@
         "data": {}
       }
     },
+    "uanalytics_kpss_test": {
+      "properties": {
+        "data": {},
+        "lag_rule": {
+          "enum": [
+            "hobijn",
+            "schwert"
+          ]
+        },
+        "lags": {},
+        "model": {
+          "enum": [
+            "level",
+            "trend"
+          ]
+        }
+      }
+    },
     "uanalytics_kruskal_wallis_test": {
       "properties": {
         "groups": {}

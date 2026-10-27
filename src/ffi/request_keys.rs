@@ -521,6 +521,11 @@ fn entry_points() -> Vec<(&'static str, Entry, Value)> {
             json!({ "data": walk() }),
         ),
         ep(
+            "uanalytics_kpss_test",
+            uanalytics_kpss_test,
+            json!({ "data": walk(), "model": "trend", "lag_rule": "schwert" }),
+        ),
+        ep(
             "uanalytics_mann_kendall_test",
             uanalytics_mann_kendall_test,
             json!({ "data": series() }),

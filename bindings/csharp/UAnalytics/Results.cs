@@ -414,6 +414,49 @@ public enum AdfModel
     [JsonStringEnumMemberName("constant_trend")] ConstantTrend,
 }
 
+/// <summary>One significance level of a KPSS test: <see cref="Rejected"/> = stationarity rejected.</summary>
+public sealed record KpssLevel(double Level, double CriticalValue, bool Rejected);
+
+/// <summary>
+/// KPSS stationarity test: the statistic, the truncation lag, the p-value interpolated in the
+/// table of critical values (<see cref="PValueBound"/> says when it is the table's bound
+/// instead), and the 1 %, 2.5 %, 5 % and 10 % levels.
+/// </summary>
+public sealed record KpssResult(
+    double Statistic, int NLags, double PValue, KpssPValueBound PValueBound, IReadOnlyList<KpssLevel> Levels);
+
+/// <summary>Where a KPSS p-value stands relative to its table.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<KpssPValueBound>))]
+public enum KpssPValueBound
+{
+    /// <summary>Interpolated between 0.01 and 0.10.</summary>
+    [JsonStringEnumMemberName("interpolated")] Interpolated,
+    /// <summary>Beyond the 1 % critical value: the p-value is at most 0.01.</summary>
+    [JsonStringEnumMemberName("at_most")] AtMost,
+    /// <summary>Below the 10 % critical value: the p-value is at least 0.10.</summary>
+    [JsonStringEnumMemberName("at_least")] AtLeast,
+}
+
+/// <summary>What the KPSS null says the series is stationary around.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<KpssModel>))]
+public enum KpssModel
+{
+    /// <summary>A constant level.</summary>
+    [JsonStringEnumMemberName("level")] Level,
+    /// <summary>A linear trend.</summary>
+    [JsonStringEnumMemberName("trend")] Trend,
+}
+
+/// <summary>How the KPSS long-run variance's truncation lag is chosen.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<KpssLagRule>))]
+public enum KpssLagRule
+{
+    /// <summary>Hobijn, Franses &amp; Ooms (1998), from the residuals' autocovariances.</summary>
+    [JsonStringEnumMemberName("hobijn")] Hobijn,
+    /// <summary>Schwert (1989): ⌈12·(n/100)^¼⌉.</summary>
+    [JsonStringEnumMemberName("schwert")] Schwert,
+}
+
 /// <summary>Mann-Kendall trend test with Kendall's τ and Sen's slope.</summary>
 public sealed record MannKendallResult(
     long SStatistic, double Variance, double ZStatistic, double PValue, double KendallTau, double SenSlope);

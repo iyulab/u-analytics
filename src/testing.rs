@@ -1809,6 +1809,356 @@ fn ln_factorial(n: u64) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
+// KPSS stationarity test
+// ---------------------------------------------------------------------------
+
+/// What the KPSS null hypothesis says the series is stationary around.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KpssModel {
+    /// A constant level (statsmodels `regression="c"`).
+    Level,
+    /// A linear trend (statsmodels `regression="ct"`).
+    Trend,
+}
+
+/// The truncation lag of the Newey-West long-run variance in [`kpss_test`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KpssLags {
+    /// Hobijn, Franses & Ooms (1998): chosen from the residuals' own
+    /// autocovariances (statsmodels' default, `nlags="auto"`).
+    Hobijn,
+    /// Schwert (1989): `⌈12·(n/100)^¼⌉` (statsmodels `nlags="legacy"`).
+    Schwert,
+    /// Exactly this many, below n.
+    Fixed(usize),
+}
+
+/// Where a [`KpssResult::p_value`] stands relative to the table it is read from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KpssPValue {
+    /// Interpolated inside the table (between 0.01 and 0.10).
+    Interpolated,
+    /// The statistic is beyond the 1 % critical value: the p-value is at most 0.01.
+    AtMost,
+    /// The statistic is below the 10 % critical value: the p-value is at least 0.10.
+    AtLeast,
+}
+
+/// Result of the KPSS stationarity test.
+#[derive(Debug, Clone)]
+pub struct KpssResult {
+    /// The KPSS statistic η / σ̂² (Kwiatkowski et al. 1992, eq. 11).
+    pub statistic: f64,
+    /// The truncation lag of the long-run variance.
+    pub n_lags: usize,
+    /// p-value, linearly interpolated in the table of critical values and
+    /// clamped to [0.01, 0.10] — see [`KpssResult::p_value_bound`].
+    pub p_value: f64,
+    /// Whether `p_value` is interpolated or a bound of the table.
+    pub p_value_bound: KpssPValue,
+    /// Critical values at 10 %, 5 %, 2.5 % and 1 % (Kwiatkowski et al. 1992, Table 1).
+    pub critical_values: [f64; 4],
+    /// `statistic > critical_value` at each of those levels: stationarity is rejected.
+    pub rejected: [bool; 4],
+}
+
+/// Significance levels of [`KpssResult::critical_values`], in order.
+pub const KPSS_LEVELS: [f64; 4] = [0.10, 0.05, 0.025, 0.01];
+
+/// KPSS test of stationarity: H₀ the series is stationary around a level (or
+/// a trend), H₁ it has a unit root.
+///
+/// The complement of [`adf_test`], whose null is the unit root: a series ADF
+/// does not reject and KPSS does is non-stationary; differencing it once and
+/// testing again is how the number of differences is chosen (Hyndman &
+/// Khandakar 2008, `ndiffs`).
+///
+/// # Algorithm
+///
+/// Residuals eₜ of the series on a constant (or constant + trend);
+/// η = Σ Sₜ² / n² with Sₜ the partial sums of eₜ; σ̂² the Newey-West long-run
+/// variance with Bartlett weights 1 − i/(l + 1); statistic η / σ̂². The p-value
+/// is interpolated in the table of critical values.
+///
+/// # Returns
+///
+/// `None` if fewer than 10 values, a non-finite value, a fixed lag of n or
+/// more, or no variation (σ̂² not positive against the series' size).
+///
+/// # References
+///
+/// - Kwiatkowski, Phillips, Schmidt & Shin (1992). "Testing the null
+///   hypothesis of stationarity against the alternative of a unit root."
+///   *Journal of Econometrics*, 54, 159–178.
+/// - Hobijn, Franses & Ooms (1998). "Generalisations of the KPSS-test for
+///   stationarity." Econometric Institute Report 9802/A.
+/// - Newey & West (1994). "Automatic lag selection in covariance matrix
+///   estimation." *Review of Economic Studies*, 61(4), 631–653.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::testing::{kpss_test, KpssLags, KpssModel};
+///
+/// // A walk that drifts: stationarity around a level is rejected at 5 %.
+/// let mut walk = vec![0.0];
+/// for i in 1..80 {
+///     walk.push(walk[i - 1] + 1.0 + 0.1 * (((i * 7919) % 13) as f64 - 6.0));
+/// }
+/// let r = kpss_test(&walk, KpssModel::Level, KpssLags::Hobijn).unwrap();
+/// assert!(r.rejected[1]);
+/// ```
+pub fn kpss_test(data: &[f64], model: KpssModel, lags: KpssLags) -> Option<KpssResult> {
+    let n = data.len();
+    if n < 10 || data.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let nf = n as f64;
+
+    let residuals: Vec<f64> = match model {
+        KpssModel::Level => {
+            let mean = data.iter().sum::<f64>() / nf;
+            data.iter().map(|x| x - mean).collect()
+        }
+        KpssModel::Trend => {
+            // OLS on 1 and t = 1..n.
+            let t_mean = (nf + 1.0) / 2.0;
+            let y_mean = data.iter().sum::<f64>() / nf;
+            let (mut sty, mut stt) = (0.0, 0.0);
+            for (i, y) in data.iter().enumerate() {
+                let dt = (i + 1) as f64 - t_mean;
+                sty += dt * (y - y_mean);
+                stt += dt * dt;
+            }
+            let slope = sty / stt;
+            data.iter()
+                .enumerate()
+                .map(|(i, y)| y - y_mean - slope * ((i + 1) as f64 - t_mean))
+                .collect()
+        }
+    };
+
+    // No variation beyond the rounding of the fit, against the series' size.
+    let sum_sq: f64 = residuals.iter().map(|e| e * e).sum();
+    let size: f64 = data.iter().map(|x| x * x).sum();
+    if sum_sq <= 1e-20 * size {
+        return None;
+    }
+
+    let autocovariance = |i: usize| -> f64 {
+        residuals[i..]
+            .iter()
+            .zip(&residuals[..n - i])
+            .map(|(a, b)| a * b)
+            .sum()
+    };
+
+    let n_lags = match lags {
+        KpssLags::Fixed(l) if l >= n => return None,
+        KpssLags::Fixed(l) => l,
+        KpssLags::Schwert => ((12.0 * (nf / 100.0).powf(0.25)).ceil() as usize).min(n - 1),
+        KpssLags::Hobijn => {
+            // Hobijn et al. (1998), as statsmodels' `_kpss_autolag`.
+            let cov_lags = nf.powf(2.0 / 9.0) as usize;
+            let mut s0 = sum_sq / nf;
+            let mut s1 = 0.0;
+            for i in 1..=cov_lags.min(n - 1) {
+                let g = autocovariance(i) / (nf / 2.0);
+                s0 += g;
+                s1 += i as f64 * g;
+            }
+            let s_hat = s1 / s0;
+            let gamma = 1.1447 * (s_hat * s_hat).powf(1.0 / 3.0);
+            ((gamma * nf.powf(1.0 / 3.0)) as usize).min(n - 1)
+        }
+    };
+
+    let mut long_run = sum_sq;
+    for i in 1..=n_lags {
+        long_run += 2.0 * autocovariance(i) * (1.0 - i as f64 / (n_lags as f64 + 1.0));
+    }
+    let long_run = long_run / nf;
+    if long_run <= 0.0 {
+        return None;
+    }
+
+    let mut partial = 0.0;
+    let eta = residuals
+        .iter()
+        .map(|e| {
+            partial += e;
+            partial * partial
+        })
+        .sum::<f64>()
+        / (nf * nf);
+    let statistic = eta / long_run;
+
+    let critical_values = match model {
+        KpssModel::Level => [0.347, 0.463, 0.574, 0.739],
+        KpssModel::Trend => [0.119, 0.146, 0.176, 0.216],
+    };
+    let (p_value, p_value_bound) = if statistic <= critical_values[0] {
+        (KPSS_LEVELS[0], KpssPValue::AtLeast)
+    } else if statistic >= critical_values[3] {
+        (KPSS_LEVELS[3], KpssPValue::AtMost)
+    } else {
+        let k = critical_values
+            .windows(2)
+            .position(|w| statistic <= w[1])
+            .expect("the statistic lies inside the table");
+        let (c0, c1) = (critical_values[k], critical_values[k + 1]);
+        let (p0, p1) = (KPSS_LEVELS[k], KPSS_LEVELS[k + 1]);
+        (
+            p0 + (statistic - c0) / (c1 - c0) * (p1 - p0),
+            KpssPValue::Interpolated,
+        )
+    };
+    let rejected = critical_values.map(|c| statistic > c);
+
+    Some(KpssResult {
+        statistic,
+        n_lags,
+        p_value,
+        p_value_bound,
+        critical_values,
+        rejected,
+    })
+}
+
+/// KPSS against statsmodels 0.15.0 `kpss(x, regression, nlags)` on a
+/// stationary AR(1) and a random walk (seeded, rounded to 3 places).
+#[cfg(test)]
+mod kpss_reference {
+    use super::*;
+
+    const AR: [f64; 60] = [
+        0.0, 0.299, -0.154, -0.953, -0.836, -1.326, -0.471, 1.152, -0.031, -0.633, 0.237, 0.452,
+        0.286, -0.816, -0.355, 0.553, -1.123, -0.907, -2.264, -2.196, -2.72, -1.323, -1.796,
+        -0.447, -0.022, -0.196, -2.595, -1.577, -0.68, -0.159, -1.594, -1.115, -1.425, -1.379,
+        0.509, -0.604, -0.275, 0.774, -0.274, -0.222, 0.021, 0.073, -1.196, -0.402, 1.198, -1.068,
+        0.432, 0.292, -0.524, 1.79, 1.478, -0.608, -0.168, 0.51, 0.015, 0.689, 0.209, 0.75, 1.739,
+        0.02,
+    ];
+    const RW: [f64; 60] = [
+        0.001, 0.3, 0.026, -0.865, -1.32, -2.312, -2.252, -0.912, -1.404, -2.024, -1.534, -1.177,
+        -1.072, -2.002, -2.031, -1.336, -2.68, -3.138, -5.039, -6.329, -8.171, -8.406, -9.673,
+        -9.402, -9.245, -9.432, -11.949, -12.488, -12.537, -12.424, -13.954, -14.432, -15.411,
+        -16.22, -15.159, -15.967, -16.0, -15.116, -15.7, -15.812, -15.702, -15.638, -16.863,
+        -16.787, -15.428, -16.975, -16.116, -15.997, -16.638, -14.638, -13.876, -15.075, -15.0,
+        -14.423, -14.612, -13.929, -13.996, -13.329, -11.89, -12.566,
+    ];
+
+    #[test]
+    fn statistic_lag_and_p_value_reproduce_statsmodels() {
+        use KpssLags::{Fixed, Hobijn, Schwert};
+        use KpssModel::{Level, Trend};
+        type Case = (&'static [f64; 60], KpssModel, KpssLags, f64, f64, usize);
+        let cases: [Case; 12] = [
+            (
+                &AR,
+                Level,
+                Hobijn,
+                0.5229270606681895,
+                0.036502914263921285,
+                3,
+            ),
+            (&AR, Level, Schwert, 0.288001639308506, 0.1, 11),
+            (
+                &AR,
+                Level,
+                Fixed(4),
+                0.46189194657609306,
+                0.05047760923444266,
+                4,
+            ),
+            (&AR, Trend, Hobijn, 0.2274846895383343, 0.01, 3),
+            (
+                &AR,
+                Trend,
+                Schwert,
+                0.14193842821368732,
+                0.05752142923391235,
+                11,
+            ),
+            (
+                &AR,
+                Trend,
+                Fixed(4),
+                0.20574827757371436,
+                0.013844395909857114,
+                4,
+            ),
+            (&RW, Level, Hobijn, 0.9286533322383663, 0.01, 5),
+            (
+                &RW,
+                Level,
+                Schwert,
+                0.5112288964656923,
+                0.0391376359311504,
+                11,
+            ),
+            (&RW, Level, Fixed(4), 1.09862199299003, 0.01, 4),
+            (&RW, Trend, Hobijn, 0.26866997231516837, 0.01, 4),
+            (
+                &RW,
+                Trend,
+                Schwert,
+                0.14468829763941088,
+                0.05242907844553539,
+                11,
+            ),
+            (&RW, Trend, Fixed(4), 0.26866997231516837, 0.01, 4),
+        ];
+        for (data, model, lags, statistic, p, n_lags) in cases {
+            let r = kpss_test(data, model, lags).unwrap();
+            let what = format!("{model:?} {lags:?}");
+            assert_eq!(r.n_lags, n_lags, "{what}");
+            assert!(
+                (r.statistic - statistic).abs() < 1e-10 * statistic,
+                "{what}: {} vs {statistic}",
+                r.statistic
+            );
+            assert!(
+                (r.p_value - p).abs() < 1e-12,
+                "{what}: p {} vs {p}",
+                r.p_value
+            );
+        }
+    }
+
+    #[test]
+    fn bounds_rejections_and_refusals() {
+        let r = kpss_test(&RW, KpssModel::Level, KpssLags::Fixed(4)).unwrap();
+        assert_eq!(r.p_value_bound, KpssPValue::AtMost);
+        assert_eq!(r.rejected, [true; 4]);
+        let r = kpss_test(&AR, KpssModel::Level, KpssLags::Schwert).unwrap();
+        assert_eq!(r.p_value_bound, KpssPValue::AtLeast);
+        assert_eq!(r.rejected, [false; 4]);
+        let r = kpss_test(&AR, KpssModel::Level, KpssLags::Hobijn).unwrap();
+        assert_eq!(r.p_value_bound, KpssPValue::Interpolated);
+        assert_eq!(r.rejected, [true, true, false, false]);
+
+        assert!(kpss_test(&AR[..9], KpssModel::Level, KpssLags::Hobijn).is_none());
+        assert!(kpss_test(&AR, KpssModel::Level, KpssLags::Fixed(60)).is_none());
+        assert!(kpss_test(&[4.0; 20], KpssModel::Level, KpssLags::Hobijn).is_none());
+        let line: Vec<f64> = (0..20).map(|i| 2.0 + 0.5 * i as f64).collect();
+        assert!(kpss_test(&line, KpssModel::Trend, KpssLags::Hobijn).is_none());
+    }
+
+    /// The statistic is a ratio of the residuals' own scale: the same in any unit.
+    #[test]
+    fn unit_invariant() {
+        let base = kpss_test(&AR, KpssModel::Trend, KpssLags::Hobijn).unwrap();
+        for f in [1e-9, 1e9] {
+            let x: Vec<f64> = AR.iter().map(|v| v * f).collect();
+            let r = kpss_test(&x, KpssModel::Trend, KpssLags::Hobijn).unwrap();
+            assert_eq!(r.n_lags, base.n_lags);
+            assert!((r.statistic - base.statistic).abs() < 1e-9 * base.statistic);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Augmented Dickey-Fuller test
 // ---------------------------------------------------------------------------
 
