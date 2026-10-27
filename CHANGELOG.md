@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-27
+
+Depends on u-numflow 0.15. The .NET client is `UAnalytics` 0.23.0.
+
 ### Added
 
 - `kpss_test` -- the KPSS stationarity test (Kwiatkowski et al. 1992), the
