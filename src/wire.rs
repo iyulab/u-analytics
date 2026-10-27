@@ -2261,6 +2261,194 @@ pub(crate) struct PercentileCapabilityInputDto {
         schemars(schema_with = "crate::wire::card_schema::capability_model_or_null")
     )]
     pub(crate) distribution: Option<String>,
+    /// Bootstrap replicates behind `goodness_of_fit.p_value`; absent = 199,
+    /// 0 = skip the p-value (`null`). See `goodness_of_fit`.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) fit_replicates: Option<Whole>,
+    /// Seed of the bootstrap draws; absent = 0.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) seed: Option<Whole>,
+}
+
+/// Input for `goodness_of_fit`.
+#[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct GoodnessOfFitInputDto {
+    pub(crate) data: Vec<f64>,
+    /// The family to fit and test, by the names `fit_best` reports.
+    #[cfg_attr(
+        feature = "wasm",
+        tsify(
+            type = "\"Normal\" | \"LogNormal\" | \"Weibull\" | \"Gamma\" | \"Exponential\" | \"Beta\""
+        )
+    )]
+    #[cfg_attr(
+        all(test, feature = "wasm"),
+        schemars(extend("enum" = ["Normal", "LogNormal", "Weibull", "Gamma", "Exponential", "Beta"]))
+    )]
+    pub(crate) distribution: String,
+    /// Bootstrap replicates, 1 to 9999; absent = 199.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) replicates: Option<Whole>,
+    /// Seed of the bootstrap draws; absent = 0.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) seed: Option<Whole>,
+}
+
+/// Most bootstrap replicates a goodness-of-fit request may ask for.
+const MAX_GOF_REPLICATES: f64 = 9999.0;
+
+/// Fewest values `goodness_of_fit` tests (as `anderson_darling_test`).
+const MIN_GOF_DATA: usize = 8;
+
+/// `replicates` within `[min, MAX_GOF_REPLICATES]`, absent = the default.
+fn gof_replicates(
+    value: Option<Whole>,
+    parameter: &'static str,
+    min: f64,
+) -> Result<usize, WireError> {
+    match value {
+        None => Ok(crate::distribution::DEFAULT_GOF_REPLICATES),
+        Some(Whole(b)) if (min..=MAX_GOF_REPLICATES).contains(&b) => Ok(Whole(b).count()),
+        Some(Whole(b)) => Err(WireError::out_of_range(
+            parameter,
+            Bound::Closed(min),
+            Bound::Closed(MAX_GOF_REPLICATES),
+            b,
+            format!("{parameter}: {min} to {MAX_GOF_REPLICATES} replicates, got {b}"),
+        )),
+    }
+}
+
+/// A bootstrap seed: a whole number from 0 to 2^53 (exact in a JSON number).
+fn gof_seed(value: Option<Whole>) -> Result<u64, WireError> {
+    match value {
+        None => Ok(0),
+        Some(Whole(s)) if (0.0..=MAX_EXACT_COUNT).contains(&s) => Ok(s as u64),
+        Some(Whole(s)) => Err(WireError::out_of_range(
+            "seed",
+            Bound::Closed(0.0),
+            Bound::Closed(MAX_EXACT_COUNT),
+            s,
+            format!("seed: 0 to {MAX_EXACT_COUNT}, got {s}"),
+        )),
+    }
+}
+
+/// How well the fitted family describes the data.
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct GoodnessOfFitDto {
+    /// Anderson–Darling A² against the fitted distribution.
+    pub(crate) statistic: f64,
+    /// Parametric-bootstrap p-value; `null` when `replicates` is 0.
+    pub(crate) p_value: Option<f64>,
+    pub(crate) replicates: usize,
+}
+
+/// `goodness_of_fit`'s result: the family fitted, its parameters, and the test.
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct GoodnessOfFitResultDto {
+    #[cfg_attr(
+        feature = "wasm",
+        tsify(
+            type = "\"Normal\" | \"LogNormal\" | \"Weibull\" | \"Gamma\" | \"Exponential\" | \"Beta\""
+        )
+    )]
+    #[cfg_attr(all(test, feature = "wasm"), schemars(extend("enum" = ["Normal", "LogNormal", "Weibull", "Gamma", "Exponential", "Beta"])))]
+    pub(crate) distribution: &'static str,
+    #[cfg_attr(feature = "wasm", tsify(type = "Record<string, number>"))]
+    pub(crate) parameters: std::collections::BTreeMap<String, f64>,
+    pub(crate) statistic: f64,
+    pub(crate) p_value: f64,
+    pub(crate) replicates: usize,
+}
+
+/// The test of `fit` against `data`, with `replicates` (0 = statistic only).
+fn goodness_dto(
+    data: &[f64],
+    fit: &crate::distribution::FitResult,
+    replicates: usize,
+    seed: u64,
+) -> GoodnessOfFitDto {
+    let statistic = crate::distribution::anderson_darling_fit(data, fit)
+        .expect("the fit is one of fit_best's families and the data finite");
+    let p_value = (replicates > 0).then(|| {
+        crate::distribution::goodness_of_fit(data, fit, replicates, seed)
+            .expect("the fit is one of fit_best's families and the data finite")
+            .p_value
+    });
+    GoodnessOfFitDto {
+        statistic,
+        p_value,
+        replicates,
+    }
+}
+
+/// The refusal for a family `data` does not admit: the first value outside
+/// its support when that is the reason, `invalid_option` otherwise.
+fn family_refusal(
+    model: crate::capability::CapabilityModel,
+    data: &[f64],
+    message: String,
+) -> WireError {
+    use crate::capability::CapabilityModel as M;
+    match model {
+        // The families on (0, inf) refuse data that reaches 0 or below; name
+        // the first such value.
+        M::LogNormal | M::Weibull | M::Gamma | M::Exponential if data.iter().any(|&v| v <= 0.0) => {
+            let index = data.iter().position(|&v| v <= 0.0);
+            let got = index.map_or(Detail::Null, |i| Detail::Num(data[i]));
+            WireError::new(code::NON_POSITIVE_DATA, index, message)
+                .about("data")
+                .with("got", got)
+        }
+        _ => WireError::new(code::INVALID_OPTION, None, message).about("distribution"),
+    }
+}
+
+pub(crate) fn goodness_of_fit_dto(
+    input: GoodnessOfFitInputDto,
+) -> Result<GoodnessOfFitResultDto, WireError> {
+    let model = capability_model(&input.distribution).ok_or_else(|| {
+        WireError::unknown_option("distribution", &input.distribution, CAPABILITY_MODELS)
+    })?;
+    let replicates = gof_replicates(input.replicates, "replicates", 1.0)?;
+    let seed = gof_seed(input.seed)?;
+    let data = at_least(input.data, MIN_GOF_DATA, "data")?;
+    if first_constant(std::slice::from_ref(&data)).is_some() {
+        return Err(WireError::invalid_input(
+            "data: every value is the same, so no distribution can be fitted",
+        )
+        .about("data"));
+    }
+    let fit = model.fit(&data).ok_or_else(|| {
+        family_refusal(
+            model,
+            &data,
+            format!("the {model:?} distribution cannot be fitted to this data"),
+        )
+    })?;
+    let gof = goodness_dto(&data, &fit, replicates, seed);
+    Ok(GoodnessOfFitResultDto {
+        distribution: capability_model_name(model),
+        parameters: fit.parameters.into_iter().collect(),
+        statistic: gof.statistic,
+        p_value: gof.p_value.expect("replicates >= 1"),
+        replicates,
+    })
 }
 
 /// The families `percentile_capability` fits, by the names `fit_best` uses.
@@ -2324,6 +2512,9 @@ pub(crate) struct PercentileCapabilityDto {
     /// Its fitted parameters by name, as `fit_best` reports them.
     #[cfg_attr(feature = "wasm", tsify(type = "Record<string, number>"))]
     pub(crate) parameters: std::collections::BTreeMap<String, f64>,
+    /// Whether that family describes the data — the indices mean nothing when
+    /// it does not.
+    pub(crate) goodness_of_fit: GoodnessOfFitDto,
 }
 
 #[derive(Deserialize)]
@@ -2585,6 +2776,8 @@ pub(crate) fn percentile_capability_dto(
         Some(name) => capability_model(name)
             .ok_or_else(|| WireError::unknown_option("distribution", name, CAPABILITY_MODELS))?,
     };
+    let replicates = gof_replicates(input.fit_replicates, "fit_replicates", 0.0)?;
+    let seed = gof_seed(input.seed)?;
     let data = at_least(input.data, crate::capability::MIN_PERCENTILE_DATA, "data")?;
     let result = crate::capability::percentile_capability(&data, input.lsl, input.usl, model)
         .map_err(|e| {
@@ -2593,23 +2786,11 @@ pub(crate) fn percentile_capability_dto(
                 E::NonFiniteData { index } => {
                     WireError::new(code::VALUE_NOT_FINITE, Some(index), message).about("data")
                 }
-                // The families on (0, inf) refuse data that reaches 0 or
-                // below; name the first such value.
-                E::ModelNotFitted(M::LogNormal | M::Weibull | M::Gamma | M::Exponential)
-                    if data.iter().any(|&v| v <= 0.0) =>
-                {
-                    let index = data.iter().position(|&v| v <= 0.0);
-                    let got = index.map_or(Detail::Null, |i| Detail::Num(data[i]));
-                    WireError::new(code::NON_POSITIVE_DATA, index, message)
-                        .about("data")
-                        .with("got", got)
-                }
-                E::ModelNotFitted(_) => {
-                    WireError::new(code::INVALID_OPTION, None, message).about("distribution")
-                }
+                E::ModelNotFitted(model) => family_refusal(model, &data, message),
                 _ => WireError::invalid_input(message).about("data"),
             }
         })?;
+    let goodness_of_fit = goodness_dto(&data, &result.fit, replicates, seed);
     Ok(PercentileCapabilityDto {
         cp_star: result.cp_star,
         cpk_star: result.cpk_star,
@@ -2619,7 +2800,8 @@ pub(crate) fn percentile_capability_dto(
         percentile_lower: result.percentile_lower,
         percentile_upper: result.percentile_upper,
         distribution: capability_model_name(result.model),
-        parameters: result.parameters.into_iter().collect(),
+        parameters: result.fit.parameters.into_iter().collect(),
+        goodness_of_fit,
     })
 }
 
@@ -3248,6 +3430,9 @@ pub(crate) struct DistributionFitDto {
     pub(crate) log_likelihood: f64,
     pub(crate) aic: f64,
     pub(crate) bic: f64,
+    /// Anderson–Darling A² against this fit — smaller is closer. Whether the
+    /// family fits at all is `goodness_of_fit`'s p-value.
+    pub(crate) anderson_darling: f64,
 }
 
 /// Every continuous family that fits `data`, best AIC first.
@@ -3264,6 +3449,8 @@ pub(crate) fn fit_best_dto(data: &[f64]) -> Result<Vec<DistributionFitDto>, Wire
     Ok(fits
         .into_iter()
         .map(|f| DistributionFitDto {
+            anderson_darling: crate::distribution::anderson_darling_fit(&data, &f)
+                .expect("fit_best's families on finite data"),
             distribution: f.distribution,
             parameters: f.parameters.into_iter().collect(),
             log_likelihood: f.log_likelihood,

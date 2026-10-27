@@ -889,6 +889,11 @@
           "format": "double",
           "type": "number"
         },
+        "anderson_darling": {
+          "description": "Anderson–Darling A² against this fit — smaller is closer. Whether the\nfamily fits at all is `goodness_of_fit`'s p-value.",
+          "format": "double",
+          "type": "number"
+        },
         "bic": {
           "format": "double",
           "type": "number"
@@ -923,7 +928,8 @@
         "parameters",
         "log_likelihood",
         "aic",
-        "bic"
+        "bic",
+        "anderson_darling"
       ],
       "type": "object"
     },
@@ -1312,6 +1318,122 @@
         "percent_pv",
         "ndc",
         "status"
+      ],
+      "type": "object"
+    },
+    "GoodnessOfFitDto": {
+      "description": "How well the fitted family describes the data.",
+      "properties": {
+        "p_value": {
+          "description": "Parametric-bootstrap p-value; `null` when `replicates` is 0.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "replicates": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "statistic": {
+          "description": "Anderson–Darling A² against the fitted distribution.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "statistic",
+        "replicates"
+      ],
+      "type": "object"
+    },
+    "GoodnessOfFitInputDto": {
+      "additionalProperties": false,
+      "description": "Input for `goodness_of_fit`.",
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "distribution": {
+          "description": "The family to fit and test, by the names `fit_best` reports.",
+          "enum": [
+            "Normal",
+            "LogNormal",
+            "Weibull",
+            "Gamma",
+            "Exponential",
+            "Beta"
+          ],
+          "type": "string"
+        },
+        "replicates": {
+          "description": "Bootstrap replicates, 1 to 9999; absent = 199.",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "seed": {
+          "description": "Seed of the bootstrap draws; absent = 0.",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data",
+        "distribution"
+      ],
+      "type": "object"
+    },
+    "GoodnessOfFitResultDto": {
+      "description": "`goodness_of_fit`'s result: the family fitted, its parameters, and the test.",
+      "properties": {
+        "distribution": {
+          "enum": [
+            "Normal",
+            "LogNormal",
+            "Weibull",
+            "Gamma",
+            "Exponential",
+            "Beta"
+          ],
+          "type": "string"
+        },
+        "p_value": {
+          "format": "double",
+          "type": "number"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "replicates": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "statistic": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "distribution",
+        "parameters",
+        "statistic",
+        "p_value",
+        "replicates"
       ],
       "type": "object"
     },
@@ -1718,6 +1840,10 @@
           ],
           "type": "string"
         },
+        "goodness_of_fit": {
+          "$ref": "#/$defs/GoodnessOfFitDto",
+          "description": "Whether that family describes the data — the indices mean nothing when\nit does not."
+        },
         "median": {
           "format": "double",
           "type": "number"
@@ -1744,7 +1870,8 @@
         "percentile_lower",
         "percentile_upper",
         "distribution",
-        "parameters"
+        "parameters",
+        "goodness_of_fit"
       ],
       "type": "object"
     },
@@ -1779,10 +1906,24 @@
           "default": null,
           "description": "The family to fit, by the names `fit_best` reports; absent = the one it\nranks first."
         },
+        "fit_replicates": {
+          "description": "Bootstrap replicates behind `goodness_of_fit.p_value`; absent = 199,\n0 = skip the p-value (`null`). See `goodness_of_fit`.",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "lsl": {
           "format": "double",
           "type": [
             "number",
+            "null"
+          ]
+        },
+        "seed": {
+          "description": "Seed of the bootstrap draws; absent = 0.",
+          "type": [
+            "integer",
             "null"
           ]
         },
@@ -3290,6 +3431,22 @@
     },
     "gage_rr_xbar_r.output": {
       "$ref": "#/$defs/GageRRResultDto"
+    },
+    "goodness_of_fit.input": {
+      "additionalProperties": false,
+      "description": "The arguments of goodness_of_fit(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/GoodnessOfFitInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "goodness_of_fit.output": {
+      "$ref": "#/$defs/GoodnessOfFitResultDto"
     },
     "imr_chart.input": {
       "additionalProperties": false,

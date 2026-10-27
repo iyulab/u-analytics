@@ -135,6 +135,7 @@ public class ContractTests
         ["SimpleRegression"] = c => Out(c.SimpleRegression(Positive, Positive.Select((v, i) => 2 * v + i % 3).ToArray()), AnalyticsJson.Default.RegressionResult),
         ["SimpleRegression(exact)"] = c => Out(c.SimpleRegression([1, 2, 3, 4], [3, 5, 7, 9]), AnalyticsJson.Default.RegressionResult),
         ["FitBest"] = c => Out(c.FitBest(Positive), AnalyticsJson.Default.IReadOnlyListDistributionFit),
+        ["GoodnessOfFit"] = c => Out(c.GoodnessOfFit(Positive, DistributionFamily.Weibull, replicates: 19), AnalyticsJson.Default.GoodnessOfFitResult),
         ["GetCodes"] = c => Out(c.GetCodes(), AnalyticsJson.Default.Codes),
     };
 

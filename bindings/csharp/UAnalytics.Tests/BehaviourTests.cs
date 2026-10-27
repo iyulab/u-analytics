@@ -48,6 +48,18 @@ public class BehaviourTests
     }
 
     [Fact]
+    public void Percentile_capability_says_when_its_family_does_not_fit()
+    {
+        double[] uniform = [.. Enumerable.Range(1, 1000).Select(i => (double)i)];
+        var capability = _client.PercentileCapability(uniform, usl: 1100, lsl: 0);
+        Assert.Equal(199, capability.GoodnessOfFit.Replicates);
+        Assert.Equal(1.0 / 200, capability.GoodnessOfFit.PValue);
+        var same = _client.GoodnessOfFit(uniform, capability.Distribution);
+        Assert.Equal(capability.GoodnessOfFit.Statistic, same.Statistic, 12);
+        Assert.Null(_client.PercentileCapability(uniform, usl: 1100, lsl: 0, fitReplicates: 0).GoodnessOfFit.PValue);
+    }
+
+    [Fact]
     public void The_engine_still_names_what_it_refuses()
     {
         var e = Assert.Throws<AnalyticsException>(() => _client.TChart([1.0, -2.0, 3.0]));

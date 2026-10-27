@@ -171,6 +171,9 @@ internal static partial class NativeInterop
     [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
     public static partial int uanalytics_fit_best(string requestJson, out IntPtr resultPtr);
 
+    [LibraryImport(DllName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int uanalytics_goodness_of_fit(string requestJson, out IntPtr resultPtr);
+
     [LibraryImport(DllName)]
     public static partial void uanalytics_free_string(IntPtr ptr);
 

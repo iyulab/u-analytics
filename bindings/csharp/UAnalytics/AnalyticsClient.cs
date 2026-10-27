@@ -257,15 +257,19 @@ public sealed class AnalyticsClient : IDisposable
     /// quantiles and the median of a distribution fitted to <paramref name="data"/> (at least
     /// 20 values) stand in for μ ± 3σ and μ. The family is <paramref name="distribution"/>, or
     /// when it is null the one <see cref="FitBest"/> ranks first; the result names the family
-    /// and its parameters.
+    /// and its parameters, and carries the Anderson-Darling test of that family against the data
+    /// (<see cref="GoodnessOfFit"/>, <paramref name="fitReplicates"/> bootstrap replicates,
+    /// default 199, 0 for no p-value; drawn from <paramref name="seed"/>, default 0).
     /// </summary>
     public PercentileCapabilityResult PercentileCapability(double[] data, double? usl, double? lsl,
-        DistributionFamily? distribution = null)
+        DistributionFamily? distribution = null, int? fitReplicates = null, long? seed = null)
         => Call(NativeInterop.uanalytics_percentile_capability, AnalyticsJson.Default.PercentileCapabilityResult,
             ("data", Request.Nums("data", data)), ("usl", Request.Num("usl", usl)),
             ("lsl", Request.Num("lsl", lsl)),
             ("distribution", distribution is { } d
-                ? Request.Option(d, AnalyticsJson.Default.DistributionFamily) : null));
+                ? Request.Option(d, AnalyticsJson.Default.DistributionFamily) : null),
+            ("fit_replicates", fitReplicates is { } r ? JsonValue.Create(r) : null),
+            ("seed", seed is { } s ? JsonValue.Create(s) : null));
 
     // ── MSA ──
 
@@ -707,12 +711,29 @@ public sealed class AnalyticsClient : IDisposable
     /// <summary>
     /// Every continuous family that fits <paramref name="data"/> (at least 2 values, not all
     /// equal), best AIC first: each with <c>distribution</c>, <c>parameters</c> (an object of
-    /// name → value), <c>log_likelihood</c>, <c>aic</c>, <c>bic</c>. Normal always;
+    /// name → value), <c>log_likelihood</c>, <c>aic</c>, <c>bic</c>, <c>anderson_darling</c>. Normal always;
     /// Exponential, Gamma, LogNormal and Weibull for positive data; Beta for data in (0, 1).
     /// </summary>
     public IReadOnlyList<DistributionFit> FitBest(double[] data)
         => Call(NativeInterop.uanalytics_fit_best, AnalyticsJson.Default.IReadOnlyListDistributionFit,
             ("data", Request.Nums("data", data)));
+
+    /// <summary>
+    /// Whether <paramref name="distribution"/> describes <paramref name="data"/> (at least 8
+    /// values, not all equal): fits the family by maximum likelihood and returns the
+    /// Anderson-Darling statistic A² against the fit with its parametric-bootstrap p-value —
+    /// <paramref name="replicates"/> samples (1–9999, default 199) drawn from the fit with
+    /// <paramref name="seed"/> (default 0) and refitted, so the p-value accounts for the
+    /// parameters having been estimated from the same data. <see cref="FitBest"/> ranks families
+    /// against each other; this says whether the chosen one fits at all.
+    /// </summary>
+    public GoodnessOfFitResult GoodnessOfFit(double[] data, DistributionFamily distribution,
+        int? replicates = null, long? seed = null)
+        => Call(NativeInterop.uanalytics_goodness_of_fit, AnalyticsJson.Default.GoodnessOfFitResult,
+            ("data", Request.Nums("data", data)),
+            ("distribution", Request.Option(distribution, AnalyticsJson.Default.DistributionFamily)),
+            ("replicates", replicates is { } r ? JsonValue.Create(r) : null),
+            ("seed", seed is { } s ? JsonValue.Create(s) : null));
 
     // ── Internal ──
 

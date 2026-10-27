@@ -100,6 +100,7 @@ public class RequestContractTests
         ["ProcessCapability"] = c => c.ProcessCapability(Series, 11, 9, target: 10, sigmaWithin: 0.25, sigmaWithinDf: 15, confidence: 0.9),
         ["PercentileCapability"] = c => c.PercentileCapability(Series, 11, 9),
         ["PercentileCapability(Normal)"] = c => c.PercentileCapability(Series, 11, 9, DistributionFamily.Normal),
+        ["PercentileCapability(fit)"] = c => c.PercentileCapability(Series, 11, 9, fitReplicates: 9, seed: 1),
         ["PercentileCapability(LogNormal)"] = c => c.PercentileCapability(Series, 11, 9, DistributionFamily.LogNormal),
         ["PercentileCapability(Weibull)"] = c => c.PercentileCapability(Series, 11, 9, DistributionFamily.Weibull),
         ["PercentileCapability(Gamma)"] = c => c.PercentileCapability(Series, 11, 9, DistributionFamily.Gamma),
@@ -160,6 +161,12 @@ public class RequestContractTests
         ["CorrelationMatrix(kendall)"] = c => c.CorrelationMatrix([Series, Step()[..20]], CorrelationMethod.Kendall),
         ["SimpleRegression"] = c => c.SimpleRegression([1, 2, 3, 4], [3, 5, 7.1, 9]),
         ["FitBest"] = c => c.FitBest(Positive),
+        ["GoodnessOfFit"] = c => c.GoodnessOfFit(Positive, DistributionFamily.Weibull, replicates: 19, seed: 1),
+        ["GoodnessOfFit(Normal)"] = c => c.GoodnessOfFit(Series, DistributionFamily.Normal, replicates: 9),
+        ["GoodnessOfFit(LogNormal)"] = c => c.GoodnessOfFit(Series, DistributionFamily.LogNormal, replicates: 9),
+        ["GoodnessOfFit(Gamma)"] = c => c.GoodnessOfFit(Series, DistributionFamily.Gamma, replicates: 9),
+        ["GoodnessOfFit(Exponential)"] = c => c.GoodnessOfFit(Series, DistributionFamily.Exponential, replicates: 9),
+        ["GoodnessOfFit(Beta)"] = c => c.GoodnessOfFit([.. Series.Select(v => v / 20)], DistributionFamily.Beta, replicates: 9),
     };
 
     /// <summary>

@@ -192,6 +192,23 @@
         "tolerance": {}
       }
     },
+    "uanalytics_goodness_of_fit": {
+      "properties": {
+        "data": {},
+        "distribution": {
+          "enum": [
+            "Normal",
+            "LogNormal",
+            "Weibull",
+            "Gamma",
+            "Exponential",
+            "Beta"
+          ]
+        },
+        "replicates": {},
+        "seed": {}
+      }
+    },
     "uanalytics_imr_chart": {
       "properties": {
         "rules": {
@@ -335,7 +352,9 @@
             "Beta"
           ]
         },
+        "fit_replicates": {},
         "lsl": {},
+        "seed": {},
         "usl": {}
       }
     },

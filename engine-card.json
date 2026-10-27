@@ -888,7 +888,7 @@
     },
     {
       "id": "fit_best",
-      "summary": "Every continuous family that fits the data by maximum likelihood, best AIC first, with parameters, log-likelihood, AIC and BIC: normal always; exponential, gamma, lognormal and Weibull for positive data; beta for data inside (0, 1).",
+      "summary": "Every continuous family that fits the data by maximum likelihood, best AIC first, with parameters, log-likelihood, AIC, BIC and the Anderson-Darling statistic against each fit: normal always; exponential, gamma, lognormal and Weibull for positive data; beta for data inside (0, 1).",
       "input": {
         "schema": "schemas/wasm.schema.json#/$defs/fit_best.input",
         "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
@@ -924,11 +924,77 @@
             "method": "compares the family order and every parameter, log-likelihood, AIC and BIC of three samples (data inside (0, 1), positive data, data of mixed sign) with the reference's",
             "tolerance": "1e-9 (relative)",
             "test": "src/distribution.rs::scipy_reference::data_inside_the_unit_interval_is_fitted_by_all_six_families"
+          },
+          {
+            "claim": "A² against a given distribution equals the reference's for every family offered, including a value far in the upper tail.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1: A² summed from scipy.stats logcdf and logsf of norm, lognorm, weibull_min, gamma, expon and beta at the same parameters",
+            "method": "compares A² of two fixed samples of 12 against fixed parameters of each family",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/distribution.rs::goodness_of_fit_reference::anderson_darling_statistic_reproduces_scipy_for_every_family"
           }
         ],
         "limits": [
           "Checked for three samples of 8 to 12 values; the fit of a heavily tied or near-degenerate sample, and the convergence refusal, are not compared with the reference.",
           "The reference solves the same likelihood equations, so it checks the numerical solution, not the choice of the families offered."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "goodness_of_fit",
+      "summary": "Whether a distribution family describes the data: fits the family by maximum likelihood and returns the Anderson-Darling statistic against the fit with a parametric-bootstrap p-value, which accounts for the parameters having been estimated from the same data.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/goodness_of_fit.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/goodness_of_fit.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "seeded"
+      },
+      "determinism": {
+        "kind": "seeded",
+        "test": "src/distribution.rs::goodness_of_fit_reference::same_seed_same_p_value_and_refusals",
+        "note": "The bootstrap draws come from `seed` (absent = 0), so the same request always gives the same p-value."
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "A² against a given distribution equals the reference's for every family offered, including a value far in the upper tail.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1: A² summed from scipy.stats logcdf and logsf of norm, lognorm, weibull_min, gamma, expon and beta at the same parameters",
+            "method": "compares A² of two fixed samples of 12 against fixed parameters of each family",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/distribution.rs::goodness_of_fit_reference::anderson_darling_statistic_reproduces_scipy_for_every_family"
+          },
+          {
+            "claim": "The parametric-bootstrap p-value agrees with the reference's Monte Carlo of the same test.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.goodness_of_fit(expon, known loc 0, statistic='ad', n_mc_samples=99999)",
+            "method": "compares A² and the p-value (9 999 replicates here) of one sample of 12",
+            "tolerance": "A² 1e-9 (relative); p-value 0.015 absolute (about 4 standard errors of the two Monte Carlo estimates)",
+            "test": "src/distribution.rs::goodness_of_fit_reference::bootstrap_p_value_agrees_with_scipy_goodness_of_fit"
+          }
+        ],
+        "limits": [
+          "The p-value is compared with the reference for the exponential family only; SciPy fits the normal with the n − 1 standard deviation, a different estimator from this crate's maximum-likelihood one.",
+          "A p-value is resolved to 1 / (replicates + 1); the bootstrap's own Monte Carlo error is not reported."
         ]
       },
       "performance": {
@@ -2254,7 +2320,7 @@
     },
     {
       "id": "percentile_capability",
-      "summary": "Percentile-based capability of non-normal data (ISO 22514-2): a fitted distribution's lower and upper percentiles and median against the specification limits, as Cp*, Cpk*, Cpl* and Cpu*.",
+      "summary": "Percentile-based capability of non-normal data (ISO 22514-2): a fitted distribution's lower and upper percentiles and median against the specification limits, as Cp*, Cpk*, Cpl* and Cpu*. Returned with the Anderson-Darling test of that family against the data (parametric-bootstrap p-value), so a host can refuse indices from a family the data does not follow.",
       "input": {
         "schema": "schemas/wasm.schema.json#/$defs/percentile_capability.input",
         "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
@@ -2274,11 +2340,12 @@
         "filesystem": "none",
         "network": "none",
         "clock": "none",
-        "randomness": "none"
+        "randomness": "seeded"
       },
       "determinism": {
-        "kind": "deterministic",
-        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
+        "kind": "seeded",
+        "test": "src/distribution.rs::goodness_of_fit_reference::same_seed_same_p_value_and_refusals",
+        "note": "The bootstrap draws come from `seed` (absent = 0), so the same request always gives the same p-value."
       },
       "validation": {
         "status": "partial",
@@ -2298,6 +2365,14 @@
             "method": "compares the three quantiles and four ratios of the same sample with the reference's",
             "tolerance": "1e-9 (relative)",
             "test": "src/capability/percentile.rs::scipy_reference::weibull_percentile_capability_reproduces_scipy"
+          },
+          {
+            "claim": "The parametric-bootstrap p-value agrees with the reference's Monte Carlo of the same test.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1, scipy.stats.goodness_of_fit(expon, known loc 0, statistic='ad', n_mc_samples=99999)",
+            "method": "compares A² and the p-value (9 999 replicates here) of one sample of 12",
+            "tolerance": "A² 1e-9 (relative); p-value 0.015 absolute (about 4 standard errors of the two Monte Carlo estimates)",
+            "test": "src/distribution.rs::goodness_of_fit_reference::bootstrap_p_value_agrees_with_scipy_goodness_of_fit"
           }
         ],
         "limits": [

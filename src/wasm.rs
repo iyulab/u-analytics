@@ -19,7 +19,7 @@ use wasm_bindgen::prelude::*;
 use crate::wire::{
     c_chart_dto, capability_dto, correlation_matrix_dto, count_pairs, count_rows, cusum_dto,
     default_correlation_method, ewma_dto, failure_site, fit_best_dto, g_chart_dto,
-    gage_rr_anova_dto, gage_rr_xbar_r_dto,
+    gage_rr_anova_dto, gage_rr_xbar_r_dto, goodness_of_fit_dto,
     hypothesis::{
         adf_dto, anderson_darling_dto, chi_squared_gof_dto, chi_squared_independence_dto,
         fisher_exact_dto, groups_test_dto, jarque_bera_dto, mann_kendall_dto, mann_whitney_dto,
@@ -39,9 +39,9 @@ use crate::wire::{
     },
     rules_from_json, run_rules_dto, sample_size_value, simple_regression_dto, t_chart_dto,
     u_chart_dto, xbar_r_dto, xbar_s_dto, AttributeStandardDto, CapabilityInputDto,
-    CorrelationInputDto, CusumInputDto, EwmaInputDto, GageRRInputDto, LimitsInputDto,
-    MultiPeltInputDto, PeltInputDto, PercentileCapabilityInputDto, RegressionInputDto,
-    SeasonalityInputDto, SpectralResidualInputDto, WireError,
+    CorrelationInputDto, CusumInputDto, EwmaInputDto, GageRRInputDto, GoodnessOfFitInputDto,
+    LimitsInputDto, MultiPeltInputDto, PeltInputDto, PercentileCapabilityInputDto,
+    RegressionInputDto, SeasonalityInputDto, SpectralResidualInputDto, WireError,
 };
 
 // ---------------------------------------------------------------------------
@@ -748,6 +748,21 @@ pub fn fit_best(
     to_js(&fit_best_dto(&data).map_err(js_err)?)
 }
 
+/// Whether a family describes the data: fits `distribution` to `data` (at
+/// least 8 values) and tests it — `{ distribution, parameters, statistic,
+/// p_value, replicates }`. `statistic` is Anderson–Darling A² against the fit;
+/// `p_value` is the parametric bootstrap (refit on `replicates` samples drawn
+/// from the fit, default 199, seeded by `seed`, default 0), so it accounts for
+/// the parameters having been estimated from the same data. Small = the family
+/// does not describe the data.
+#[wasm_bindgen(unchecked_return_type = "GoodnessOfFitResultDto")]
+pub fn goodness_of_fit(
+    #[wasm_bindgen(unchecked_param_type = "GoodnessOfFitInputDto")] input: JsValue,
+) -> Result<JsValue, JsValue> {
+    let input: GoodnessOfFitInputDto = from_js(input, "input")?;
+    to_js(&goodness_of_fit_dto(input).map_err(js_err)?)
+}
+
 /// Compute the Laney P' chart from (defectives, sample_size) pairs.
 ///
 /// Adjusts control limits for overdispersion via a φ correction factor.
@@ -1356,7 +1371,10 @@ pub fn gage_rr_anova(
 /// # Output JSON
 ///
 /// Object with fields: `cp_star`, `cpk_star`, `cpu_star`, `cpl_star`,
-/// `median`, `percentile_lower`, `percentile_upper`.
+/// `median`, `percentile_lower`, `percentile_upper`, `distribution`,
+/// `parameters`, and `goodness_of_fit: { statistic, p_value, replicates }` —
+/// whether the family describes the data (see `goodness_of_fit`; `p_value` is
+/// `null` with `fit_replicates: 0`).
 #[wasm_bindgen(unchecked_return_type = "PercentileCapabilityDto")]
 pub fn percentile_capability(
     #[wasm_bindgen(unchecked_param_type = "PercentileCapabilityInputDto")] input: JsValue,
@@ -3112,9 +3130,9 @@ mod engine_card_tests {
     use crate::wire::{
         counter, hypothesis, point_process, reliability, CapabilityDto, ChartPointDto,
         CorrelationMatrixDto, CusumDto, DistributionFitDto, EwmaDto, FixedLimitChartDto, GChartDto,
-        GageRRAnovaResultDto, GageRRResultDto, ImrChartDto, LaneyPChartDto, LaneyUChartDto,
-        PChartDto, PeltResultDto, PercentileCapabilityDto, RegressionDto, SeasonalityDto,
-        SpectralResidualDto, TChartDto, UChartDto, XbarRChartDto, XbarSChartDto,
+        GageRRAnovaResultDto, GageRRResultDto, GoodnessOfFitResultDto, ImrChartDto, LaneyPChartDto,
+        LaneyUChartDto, PChartDto, PeltResultDto, PercentileCapabilityDto, RegressionDto,
+        SeasonalityDto, SpectralResidualDto, TChartDto, UChartDto, XbarRChartDto, XbarSChartDto,
     };
 
     fn schemas() -> Schemas {
@@ -3224,6 +3242,11 @@ mod engine_card_tests {
             "fit_best",
             vec![arg("data", numbers())],
             s.of::<Vec<DistributionFitDto>>(),
+        );
+        s.op(
+            "goodness_of_fit",
+            vec![arg("input", s.of::<GoodnessOfFitInputDto>())],
+            s.of::<GoodnessOfFitResultDto>(),
         );
         s.op(
             "one_sample_t_test",

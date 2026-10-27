@@ -644,6 +644,11 @@ fn entry_points() -> Vec<(&'static str, Entry, Value)> {
             uanalytics_fit_best,
             json!({ "data": positive() }),
         ),
+        ep(
+            "uanalytics_goodness_of_fit",
+            uanalytics_goodness_of_fit,
+            json!({ "data": positive(), "distribution": "Weibull", "replicates": 9, "seed": 1 }),
+        ),
     ]
 }
 

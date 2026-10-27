@@ -32,13 +32,9 @@
 
 use std::fmt;
 
-use u_numflow::distributions::{
-    BetaDistribution, Exponential, GammaDistribution, LogNormal, Normal, Weibull,
-};
-
 use crate::distribution::{
     fit_best, fit_beta, fit_exponential, fit_gamma, fit_lognormal, fit_normal, fit_weibull,
-    FitResult,
+    fitted_quantile, FitResult,
 };
 
 /// Lower tail probability: the normal 3σ point, Φ(−3).
@@ -84,7 +80,7 @@ impl CapabilityModel {
         })
     }
 
-    fn fit(self, data: &[f64]) -> Option<FitResult> {
+    pub(crate) fn fit(self, data: &[f64]) -> Option<FitResult> {
         match self {
             Self::Auto => fit_best(data)
                 .into_iter()
@@ -167,8 +163,12 @@ pub struct PercentileCapabilityResult {
     pub percentile_upper: f64,
     /// The family the quantiles come from — never [`CapabilityModel::Auto`].
     pub model: CapabilityModel,
-    /// Its fitted parameters, as [`FitResult::parameters`] names them.
-    pub parameters: Vec<(String, f64)>,
+    /// The fit the quantiles come from: its parameters (as
+    /// [`FitResult::parameters`] names them) and likelihood. Pass it to
+    /// [`goodness_of_fit`](crate::distribution::goodness_of_fit) to judge
+    /// whether the family describes the data — the indices mean nothing when
+    /// it does not.
+    pub fit: FitResult,
 }
 
 /// Computes percentile-based process capability indices.
@@ -223,7 +223,7 @@ pub fn percentile_capability(
     let fitted = CapabilityModel::of_fit(&fit.distribution)
         .ok_or(PercentileCapabilityError::ModelNotFitted(model))?;
     let (p_lower, median, p_upper) =
-        quantiles(fitted, &fit).ok_or(PercentileCapabilityError::ModelNotFitted(model))?;
+        quantiles(&fit).ok_or(PercentileCapabilityError::ModelNotFitted(model))?;
 
     let spread = p_upper - p_lower;
     if spread <= 0.0 {
@@ -252,46 +252,13 @@ pub fn percentile_capability(
         percentile_lower: p_lower,
         percentile_upper: p_upper,
         model: fitted,
-        parameters: fit.parameters,
+        fit,
     })
 }
 
 /// The 0.135 %, 50 % and 99.865 % quantiles of a fitted family.
-fn quantiles(model: CapabilityModel, fit: &FitResult) -> Option<(f64, f64, f64)> {
-    let param = |name: &str| {
-        fit.parameters
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|&(_, v)| v)
-    };
-    let q: Box<dyn Fn(f64) -> Option<f64>> = match model {
-        CapabilityModel::Normal => {
-            let d = Normal::new(param("mu")?, param("sigma")?).ok()?;
-            Box::new(move |p| d.quantile(p))
-        }
-        CapabilityModel::LogNormal => {
-            let d = LogNormal::new(param("mu")?, param("sigma")?).ok()?;
-            Box::new(move |p| d.quantile(p))
-        }
-        CapabilityModel::Weibull => {
-            let d = Weibull::new(param("shape")?, param("scale")?).ok()?;
-            Box::new(move |p| d.quantile(p))
-        }
-        CapabilityModel::Gamma => {
-            // `fit_gamma` reports the rate as `beta`.
-            let d = GammaDistribution::new(param("alpha")?, param("beta")?).ok()?;
-            Box::new(move |p| d.quantile(p))
-        }
-        CapabilityModel::Exponential => {
-            let d = Exponential::new(param("lambda")?).ok()?;
-            Box::new(move |p| d.quantile(p))
-        }
-        CapabilityModel::Beta => {
-            let d = BetaDistribution::new(param("alpha")?, param("beta")?).ok()?;
-            Box::new(move |p| d.quantile(p))
-        }
-        CapabilityModel::Auto => return None,
-    };
+fn quantiles(fit: &FitResult) -> Option<(f64, f64, f64)> {
+    let q = |p| fitted_quantile(fit, p);
     let (lo, mid, hi) = (q(P_LOWER)?, q(0.5)?, q(P_UPPER)?);
     (lo.is_finite() && mid.is_finite() && hi.is_finite()).then_some((lo, mid, hi))
 }
@@ -304,6 +271,7 @@ fn quantiles(model: CapabilityModel, fit: &FitResult) -> Option<(f64, f64, f64)>
 mod tests {
     use super::*;
     use u_numflow::distributions::Sample;
+    use u_numflow::distributions::{LogNormal, Normal};
 
     /// Generate uniform-like data for testing.
     fn uniform_data(n: usize) -> Vec<f64> {
@@ -469,8 +437,14 @@ mod tests {
         let data = process.sample_n(200, 42);
         let r =
             percentile_capability(&data, Some(40.0), Some(60.0), CapabilityModel::Normal).unwrap();
-        let mu = r.parameters.iter().find(|(n, _)| n == "mu").unwrap().1;
-        let sigma = r.parameters.iter().find(|(n, _)| n == "sigma").unwrap().1;
+        let mu = r.fit.parameters.iter().find(|(n, _)| n == "mu").unwrap().1;
+        let sigma = r
+            .fit
+            .parameters
+            .iter()
+            .find(|(n, _)| n == "sigma")
+            .unwrap()
+            .1;
         assert_eq!(r.model, CapabilityModel::Normal);
         assert!((r.median - mu).abs() < 1e-9);
         assert!((r.percentile_lower - (mu - 3.0 * sigma)).abs() < 1e-6);

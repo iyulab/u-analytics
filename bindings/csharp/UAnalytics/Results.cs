@@ -173,7 +173,24 @@ public sealed record CapabilityIntervals(
 public sealed record PercentileCapabilityResult(
     double? CpStar, double? CpkStar, double? CpuStar, double? CplStar,
     double Median, double PercentileLower, double PercentileUpper,
-    DistributionFamily Distribution, IReadOnlyDictionary<string, double> Parameters);
+    DistributionFamily Distribution, IReadOnlyDictionary<string, double> Parameters,
+    GoodnessOfFit GoodnessOfFit);
+
+/// <summary>
+/// Whether a fitted family describes the data: the Anderson-Darling statistic A² against the
+/// fit, and its parametric-bootstrap p-value from <see cref="Replicates"/> samples drawn from the
+/// fit and refitted (<c>null</c> when no replicates were asked for). A small p-value says the
+/// family does not describe the data — and then neither do quantiles read from it.
+/// </summary>
+public sealed record GoodnessOfFit(double Statistic, double? PValue, int Replicates);
+
+/// <summary>
+/// <see cref="AnalyticsClient.GoodnessOfFit"/>: the family fitted, its parameters, and the
+/// Anderson-Darling test of the fit (statistic A², parametric-bootstrap p-value).
+/// </summary>
+public sealed record GoodnessOfFitResult(
+    DistributionFamily Distribution, IReadOnlyDictionary<string, double> Parameters,
+    double Statistic, double PValue, int Replicates);
 
 /// <summary>
 /// A continuous distribution family, by the names the engine uses: the families
@@ -481,13 +498,15 @@ public sealed record RegressionResult(
     IReadOnlyList<double> Fitted);
 
 /// <summary>
-/// One fitted continuous family: which one, its parameters by name, and its log-likelihood,
-/// AIC and BIC. <see cref="Distribution"/> can be passed back to
+/// One fitted continuous family: which one, its parameters by name, its log-likelihood, AIC
+/// and BIC, and the Anderson-Darling statistic A² against it (smaller is closer; whether the
+/// family fits at all is <see cref="AnalyticsClient.GoodnessOfFit"/>'s p-value).
+/// <see cref="Distribution"/> can be passed back to
 /// <see cref="AnalyticsClient.PercentileCapability"/> as is.
 /// </summary>
 public sealed record DistributionFit(
     DistributionFamily Distribution, IReadOnlyDictionary<string, double> Parameters,
-    double LogLikelihood, double Aic, double Bic);
+    double LogLikelihood, double Aic, double Bic, double AndersonDarling);
 
 // ── Code catalog ──
 

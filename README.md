@@ -780,10 +780,22 @@ simple_regression(x: number[] | Float64Array, y: number[] | Float64Array):
     slope_t: number | null, intercept_t: number | null, slope_p, intercept_p, residual_se,
     f_statistic: number | null, f_p_value, residuals: number[], fitted: number[] }  // null t/F: exact fit
 fit_best(data: number[] | Float64Array):  // >= 2 values, not all equal; best AIC first
-  { distribution: string, parameters: Record<string, number>, log_likelihood, aic, bic }[]
+  { distribution: string, parameters: Record<string, number>, log_likelihood, aic, bic,
+    anderson_darling: number }[]   // A² against each fit -- smaller is closer
 // fit_best ranks continuous families only (Normal; Exponential, Gamma, LogNormal,
 // Weibull for positive data; Beta for (0, 1)) -- a probability mass is not ranked
 // against densities, so count data get no Poisson entry here.
+// AIC ranks the families against each other; it does not say the best one fits.
+// goodness_of_fit does: A² against the fitted distribution, with a p-value from
+// the parametric bootstrap (refit on `replicates` samples drawn from the fit), so
+// it accounts for the parameters having been estimated from the same data.
+goodness_of_fit(input: {
+  data: number[],     // >= 8 values, not all equal
+  distribution: "Normal" | "LogNormal" | "Weibull" | "Gamma" | "Exponential" | "Beta",
+  replicates?: number, // 1..9999, default 199 (p resolved to 1 / (replicates + 1))
+  seed?: number,       // default 0 -- the same request gives the same p-value
+}): { distribution, parameters: Record<string, number>, statistic: number,
+      p_value: number, replicates: number }   // small p: the family does not fit
 // A number array is read as sent: `null` or a string at data[i] throws
 // malformed_input with index i (it is not averaged as 0).
 
@@ -923,12 +935,19 @@ gage_rr_anova(input: { measurements: number[][][], tolerance?: number }): {
 percentile_capability(input: {
   data: number[], usl?: number, lsl?: number,
   distribution?: "Normal" | "LogNormal" | "Weibull" | "Gamma" | "Exponential" | "Beta",
+  fit_replicates?: number,  // bootstrap replicates of the fit test, 0..9999, default 199
+  seed?: number,            // default 0
 }): {
   cp_star, cpk_star, cpu_star, cpl_star: number | null,
   median: number, percentile_lower: number, percentile_upper: number,
   distribution: string,                // the family fitted (fit_best's names)
   parameters: Record<string, number>,  // its parameters, as fit_best reports them
+  goodness_of_fit: { statistic: number, p_value: number | null, replicates: number },
 }
+// The quantiles are only as good as the family. goodness_of_fit is the test of
+// that family against `data` (as the goodness_of_fit function; p_value null with
+// fit_replicates 0): with a small p_value, no index here describes the process --
+// uniform data 1..10 000 fits Weibull best by AIC, with median 4400 and p 0.005.
 ```
 
 Points on the average chart are *expected* to fall outside its limits -- that is
@@ -1005,6 +1024,7 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_correlation_matrix` | `correlation_matrix(variables, { method? })` | `{ variables, method? }` |
 | `uanalytics_simple_regression` | `simple_regression(x, y)` | `{ x, y }` |
 | `uanalytics_fit_best` | `fit_best(data)` | `{ data: [...] }` |
+| `uanalytics_goodness_of_fit` | `goodness_of_fit(input)` | `input` as is |
 | `uanalytics_estimate_period` | `estimate_period(input)` | `input` as is |
 | `uanalytics_spectral_residual` | `spectral_residual(input)` | `input` as is |
 

@@ -1414,10 +1414,20 @@ wire_export!(
 
 wire_export!(
     /// Every continuous family that fits `{data}`, best AIC first:
-    /// `[{distribution, parameters: {name: value}, log_likelihood, aic, bic}]`.
+    /// `[{distribution, parameters: {name: value}, log_likelihood, aic, bic,
+    /// anderson_darling}]`.
     uanalytics_fit_best,
     DataReq,
     |r| crate::wire::fit_best_dto(&r.data)
+);
+
+wire_export!(
+    /// Whether a family describes `{data}`: `{data, distribution, replicates?,
+    /// seed?}` → `{distribution, parameters, statistic, p_value, replicates}` —
+    /// Anderson–Darling A² against the fit, parametric-bootstrap p-value.
+    uanalytics_goodness_of_fit,
+    crate::wire::GoodnessOfFitInputDto,
+    |r| crate::wire::goodness_of_fit_dto(r)
 );
 
 // ── Memory Management ───────────────────────────────────────

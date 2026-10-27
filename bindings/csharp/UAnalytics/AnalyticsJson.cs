@@ -50,6 +50,7 @@ namespace UAnalytics;
 [JsonSerializable(typeof(CorrelationMatrixResult))]
 [JsonSerializable(typeof(RegressionResult))]
 [JsonSerializable(typeof(IReadOnlyList<DistributionFit>))]
+[JsonSerializable(typeof(GoodnessOfFitResult))]
 [JsonSerializable(typeof(ValueBody))]
 [JsonSerializable(typeof(ValuesBody))]
 [JsonSerializable(typeof(RunRule))]

@@ -8,6 +8,35 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- `goodness_of_fit(data, fit, replicates, seed)` -- whether a fitted family
+  describes the data: the Anderson-Darling statistic A² against the fitted
+  distribution and its parametric-bootstrap p-value (refit on `replicates`
+  samples drawn from the fit, `(1 + count) / (B + 1)`), so the p-value accounts
+  for the parameters having been estimated from the same data, for every family
+  `fit_best` offers. Deterministic by `seed`. `anderson_darling_fit` gives the
+  statistic alone. WASM `goodness_of_fit`, C ABI `uanalytics_goodness_of_fit`,
+  .NET `AnalyticsClient.GoodnessOfFit`.
+- `fit_best` entries carry `anderson_darling` (A² against each fit). AIC ranks
+  the families against each other; it does not say the best one fits -- uniform
+  data 1..10 000 fits Weibull best, with a median of 4400.
+- `percentile_capability` returns `goodness_of_fit: { statistic, p_value,
+  replicates }` for the family its quantiles come from, so a caller can refuse
+  indices from a family the data does not follow. `fit_replicates` (default 199,
+  0 = no p-value) and `seed` (default 0) set the bootstrap.
+
+### Changed
+
+- **Breaking** (Rust): `PercentileCapabilityResult::parameters` is replaced by
+  `fit: FitResult` (its `parameters` are the same list), which is what
+  `goodness_of_fit` takes. **Breaking** (.NET): `DistributionFit` and
+  `PercentileCapabilityResult` gain a positional member (`AndersonDarling`,
+  `GoodnessOfFit`).
+- `percentile_capability` costs the bootstrap: about 0.8 s at 10 000 values with
+  the default 199 replicates (native, Weibull or Gamma). Pass `fit_replicates: 0`
+  where the test is not wanted.
+
 ## [0.27.2] - 2026-10-20
 
 Depends on u-numflow 0.15.

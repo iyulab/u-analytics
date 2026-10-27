@@ -17,6 +17,9 @@
 //! assert!(bins.n_bins >= 2);
 //! ```
 
+use u_numflow::distributions::{
+    BetaDistribution, Exponential, GammaDistribution, LogNormal, Normal, Sample, Weibull,
+};
 use u_numflow::special;
 use u_numflow::stats;
 
@@ -1127,6 +1130,290 @@ pub fn fit_best(data: &[f64]) -> Vec<FitResult> {
     results
 }
 
+// ---------------------------------------------------------------------------
+// Goodness of fit of a fitted family
+// ---------------------------------------------------------------------------
+
+/// A family [`fit_best`] reports, with its fitted parameters.
+#[derive(Debug, Clone)]
+enum Fitted {
+    Normal(Normal),
+    LogNormal(LogNormal),
+    Weibull(Weibull),
+    Gamma(GammaDistribution),
+    Exponential(Exponential),
+    Beta(BetaDistribution),
+}
+
+impl Fitted {
+    /// The distribution a [`FitResult`] names, or `None` for a family outside
+    /// [`fit_best`]'s (Poisson) or parameters it cannot be built from.
+    fn of(fit: &FitResult) -> Option<Self> {
+        let param = |name: &str| {
+            fit.parameters
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|&(_, v)| v)
+        };
+        Some(match fit.distribution.as_str() {
+            "Normal" => Self::Normal(Normal::new(param("mu")?, param("sigma")?).ok()?),
+            "LogNormal" => Self::LogNormal(LogNormal::new(param("mu")?, param("sigma")?).ok()?),
+            "Weibull" => Self::Weibull(Weibull::new(param("shape")?, param("scale")?).ok()?),
+            // `fit_gamma` reports the rate as `beta`.
+            "Gamma" => Self::Gamma(GammaDistribution::new(param("alpha")?, param("beta")?).ok()?),
+            "Exponential" => Self::Exponential(Exponential::new(param("lambda")?).ok()?),
+            "Beta" => Self::Beta(BetaDistribution::new(param("alpha")?, param("beta")?).ok()?),
+            _ => return None,
+        })
+    }
+
+    /// Refits the same family to `data`.
+    fn refit(&self, data: &[f64]) -> Option<FitResult> {
+        match self {
+            Self::Normal(_) => fit_normal(data),
+            Self::LogNormal(_) => fit_lognormal(data),
+            Self::Weibull(_) => fit_weibull(data),
+            Self::Gamma(_) => fit_gamma(data),
+            Self::Exponential(_) => fit_exponential(data),
+            Self::Beta(_) => fit_beta(data),
+        }
+    }
+
+    fn quantile(&self, p: f64) -> Option<f64> {
+        match self {
+            Self::Normal(d) => d.quantile(p),
+            Self::LogNormal(d) => d.quantile(p),
+            Self::Weibull(d) => d.quantile(p),
+            Self::Gamma(d) => d.quantile(p),
+            Self::Exponential(d) => d.quantile(p),
+            Self::Beta(d) => d.quantile(p),
+        }
+    }
+
+    /// `(ln F(x), ln (1 − F(x)))`, each tail evaluated directly so that a value
+    /// far out contributes its true log-probability rather than `ln 0`.
+    fn ln_tails(&self, x: f64) -> (f64, f64) {
+        let (cdf, sf) = match self {
+            Self::Normal(d) => {
+                let z = (x - d.mu()) / d.sigma();
+                (
+                    special::standard_normal_cdf(z),
+                    special::standard_normal_sf(z),
+                )
+            }
+            Self::LogNormal(d) => {
+                if x <= 0.0 {
+                    (0.0, 1.0)
+                } else {
+                    let z = (x.ln() - d.mu()) / d.sigma();
+                    (
+                        special::standard_normal_cdf(z),
+                        special::standard_normal_sf(z),
+                    )
+                }
+            }
+            Self::Weibull(d) => {
+                if x <= 0.0 {
+                    (0.0, 1.0)
+                } else {
+                    let h = (x / d.scale()).powf(d.shape());
+                    (-(-h).exp_m1(), (-h).exp())
+                }
+            }
+            Self::Gamma(d) => {
+                if x <= 0.0 {
+                    (0.0, 1.0)
+                } else {
+                    let t = d.rate() * x;
+                    (
+                        special::regularized_lower_gamma(d.shape(), t),
+                        special::regularized_upper_gamma(d.shape(), t),
+                    )
+                }
+            }
+            Self::Exponential(d) => (d.cdf(x), d.survival(x)),
+            Self::Beta(d) => {
+                if x <= 0.0 {
+                    (0.0, 1.0)
+                } else if x >= 1.0 {
+                    (1.0, 0.0)
+                } else {
+                    (
+                        special::regularized_incomplete_beta(x, d.alpha, d.beta),
+                        special::regularized_incomplete_beta(1.0 - x, d.beta, d.alpha),
+                    )
+                }
+            }
+        };
+        (
+            cdf.max(f64::MIN_POSITIVE).ln(),
+            sf.max(f64::MIN_POSITIVE).ln(),
+        )
+    }
+
+    fn sample_n(&self, n: usize, seed: u64) -> Vec<f64> {
+        match self {
+            Self::Normal(d) => d.sample_n(n, seed),
+            Self::LogNormal(d) => d.sample_n(n, seed),
+            Self::Weibull(d) => d.sample_n(n, seed),
+            Self::Gamma(d) => d.sample_n(n, seed),
+            Self::Exponential(d) => d.sample_n(n, seed),
+            Self::Beta(d) => d.sample_n(n, seed),
+        }
+    }
+
+    /// A² of `data` against this distribution.
+    fn anderson_darling(&self, data: &[f64]) -> f64 {
+        let mut x = data.to_vec();
+        x.sort_by(|a, b| a.partial_cmp(b).expect("finite values"));
+        let n = x.len();
+        let tails: Vec<(f64, f64)> = x.iter().map(|&v| self.ln_tails(v)).collect();
+        let s: f64 = (0..n)
+            .map(|i| (2 * i + 1) as f64 * (tails[i].0 + tails[n - 1 - i].1))
+            .sum();
+        -(n as f64) - s / n as f64
+    }
+}
+
+/// The 0.135 %, 50 % and 99.865 % quantiles (or any others) of the family a
+/// [`FitResult`] names — for the capability methods that read a fitted model.
+pub(crate) fn fitted_quantile(fit: &FitResult, p: f64) -> Option<f64> {
+    Fitted::of(fit)?.quantile(p)
+}
+
+/// Anderson–Darling statistic A² of `data` against the distribution `fit`
+/// describes (its fitted parameters, not re-estimated).
+///
+/// A² = −n − (1/n) Σᵢ (2i − 1)·[ln F(x₍ᵢ₎) + ln(1 − F(x₍ₙ₊₁₋ᵢ₎))]. It weights
+/// the tails, where a wrong family misplaces quantiles most. Smaller is closer;
+/// among families fitted to the same data it ranks them by fit rather than by
+/// likelihood. To judge whether the family fits at all, use
+/// [`goodness_of_fit`] — the null distribution of A² depends on the family and
+/// on the parameters having been estimated from the same data.
+///
+/// # Returns
+///
+/// `None` if `data` is empty or has a non-finite value, or `fit` is not one of
+/// the families [`fit_best`] reports.
+///
+/// # References
+///
+/// Anderson, T.W. & Darling, D.A. (1954). "A test of goodness of fit."
+/// *JASA*, 49(268), 765–769.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::distribution::{anderson_darling_fit, fit_normal};
+///
+/// let data = [4.1, 5.3, 4.8, 5.9, 5.0, 4.4, 5.6, 4.9, 5.2, 4.7];
+/// let fit = fit_normal(&data).unwrap();
+/// let a2 = anderson_darling_fit(&data, &fit).unwrap();
+/// assert!(a2 > 0.0 && a2 < 1.0);
+/// ```
+pub fn anderson_darling_fit(data: &[f64], fit: &FitResult) -> Option<f64> {
+    if data.is_empty() || data.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    Some(Fitted::of(fit)?.anderson_darling(data))
+}
+
+/// Whether a fitted family describes the data: the Anderson–Darling statistic
+/// against the fitted distribution and its p-value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GoodnessOfFit {
+    /// A² of the data against the fitted distribution ([`anderson_darling_fit`]).
+    pub statistic: f64,
+    /// Probability, if the data came from the family, of an A² at least this
+    /// large after fitting the family to a sample of the same size — the
+    /// parametric-bootstrap estimate `(1 + #{A²_b ≥ A²}) / (B + 1)`. Small
+    /// values say the family does not describe the data.
+    pub p_value: f64,
+    /// Bootstrap replicates `B` behind `p_value`; the smallest p it can report
+    /// is `1 / (B + 1)`.
+    pub replicates: usize,
+}
+
+/// Replicates [`goodness_of_fit`] uses when a caller has no reason to choose:
+/// with 199 the p-value is resolved to 0.005, and a 0.05 or 0.01 cut falls on
+/// a whole number of replicates ((B + 1)·α integer — Davison & Hinkley §4.2).
+pub const DEFAULT_GOF_REPLICATES: usize = 199;
+
+/// Tests whether the family `fit` describes `data`, with the family's
+/// parameters estimated from that same data.
+///
+/// The statistic is A² against the fitted distribution
+/// ([`anderson_darling_fit`]). Its null distribution is not the textbook one
+/// when parameters are estimated — fitting pulls the model toward the sample —
+/// and it depends on the family (and, for Gamma and Beta, on the shape). The
+/// p-value is therefore the **parametric bootstrap**: draw `replicates` samples
+/// of size n from the fitted distribution, refit the same family to each, and
+/// count how often their A² reaches the observed one. This applies the same
+/// way to every family, where tables exist only for some.
+///
+/// Deterministic: the same `(data, fit, replicates, seed)` gives the same
+/// p-value.
+///
+/// # Complexity
+///
+/// O(B · (n log n + fit)), where `fit` is the family's maximum-likelihood
+/// iteration (closed form for Normal, LogNormal and Exponential).
+///
+/// # Returns
+///
+/// `None` if `replicates` is 0, `data` has fewer than 2 values or a non-finite
+/// one, or `fit` is not one of the families [`fit_best`] reports.
+///
+/// # References
+///
+/// - Stute, W., González Manteiga, W. & Presedo Quindimil, M. (1993).
+///   "Bootstrap based goodness-of-fit-tests." *Metrika*, 40, 243–256.
+/// - Davison, A.C. & Hinkley, D.V. (1997). *Bootstrap Methods and their
+///   Application*, §4.2 (the `(1 + count) / (B + 1)` estimate).
+/// - Stephens, M.A. (1974). "EDF statistics for goodness of fit and some
+///   comparisons." *JASA*, 69(347), 730–737 (A² with estimated parameters).
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::distribution::{fit_best, goodness_of_fit, DEFAULT_GOF_REPLICATES};
+///
+/// // Uniform data: no listed family describes it.
+/// let data: Vec<f64> = (1..=500).map(f64::from).collect();
+/// let best = &fit_best(&data)[0];
+/// let gof = goodness_of_fit(&data, best, DEFAULT_GOF_REPLICATES, 0).unwrap();
+/// assert!(gof.p_value < 0.01);
+/// ```
+pub fn goodness_of_fit(
+    data: &[f64],
+    fit: &FitResult,
+    replicates: usize,
+    seed: u64,
+) -> Option<GoodnessOfFit> {
+    if replicates == 0 || data.len() < 2 || data.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let model = Fitted::of(fit)?;
+    let statistic = model.anderson_darling(data);
+    let n = data.len();
+    let at_least = (0..replicates as u64)
+        .filter(|&b| {
+            let sample = model.sample_n(n, seed.wrapping_add(b));
+            // A replicate the family cannot refit (a draw that degenerates)
+            // counts as at least as extreme: the estimate stays conservative.
+            match model.refit(&sample).and_then(|f| Fitted::of(&f)) {
+                Some(refitted) => refitted.anderson_darling(&sample) >= statistic,
+                None => true,
+            }
+        })
+        .count();
+    Some(GoodnessOfFit {
+        statistic,
+        p_value: (1 + at_least) as f64 / (replicates + 1) as f64,
+        replicates,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1979,5 +2266,168 @@ mod scipy_reference {
             )],
             "mixed sign",
         );
+    }
+}
+
+/// Goodness of fit against SciPy 1.17.1 (`ad_ref.py` / `p_ref.py` in the
+/// cycle log): A² from `logcdf` / `logsf` of the same distribution, and the
+/// parametric bootstrap of `scipy.stats.goodness_of_fit(statistic="ad")`.
+#[cfg(test)]
+mod goodness_of_fit_reference {
+    use super::*;
+
+    const POS: &[f64] = &[
+        3.2, 4.8, 5.1, 6.0, 6.7, 7.3, 8.1, 9.4, 10.2, 12.5, 15.8, 41.0,
+    ];
+    const UNIT: &[f64] = &[
+        0.04, 0.11, 0.19, 0.23, 0.31, 0.38, 0.42, 0.55, 0.61, 0.74, 0.88, 0.97,
+    ];
+
+    fn fixed(distribution: &str, parameters: &[(&str, f64)]) -> FitResult {
+        FitResult {
+            distribution: distribution.to_string(),
+            parameters: parameters
+                .iter()
+                .map(|&(n, v)| (n.to_string(), v))
+                .collect(),
+            log_likelihood: 0.0,
+            aic: 0.0,
+            bic: 0.0,
+            n_params: parameters.len(),
+        }
+    }
+
+    /// Every family's A² against fixed parameters — including a value (41) in
+    /// the far upper tail of the Normal and Exponential, where `1 − F` taken by
+    /// subtraction would lose its digits.
+    #[test]
+    fn anderson_darling_statistic_reproduces_scipy_for_every_family() {
+        type Case = (
+            &'static str,
+            &'static [(&'static str, f64)],
+            &'static [f64],
+            f64,
+        );
+        let cases: [Case; 6] = [
+            (
+                "Normal",
+                &[("mu", 9.0), ("sigma", 4.0)],
+                POS,
+                3.0398709332150187,
+            ),
+            (
+                "LogNormal",
+                &[("mu", 2.0), ("sigma", 0.6)],
+                POS,
+                0.4154008172250965,
+            ),
+            (
+                "Weibull",
+                &[("shape", 1.7), ("scale", 11.0)],
+                POS,
+                0.8259972063661056,
+            ),
+            (
+                "Gamma",
+                &[("alpha", 2.5), ("beta", 0.25)],
+                POS,
+                0.5575965468003456,
+            ),
+            ("Exponential", &[("lambda", 0.1)], POS, 1.235635893786549),
+            (
+                "Beta",
+                &[("alpha", 1.3), ("beta", 1.6)],
+                UNIT,
+                0.34159812117638744,
+            ),
+        ];
+        for (name, params, data, want) in cases {
+            let got = anderson_darling_fit(data, &fixed(name, params)).unwrap();
+            assert!(
+                ((got - want) / want).abs() < 1e-9,
+                "{name}: A² {got}, SciPy {want}"
+            );
+        }
+    }
+
+    /// The bootstrap p-value agrees with SciPy's Monte Carlo of the same test
+    /// (99 999 samples there, 9 999 here: standard errors 0.001 and 0.004).
+    /// Exponential only: SciPy's Normal fit takes the n − 1 standard deviation
+    /// where `fit_normal` takes the maximum-likelihood one, so its A² (0.4988)
+    /// is a different test's statistic (A² at the MLE fit: 0.5086, as here).
+    #[test]
+    fn bootstrap_p_value_agrees_with_scipy_goodness_of_fit() {
+        let data = [
+            3.2, 4.8, 5.1, 6.0, 6.7, 7.3, 8.1, 9.4, 10.2, 12.5, 15.8, 21.0,
+        ];
+        let fit = fit_exponential(&data).unwrap();
+        let (statistic, p) = (1.4502868637902981, 0.03158);
+        let g = goodness_of_fit(&data, &fit, 9999, 3).unwrap();
+        assert!(
+            ((g.statistic - statistic) / statistic).abs() < 1e-9,
+            "A² {} vs {statistic}",
+            g.statistic
+        );
+        assert!(
+            (g.p_value - p).abs() < 0.015,
+            "p {} vs SciPy {p}",
+            g.p_value
+        );
+    }
+
+    /// The case that motivated the test: uniform data, whose best-AIC family
+    /// places the median at 4400 of 1..10 000 — no listed family fits it, and
+    /// the test says so; a sample drawn from a family is not rejected.
+    #[test]
+    fn rejects_the_best_family_for_uniform_data_and_keeps_a_true_one() {
+        use u_numflow::distributions::Sample;
+        let uniform: Vec<f64> = (1..=2000).map(f64::from).collect();
+        let best = &fit_best(&uniform)[0];
+        let g = goodness_of_fit(&uniform, best, DEFAULT_GOF_REPLICATES, 0).unwrap();
+        assert_eq!(g.p_value, 1.0 / 200.0, "{}: {g:?}", best.distribution);
+
+        let weibull = Weibull::new(2.0, 10.0).unwrap().sample_n(300, 11);
+        let fit = fit_weibull(&weibull).unwrap();
+        let g = goodness_of_fit(&weibull, &fit, DEFAULT_GOF_REPLICATES, 0).unwrap();
+        assert!(g.p_value > 0.05, "{g:?}");
+    }
+
+    #[test]
+    fn same_seed_same_p_value_and_refusals() {
+        let data = [2.1, 3.5, 1.8, 4.2, 2.9, 3.1, 2.5, 3.8, 1.5, 2.7];
+        let fit = fit_gamma(&data).unwrap();
+        let a = goodness_of_fit(&data, &fit, 99, 7).unwrap();
+        assert_eq!(a, goodness_of_fit(&data, &fit, 99, 7).unwrap());
+        assert_eq!(a.replicates, 99);
+        assert!(goodness_of_fit(&data, &fit, 0, 7).is_none());
+        assert!(goodness_of_fit(&[1.0], &fit, 9, 7).is_none());
+        assert!(goodness_of_fit(&[1.0, f64::NAN, 2.0], &fit, 9, 7).is_none());
+        let poisson = fit_poisson(&[1.0, 2.0, 2.0, 3.0]).unwrap();
+        assert!(anderson_darling_fit(&data, &poisson).is_none());
+    }
+
+    /// The statistic and the p-value do not depend on the unit of the data.
+    #[test]
+    fn unit_invariant() {
+        let data = [2.1, 3.5, 1.8, 4.2, 2.9, 3.1, 2.5, 3.8, 1.5, 2.7, 6.3, 2.2];
+        for scale in [1e-9, 1.0, 1e9] {
+            let x: Vec<f64> = data.iter().map(|v| v * scale).collect();
+            for fit in fit_best(&x) {
+                let base: Vec<f64> = data.to_vec();
+                let reference = fit_best(&base)
+                    .into_iter()
+                    .find(|f| f.distribution == fit.distribution);
+                let Some(reference) = reference else { continue };
+                let a = goodness_of_fit(&x, &fit, 49, 1).unwrap();
+                let b = goodness_of_fit(&base, &reference, 49, 1).unwrap();
+                assert!(
+                    (a.statistic - b.statistic).abs() < 1e-6 * b.statistic.max(1.0),
+                    "{} at ×{scale}: {} vs {}",
+                    fit.distribution,
+                    a.statistic,
+                    b.statistic
+                );
+            }
+        }
     }
 }
