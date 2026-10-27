@@ -13,6 +13,7 @@
 //! assert!(result.p_value > 0.05); // cannot reject H₀: μ = 5.0
 //! ```
 
+use crate::error::{check_option, check_series, TimeSeriesError};
 use u_numflow::special;
 use u_numflow::stats;
 
@@ -1865,6 +1866,9 @@ pub struct KpssResult {
 /// Significance levels of [`KpssResult::critical_values`], in order.
 pub const KPSS_LEVELS: [f64; 4] = [0.10, 0.05, 0.025, 0.01];
 
+/// The fewest values [`kpss_test`] takes.
+pub const KPSS_MIN_OBSERVATIONS: usize = 10;
+
 /// KPSS test of stationarity: H₀ the series is stationary around a level (or
 /// a trend), H₁ it has a unit root.
 ///
@@ -1880,10 +1884,11 @@ pub const KPSS_LEVELS: [f64; 4] = [0.10, 0.05, 0.025, 0.01];
 /// variance with Bartlett weights 1 − i/(l + 1); statistic η / σ̂². The p-value
 /// is interpolated in the table of critical values.
 ///
-/// # Returns
+/// # Errors
 ///
-/// `None` if fewer than 10 values, a non-finite value, a fixed lag of n or
-/// more, or no variation (σ̂² not positive against the series' size).
+/// [`TimeSeriesError`]: a non-finite value, fewer than 10 values, a fixed
+/// lag outside `[0, n − 1]` (`lags`), or no variation about the level or
+/// trend (σ̂² not positive against the series' size).
 ///
 /// # References
 ///
@@ -1908,10 +1913,15 @@ pub const KPSS_LEVELS: [f64; 4] = [0.10, 0.05, 0.025, 0.01];
 /// let r = kpss_test(&walk, KpssModel::Level, KpssLags::Hobijn).unwrap();
 /// assert!(r.rejected[1]);
 /// ```
-pub fn kpss_test(data: &[f64], model: KpssModel, lags: KpssLags) -> Option<KpssResult> {
+pub fn kpss_test(
+    data: &[f64],
+    model: KpssModel,
+    lags: KpssLags,
+) -> Result<KpssResult, TimeSeriesError> {
+    check_series(data, KPSS_MIN_OBSERVATIONS)?;
     let n = data.len();
-    if n < 10 || data.iter().any(|v| !v.is_finite()) {
-        return None;
+    if let KpssLags::Fixed(l) = lags {
+        check_option("lags", l, 0, n - 1)?;
     }
     let nf = n as f64;
 
@@ -1942,7 +1952,7 @@ pub fn kpss_test(data: &[f64], model: KpssModel, lags: KpssLags) -> Option<KpssR
     let sum_sq: f64 = residuals.iter().map(|e| e * e).sum();
     let size: f64 = data.iter().map(|x| x * x).sum();
     if sum_sq <= 1e-20 * size {
-        return None;
+        return Err(TimeSeriesError::NoVariation);
     }
 
     let autocovariance = |i: usize| -> f64 {
@@ -1954,7 +1964,6 @@ pub fn kpss_test(data: &[f64], model: KpssModel, lags: KpssLags) -> Option<KpssR
     };
 
     let n_lags = match lags {
-        KpssLags::Fixed(l) if l >= n => return None,
         KpssLags::Fixed(l) => l,
         KpssLags::Schwert => ((12.0 * (nf / 100.0).powf(0.25)).ceil() as usize).min(n - 1),
         KpssLags::Hobijn => {
@@ -1979,7 +1988,7 @@ pub fn kpss_test(data: &[f64], model: KpssModel, lags: KpssLags) -> Option<KpssR
     }
     let long_run = long_run / nf;
     if long_run <= 0.0 {
-        return None;
+        return Err(TimeSeriesError::NoVariation);
     }
 
     let mut partial = 0.0;
@@ -2015,7 +2024,7 @@ pub fn kpss_test(data: &[f64], model: KpssModel, lags: KpssLags) -> Option<KpssR
     };
     let rejected = critical_values.map(|c| statistic > c);
 
-    Some(KpssResult {
+    Ok(KpssResult {
         statistic,
         n_lags,
         p_value,
@@ -2138,11 +2147,34 @@ mod kpss_reference {
         assert_eq!(r.p_value_bound, KpssPValue::Interpolated);
         assert_eq!(r.rejected, [true, true, false, false]);
 
-        assert!(kpss_test(&AR[..9], KpssModel::Level, KpssLags::Hobijn).is_none());
-        assert!(kpss_test(&AR, KpssModel::Level, KpssLags::Fixed(60)).is_none());
-        assert!(kpss_test(&[4.0; 20], KpssModel::Level, KpssLags::Hobijn).is_none());
+        assert_eq!(
+            kpss_test(&AR[..9], KpssModel::Level, KpssLags::Hobijn).unwrap_err(),
+            TimeSeriesError::TooFewObservations { needed: 10, got: 9 }
+        );
+        assert_eq!(
+            kpss_test(&AR, KpssModel::Level, KpssLags::Fixed(60)).unwrap_err(),
+            TimeSeriesError::OptionOutOfRange {
+                option: "lags",
+                got: 60.0,
+                min: 0.0,
+                max: 59.0
+            }
+        );
+        assert_eq!(
+            kpss_test(&[4.0; 20], KpssModel::Level, KpssLags::Hobijn).unwrap_err(),
+            TimeSeriesError::NoVariation
+        );
         let line: Vec<f64> = (0..20).map(|i| 2.0 + 0.5 * i as f64).collect();
-        assert!(kpss_test(&line, KpssModel::Trend, KpssLags::Hobijn).is_none());
+        assert_eq!(
+            kpss_test(&line, KpssModel::Trend, KpssLags::Hobijn).unwrap_err(),
+            TimeSeriesError::NoVariation
+        );
+        let mut bad = AR;
+        bad[3] = f64::INFINITY;
+        assert_eq!(
+            kpss_test(&bad[..5], KpssModel::Level, KpssLags::Hobijn).unwrap_err(),
+            TimeSeriesError::ValueNotFinite { index: 3 }
+        );
     }
 
     /// The statistic is a ratio of the residuals' own scale: the same in any unit.
@@ -2226,9 +2258,12 @@ pub enum AdfModel {
 /// Reference: Dickey & Fuller (1979), "Distribution of the Estimators for
 /// Autoregressive Time Series with a Unit Root"
 ///
-/// # Returns
+/// # Errors
 ///
-/// `None` if fewer than 10 data points, non-finite values, or OLS fails.
+/// [`TimeSeriesError`]: a non-finite value, fewer than 10 values, a lag
+/// count (`lags`, or the AIC search's `max_lags`) outside `[0, max]` where
+/// `max` leaves the regression at least 5 rows and a residual degree of
+/// freedom ([`adf_max_lags`]), or a degenerate regression.
 ///
 /// # Examples
 ///
@@ -2245,10 +2280,22 @@ pub enum AdfModel {
 /// assert!(r.statistic.is_finite());
 /// assert_eq!(r.critical_values.len(), 3);
 /// ```
-pub fn adf_test(data: &[f64], model: AdfModel, lags: AdfLags) -> Option<AdfResult> {
+pub fn adf_test(
+    data: &[f64],
+    model: AdfModel,
+    lags: AdfLags,
+) -> Result<AdfResult, TimeSeriesError> {
+    check_series(data, ADF_MIN_OBSERVATIONS)?;
     let n = data.len();
-    if n < 10 || data.iter().any(|v| !v.is_finite()) {
-        return None;
+    let max = adf_max_lags(n, model);
+    match lags {
+        AdfLags::Fixed(p) => {
+            check_option("lags", p, 0, max)?;
+        }
+        AdfLags::Aic { max: Some(m) } => {
+            check_option("max_lags", m, 0, max)?;
+        }
+        AdfLags::Aic { max: None } => {}
     }
 
     // Compute differences
@@ -2260,12 +2307,32 @@ pub fn adf_test(data: &[f64], model: AdfModel, lags: AdfLags) -> Option<AdfResul
             // Schwert (1989) rule for the largest count considered.
             let schwert = (12.0 * (n as f64 / 100.0).powf(0.25)).floor() as usize;
             let p_max = max.unwrap_or_else(|| schwert.min(n / 3));
-            select_adf_lag(data, &dy, model, p_max)?
+            select_adf_lag(data, &dy, model, p_max).ok_or(TimeSeriesError::DegenerateRegression)?
         }
     };
 
     // The chosen count, on every observation it leaves.
-    adf_ols(data, &dy, model, best_lag)
+    adf_ols(data, &dy, model, best_lag).ok_or(TimeSeriesError::DegenerateRegression)
+}
+
+/// The fewest values [`adf_test`] takes.
+pub const ADF_MIN_OBSERVATIONS: usize = 10;
+
+/// The fewest rows the ADF test regression is fitted on.
+const ADF_MIN_REGRESSION_ROWS: usize = 5;
+
+/// The largest number of lagged differences [`adf_test`] accepts for `n`
+/// values (at least [`ADF_MIN_OBSERVATIONS`]) under `model`: with p lags the
+/// regression keeps n − 1 − p rows (one value is lost to differencing, p to
+/// the lags) and has the lagged level, the model's deterministic terms and p
+/// lag columns; it needs at least 5 rows and a residual degree of freedom.
+pub fn adf_max_lags(n: usize, model: AdfModel) -> usize {
+    let fixed_columns = match model {
+        AdfModel::None => 1,
+        AdfModel::Constant => 2,
+        AdfModel::ConstantTrend => 3,
+    };
+    (n.saturating_sub(1 + ADF_MIN_REGRESSION_ROWS)).min(n.saturating_sub(2 + fixed_columns) / 2)
 }
 
 /// The lag count in `0..=p_max` with the smallest AIC. Every candidate is
@@ -3884,12 +3951,39 @@ mod tests {
 
     #[test]
     fn adf_edge_cases() {
-        // Too few data points
-        assert!(adf_test(&[1.0; 9], AdfModel::Constant, AdfLags::default()).is_none());
-        // NaN
+        assert_eq!(
+            adf_test(&[1.0; 9], AdfModel::Constant, AdfLags::default()).unwrap_err(),
+            TimeSeriesError::TooFewObservations { needed: 10, got: 9 }
+        );
         let mut data = vec![0.0; 20];
         data[5] = f64::NAN;
-        assert!(adf_test(&data, AdfModel::Constant, AdfLags::default()).is_none());
+        assert_eq!(
+            adf_test(&data, AdfModel::Constant, AdfLags::default()).unwrap_err(),
+            TimeSeriesError::ValueNotFinite { index: 5 }
+        );
+        // 20 values under a constant: room for 0 to min(14, 8) lags.
+        assert_eq!(adf_max_lags(20, AdfModel::Constant), 8);
+        let walk: Vec<f64> = (0..20).map(|i| ((i * 37) % 11) as f64).collect();
+        for lags in [AdfLags::Fixed(9), AdfLags::Aic { max: Some(9) }] {
+            let option = if matches!(lags, AdfLags::Fixed(_)) {
+                "lags"
+            } else {
+                "max_lags"
+            };
+            assert_eq!(
+                adf_test(&walk, AdfModel::Constant, lags).unwrap_err(),
+                TimeSeriesError::OptionOutOfRange {
+                    option,
+                    got: 9.0,
+                    min: 0.0,
+                    max: 8.0
+                }
+            );
+        }
+        assert_eq!(
+            adf_test(&[3.0; 20], AdfModel::Constant, AdfLags::default()).unwrap_err(),
+            TimeSeriesError::DegenerateRegression
+        );
     }
 
     /// Differences that repeat with period 10 are fitted exactly by 9 lags. The
@@ -3904,7 +3998,10 @@ mod tests {
         for i in 1..walk.len() {
             walk[i] = walk[i - 1] + shocks[(i * 7) % 10];
         }
-        assert!(adf_test(&walk, AdfModel::ConstantTrend, AdfLags::Fixed(9)).is_none());
+        assert_eq!(
+            adf_test(&walk, AdfModel::ConstantTrend, AdfLags::Fixed(9)).unwrap_err(),
+            TimeSeriesError::DegenerateRegression
+        );
         let r = adf_test(&walk, AdfModel::ConstantTrend, AdfLags::default())
             .expect("a lag below 9 fits");
         assert!(r.n_lags < 9, "chose the exact fit: {} lags", r.n_lags);

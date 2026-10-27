@@ -1981,6 +1981,31 @@ mod tests {
             (b["code"].clone(), b["max"].clone()),
             ("parameter_out_of_range".into(), 39.0.into())
         );
+        // A negative count is judged against the same domain; a range refusal
+        // comes before the refusal of giving both options.
+        let b = refuse(serde_json::json!({ "data": walk, "lags": -1 }));
+        assert_eq!(
+            (
+                b["code"].clone(),
+                b["min"].clone(),
+                b["max"].clone(),
+                b["got"].clone()
+            ),
+            (
+                "parameter_out_of_range".into(),
+                0.0.into(),
+                39.0.into(),
+                (-1.0).into()
+            )
+        );
+        let b = refuse(serde_json::json!({ "data": walk, "lags": 40, "lag_rule": "hobijn" }));
+        assert_eq!(
+            (b["code"].clone(), b["parameter"].clone()),
+            ("parameter_out_of_range".into(), "lags".into())
+        );
+        // Too few values come before the option's range.
+        let b = refuse(serde_json::json!({ "data": [1, 2, 3], "lags": 40 }));
+        assert_eq!(b["code"], "insufficient_data", "{b}");
         let b = refuse(serde_json::json!({ "data": walk, "model": "drift" }));
         assert_eq!(b["code"], "unknown_option", "{b}");
         let b = refuse(serde_json::json!({ "data": vec![5.0; 12] }));

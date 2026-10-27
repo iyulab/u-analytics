@@ -34,6 +34,24 @@ Depends on u-numflow 0.15. The .NET client is `UAnalytics` 0.24.0.
   observed counts, summing to 0. A host that reports "no variation" can branch on
   the code; `invalid_input` now means only a refusal without a more specific
   reason.
+- **Breaking (Rust API):** `correlation::acf`, `correlation::pacf`,
+  `testing::adf_test` and `testing::kpss_test` return
+  `Result<_, error::TimeSeriesError>` instead of `Option`, saying why they
+  refuse: a non-finite value (`index`), too few values (`needed`, `got`), a lag
+  option outside its domain (`option`, `min`, `max`, `got`), a series without
+  variation, or a degenerate ADF regression. The data is checked before the
+  options and the options before any computation. Along with it:
+  - `acf` and `pacf` take `max_lag: Option<usize>`; `None` is statsmodels'
+    default `min(⌊10·log₁₀ n⌋, highest)`. A lag outside `[1, n − 1]` (`acf`) or
+    `[1, n / 2 − 1]` (`pacf`, statsmodels' limit) is refused instead of clamped,
+    and `pacf` takes at least 4 values.
+  - `adf_test` refuses a fixed lag count, or an AIC search bound, past
+    `testing::adf_max_lags(n, model)` (the room the regression leaves) instead
+    of failing in the regression.
+
+  To migrate: `acf(&x, 8)` → `acf(&x, Some(8))`, `.is_none()` →
+  `.is_err()`, and match on `TimeSeriesError` where the reason matters. The
+  WASM, C and .NET refusals are unchanged.
 
 ### Fixed
 

@@ -20,6 +20,7 @@
 //! - [`regression`] — Regression analysis (simple, multiple OLS, VIF)
 //! - [`distribution`] — Distribution analysis (ECDF, histogram bins, QQ-plot, KS test)
 //! - [`testing`] — Hypothesis testing (t-tests, ANOVA, chi-squared, normality)
+//! - [`error`] — Refusals shared by more than one module ([`error::TimeSeriesError`])
 //! - [`msa`] — Measurement System Analysis (Gage R&R, ANOVA method)
 //!
 //! ## Design Philosophy
@@ -42,6 +43,7 @@ pub mod counter;
 pub mod decomposition;
 pub mod detection;
 pub mod distribution;
+pub mod error;
 pub mod msa;
 pub mod point_process;
 pub mod regression;

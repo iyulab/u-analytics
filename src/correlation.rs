@@ -22,6 +22,7 @@
 //! assert!(k.r > 0.5);
 //! ```
 
+use crate::error::{check_option, check_series, TimeSeriesError};
 use u_numflow::matrix::Matrix;
 use u_numflow::special;
 use u_numflow::stats;
@@ -607,6 +608,22 @@ pub struct PacfResult {
 /// z₀.₉₇₅, the two-sided 95 % standard normal point.
 const Z_975: f64 = 1.959_963_984_540_054;
 
+/// The fewest values [`acf`] takes: one lag needs a pair.
+pub const ACF_MIN_OBSERVATIONS: usize = 2;
+
+/// The fewest values [`pacf`] takes: lags below `n / 2` leave lag 1 from 4 on.
+pub const PACF_MIN_OBSERVATIONS: usize = 4;
+
+/// The largest lag of an autocorrelation request: `max_lag` within
+/// `[1, highest]`, or, when it is `None`, `min(⌊10·log₁₀ n⌋, highest)`
+/// (statsmodels' default), never below 1.
+fn lag_range(max_lag: Option<usize>, n: usize, highest: usize) -> Result<usize, TimeSeriesError> {
+    match max_lag {
+        None => Ok((((n as f64).log10() * 10.0).floor() as usize).clamp(1, highest)),
+        Some(k) => check_option("max_lag", k, 1, highest),
+    }
+}
+
 /// Compute the sample autocorrelation function (ACF).
 ///
 /// Uses the biased estimator (denominator N, not N-k) which guarantees a
@@ -614,12 +631,14 @@ const Z_975: f64 = 1.959_963_984_540_054;
 ///
 /// # Arguments
 ///
-/// * `data` — time series observations (at least 2).
-/// * `max_lag` — maximum lag to compute. Clamped to `n - 1`.
+/// * `data` — time series observations (at least 2, all finite).
+/// * `max_lag` — the largest lag, in `[1, n − 1]`; `None` for statsmodels'
+///   default `min(⌊10·log₁₀ n⌋, n − 1)`.
 ///
-/// # Returns
+/// # Errors
 ///
-/// `None` if `data.len() < 2`, `max_lag == 0`, or data contains non-finite values.
+/// [`TimeSeriesError`]: a non-finite value, fewer than 2 values, `max_lag`
+/// outside `[1, n − 1]`, or a series that does not vary.
 ///
 /// # References
 ///
@@ -631,16 +650,14 @@ const Z_975: f64 = 1.959_963_984_540_054;
 /// use u_analytics::correlation::acf;
 ///
 /// let data = [1.0, 2.0, 3.0, 4.0, 5.0, 4.0, 3.0, 2.0, 1.0, 2.0];
-/// let r = acf(&data, 5).unwrap();
+/// let r = acf(&data, Some(5)).unwrap();
 /// assert!((r.acf[0] - 1.0).abs() < 1e-10); // lag 0 is always 1
 /// assert!(r.acf.len() == 6); // lags 0..=5
 /// ```
-pub fn acf(data: &[f64], max_lag: usize) -> Option<AcfResult> {
+pub fn acf(data: &[f64], max_lag: Option<usize>) -> Result<AcfResult, TimeSeriesError> {
+    check_series(data, ACF_MIN_OBSERVATIONS)?;
     let n = data.len();
-    if n < 2 || max_lag == 0 || data.iter().any(|v| !v.is_finite()) {
-        return None;
-    }
-    let max_lag = max_lag.min(n - 1);
+    let max_lag = lag_range(max_lag, n, n - 1)?;
     let nf = n as f64;
 
     let mean = data.iter().sum::<f64>() / nf;
@@ -652,7 +669,7 @@ pub fn acf(data: &[f64], max_lag: usize) -> Option<AcfResult> {
     // against the series' own size (a fixed floor would misjudge small units).
     let mean_square: f64 = data.iter().map(|&x| x * x).sum::<f64>() / nf;
     if c0 <= 1e-20 * mean_square {
-        return None;
+        return Err(TimeSeriesError::NoVariation);
     }
 
     let mut acf_vals = Vec::with_capacity(max_lag + 1);
@@ -679,7 +696,7 @@ pub fn acf(data: &[f64], max_lag: usize) -> Option<AcfResult> {
         })
         .collect();
 
-    Some(AcfResult {
+    Ok(AcfResult {
         acf: acf_vals,
         confidence_threshold: threshold,
         bartlett_limits,
@@ -695,12 +712,15 @@ pub fn acf(data: &[f64], max_lag: usize) -> Option<AcfResult> {
 ///
 /// # Arguments
 ///
-/// * `data` — time series observations (at least 3).
-/// * `max_lag` — maximum lag to compute. Clamped to `n - 1`.
+/// * `data` — time series observations (at least 4, all finite).
+/// * `max_lag` — the largest lag, in `[1, n / 2 − 1]` (statsmodels' limit:
+///   beyond `n / 2` the recursion runs on autocorrelations from too few
+///   pairs); `None` for `min(⌊10·log₁₀ n⌋, n / 2 − 1)`.
 ///
-/// # Returns
+/// # Errors
 ///
-/// `None` if `data.len() < 3`, `max_lag == 0`, or data contains non-finite values.
+/// [`TimeSeriesError`]: a non-finite value, fewer than 4 values, `max_lag`
+/// outside `[1, n / 2 − 1]`, or a series that does not vary.
 ///
 /// # References
 ///
@@ -713,24 +733,19 @@ pub fn acf(data: &[f64], max_lag: usize) -> Option<AcfResult> {
 /// use u_analytics::correlation::pacf;
 ///
 /// let data = [1.0, 3.0, 2.0, 4.0, 3.0, 5.0, 4.0, 6.0, 5.0, 7.0];
-/// let r = pacf(&data, 4).unwrap();
+/// let r = pacf(&data, Some(4)).unwrap();
 /// assert!(r.pacf.len() == 4); // lags 1..=4
 /// // Lag 1 PACF equals lag 1 ACF
 /// ```
-pub fn pacf(data: &[f64], max_lag: usize) -> Option<PacfResult> {
+pub fn pacf(data: &[f64], max_lag: Option<usize>) -> Result<PacfResult, TimeSeriesError> {
+    check_series(data, PACF_MIN_OBSERVATIONS)?;
     let n = data.len();
-    if n < 3 || max_lag == 0 {
-        return None;
-    }
+    let max_lag = lag_range(max_lag, n, n / 2 - 1)?;
 
-    // First compute ACF (which refuses a non-finite value)
-    let acf_result = acf(data, max_lag)?;
+    // The autocorrelations it recurses on (which refuse a series that does
+    // not vary).
+    let acf_result = acf(data, Some(max_lag))?;
     let rho = &acf_result.acf;
-    let max_lag = rho.len() - 1; // actual max lag (may be clamped)
-
-    if max_lag == 0 {
-        return None;
-    }
 
     let mut pacf_vals = Vec::with_capacity(max_lag);
 
@@ -738,7 +753,7 @@ pub fn pacf(data: &[f64], max_lag: usize) -> Option<PacfResult> {
     pacf_vals.push(rho[1]);
 
     if max_lag == 1 {
-        return Some(PacfResult {
+        return Ok(PacfResult {
             pacf: pacf_vals,
             confidence_threshold: Z_975 / (n as f64).sqrt(),
         });
@@ -773,7 +788,7 @@ pub fn pacf(data: &[f64], max_lag: usize) -> Option<PacfResult> {
         phi_prev = phi_new;
     }
 
-    Some(PacfResult {
+    Ok(PacfResult {
         pacf: pacf_vals,
         confidence_threshold: Z_975 / (n as f64).sqrt(),
     })
@@ -799,7 +814,7 @@ mod statsmodels_reference {
 
     #[test]
     fn acf_and_bartlett_limits_reproduce_statsmodels() {
-        let r = acf(&X, 8).unwrap();
+        let r = acf(&X, Some(8)).unwrap();
         close(
             &r.acf,
             &[
@@ -834,7 +849,7 @@ mod statsmodels_reference {
 
     #[test]
     fn pacf_reproduces_statsmodels_ldb() {
-        let r = pacf(&X, 8).unwrap();
+        let r = pacf(&X, Some(8)).unwrap();
         close(
             &r.pacf,
             &[
@@ -854,9 +869,12 @@ mod statsmodels_reference {
     #[test]
     fn a_small_unit_is_not_a_constant_series() {
         let small: Vec<f64> = X.iter().map(|v| v * 1e-150).collect();
-        let r = acf(&small, 8).unwrap();
+        let r = acf(&small, Some(8)).unwrap();
         assert!((r.acf[1] - 0.486403576681892).abs() < 1e-12);
-        assert!(acf(&[3.0; 10], 3).is_none());
+        assert_eq!(
+            acf(&[3.0; 10], Some(3)).unwrap_err(),
+            TimeSeriesError::NoVariation
+        );
     }
 }
 
@@ -1249,7 +1267,7 @@ mod tests {
     #[test]
     fn acf_lag_zero_is_one() {
         let data = [1.0, 3.0, 2.0, 5.0, 4.0, 7.0, 6.0, 8.0];
-        let r = acf(&data, 3).expect("should compute");
+        let r = acf(&data, Some(3)).expect("should compute");
         assert!((r.acf[0] - 1.0).abs() < 1e-10);
     }
 
@@ -1257,7 +1275,7 @@ mod tests {
     fn acf_linear_trend() {
         // Linear trend → strong positive autocorrelation at low lags
         let data: Vec<f64> = (0..20).map(|i| i as f64).collect();
-        let r = acf(&data, 5).expect("should compute");
+        let r = acf(&data, Some(5)).expect("should compute");
         assert!(r.acf[1] > 0.8, "lag-1 ACF for linear trend should be high");
         assert!(r.acf.len() == 6);
     }
@@ -1268,7 +1286,7 @@ mod tests {
         let data: Vec<f64> = (0..30)
             .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
             .collect();
-        let r = acf(&data, 5).expect("should compute");
+        let r = acf(&data, Some(5)).expect("should compute");
         assert!(r.acf[1] < -0.8, "alternating → negative lag-1 ACF");
         assert!(r.acf[2] > 0.8, "alternating → positive lag-2 ACF");
     }
@@ -1276,24 +1294,53 @@ mod tests {
     #[test]
     fn acf_white_noise_threshold() {
         let data: Vec<f64> = (0..100).map(|i| ((i * 7 + 3) % 13) as f64).collect();
-        let r = acf(&data, 10).expect("should compute");
+        let r = acf(&data, Some(10)).expect("should compute");
         // Threshold should be ~0.196 for n=100
         assert!((r.confidence_threshold - 1.96 / 10.0).abs() < 0.01);
     }
 
     #[test]
     fn acf_edge_cases() {
-        assert!(acf(&[1.0], 3).is_none()); // too short
-        assert!(acf(&[1.0, 2.0], 0).is_none()); // max_lag 0
-        assert!(acf(&[5.0, 5.0, 5.0, 5.0], 2).is_none()); // constant
-        assert!(acf(&[1.0, f64::NAN, 3.0], 1).is_none()); // NaN
+        assert_eq!(
+            acf(&[1.0], Some(3)).unwrap_err(),
+            TimeSeriesError::TooFewObservations { needed: 2, got: 1 }
+        );
+        assert_eq!(
+            acf(&[1.0, 2.0], Some(0)).unwrap_err(),
+            TimeSeriesError::OptionOutOfRange {
+                option: "max_lag",
+                got: 0.0,
+                min: 1.0,
+                max: 1.0
+            }
+        );
+        assert_eq!(
+            acf(&[5.0, 5.0, 5.0, 5.0], Some(2)).unwrap_err(),
+            TimeSeriesError::NoVariation
+        );
+        // A non-finite value is named before the length is judged.
+        assert_eq!(
+            acf(&[f64::NAN], Some(1)).unwrap_err(),
+            TimeSeriesError::ValueNotFinite { index: 0 }
+        );
     }
 
     #[test]
-    fn acf_max_lag_clamped() {
+    fn acf_max_lag_is_refused_past_n_minus_1_and_defaults_to_ten_log_n() {
         let data = [1.0, 2.0, 3.0, 4.0, 5.0];
-        let r = acf(&data, 100).expect("should compute");
-        assert_eq!(r.acf.len(), 5); // clamped to n-1 = 4, so lags 0..=4
+        assert_eq!(
+            acf(&data, Some(100)).unwrap_err(),
+            TimeSeriesError::OptionOutOfRange {
+                option: "max_lag",
+                got: 100.0,
+                min: 1.0,
+                max: 4.0
+            }
+        );
+        // min(floor(10 log10 5), 4) = 4.
+        assert_eq!(acf(&data, None).expect("defined").acf.len(), 5);
+        let long: Vec<f64> = (0..100).map(|i| ((i * 37) % 11) as f64).collect();
+        assert_eq!(acf(&long, None).expect("defined").acf.len(), 21);
     }
 
     // -----------------------------------------------------------------------
@@ -1303,8 +1350,8 @@ mod tests {
     #[test]
     fn pacf_lag1_equals_acf_lag1() {
         let data = [1.0, 3.0, 2.0, 5.0, 4.0, 7.0, 6.0, 8.0, 5.0, 3.0];
-        let acf_r = acf(&data, 5).expect("should compute ACF");
-        let pacf_r = pacf(&data, 5).expect("should compute PACF");
+        let acf_r = acf(&data, Some(4)).expect("should compute ACF");
+        let pacf_r = pacf(&data, Some(4)).expect("should compute PACF");
         assert!(
             (pacf_r.pacf[0] - acf_r.acf[1]).abs() < 1e-10,
             "PACF[1] should equal ACF[1]: {} vs {}",
@@ -1316,7 +1363,7 @@ mod tests {
     #[test]
     fn pacf_linear_trend() {
         let data: Vec<f64> = (0..20).map(|i| i as f64).collect();
-        let r = pacf(&data, 5).expect("should compute");
+        let r = pacf(&data, Some(5)).expect("should compute");
         // AR(1)-like: strong lag-1 PACF, weaker at higher lags
         assert!(r.pacf[0].abs() > 0.5, "lag-1 PACF should be strong");
     }
@@ -1324,7 +1371,7 @@ mod tests {
     #[test]
     fn pacf_bounded() {
         let data: Vec<f64> = (0..30).map(|i| (i as f64 * 0.5).sin()).collect();
-        let r = pacf(&data, 10).expect("should compute");
+        let r = pacf(&data, Some(10)).expect("should compute");
         for (i, &p) in r.pacf.iter().enumerate() {
             assert!(
                 (-1.0..=1.0).contains(&p),
@@ -1337,8 +1384,24 @@ mod tests {
 
     #[test]
     fn pacf_edge_cases() {
-        assert!(pacf(&[1.0, 2.0], 3).is_none()); // too short (< 3)
-        assert!(pacf(&[1.0, 2.0, 3.0], 0).is_none()); // max_lag 0
+        assert_eq!(
+            pacf(&[1.0, 2.0, 3.0], Some(1)).unwrap_err(),
+            TimeSeriesError::TooFewObservations { needed: 4, got: 3 }
+        );
+        // Lags below n / 2: 1 to 4 for 10 values.
+        let data = [1.0, 3.0, 2.0, 5.0, 4.0, 7.0, 6.0, 8.0, 5.0, 3.0];
+        for k in [0, 5] {
+            assert_eq!(
+                pacf(&data, Some(k)).unwrap_err(),
+                TimeSeriesError::OptionOutOfRange {
+                    option: "max_lag",
+                    got: k as f64,
+                    min: 1.0,
+                    max: 4.0
+                }
+            );
+        }
+        assert_eq!(pacf(&data, None).expect("defined").pacf.len(), 4);
     }
 }
 
@@ -1434,7 +1497,7 @@ mod proptests {
         fn acf_bounded_prop(
             data in proptest::collection::vec(-1e3_f64..1e3, 5..=50),
         ) {
-            if let Some(r) = acf(&data, 10) {
+            if let Ok(r) = acf(&data, Some(10)) {
                 prop_assert!((r.acf[0] - 1.0).abs() < 1e-10, "ACF[0] must be 1.0");
                 for (i, &v) in r.acf.iter().enumerate() {
                     prop_assert!((-1.0..=1.0).contains(&v), "ACF[{i}] = {v} out of [-1,1]");
@@ -1446,7 +1509,7 @@ mod proptests {
         fn pacf_bounded_prop(
             data in proptest::collection::vec(-1e3_f64..1e3, 5..=50),
         ) {
-            if let Some(r) = pacf(&data, 5) {
+            if let Ok(r) = pacf(&data, Some(5)) {
                 for (i, &v) in r.pacf.iter().enumerate() {
                     prop_assert!((-1.0 - 1e-10..=1.0 + 1e-10).contains(&v), "PACF[{i}] = {v} out of bounds");
                 }

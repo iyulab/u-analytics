@@ -234,7 +234,7 @@ pub fn estimate_period(series: &[f64]) -> Option<SeasonalityResult> {
     }
 
     // Stage 2: the ACF hill inside each candidate's frequency band.
-    let Some(acf_result) = acf(&detrended, n / 2) else {
+    let Ok(acf_result) = acf(&detrended, Some(n / 2)) else {
         return Some(no_period());
     };
     let r = &acf_result.acf;

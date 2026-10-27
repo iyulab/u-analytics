@@ -1783,45 +1783,23 @@ pub(crate) mod hypothesis {
         pub(crate) levels: Vec<AdfLevelDto>,
     }
 
-    /// The fewest rows the test regression is run on.
-    const ADF_MIN_REGRESSION_ROWS: usize = 5;
-
-    /// `adf_test`'s `model` names, each with the regression columns besides
-    /// the lags: the lagged level, plus the deterministic terms.
-    pub(crate) const ADF_MODELS: [(&str, (crate::testing::AdfModel, usize)); 3] = [
-        ("none", (crate::testing::AdfModel::None, 1)),
-        ("constant", (crate::testing::AdfModel::Constant, 2)),
-        (
-            "constant_trend",
-            (crate::testing::AdfModel::ConstantTrend, 3),
-        ),
+    /// `adf_test`'s `model` names.
+    pub(crate) const ADF_MODELS: [(&str, crate::testing::AdfModel); 3] = [
+        ("none", crate::testing::AdfModel::None),
+        ("constant", crate::testing::AdfModel::Constant),
+        ("constant_trend", crate::testing::AdfModel::ConstantTrend),
     ];
 
     pub(crate) fn adf_dto(input: AdfInputDto) -> Result<AdfDto, WireError> {
-        let (model, fixed_columns) = super::named("model", &input.model, &ADF_MODELS)?;
-        let data = at_least(input.data, 10, "data")?;
-        // With p lags the regression keeps n - 1 - p rows (one value is lost to
-        // differencing, p to the lags) and has fixed_columns + p columns. It
-        // needs ADF_MIN_REGRESSION_ROWS rows and a residual degree of freedom.
-        let n = data.len();
-        let max = (n - 1 - ADF_MIN_REGRESSION_ROWS).min((n - 2 - fixed_columns) / 2);
-        let count = |parameter: &'static str, value: Option<Whole>| match value {
-            Some(Whole(p)) if !(0.0..=max as f64).contains(&p) => Err(WireError::out_of_range(
-                parameter,
-                Bound::Closed(0.0),
-                Bound::Closed(max as f64),
-                p,
-                format!(
-                    "{parameter}: {} values leave room for 0 to {max} lags, got {p}",
-                    data.len()
-                ),
-            )),
-            p => Ok(p.map(Whole::count)),
-        };
-        let lags = match (
-            count("max_lags", input.max_lags)?,
-            count("lags", input.lags)?,
-        ) {
+        use crate::testing::{adf_test, AdfLags};
+        let model = super::named("model", &input.model, &ADF_MODELS)?;
+        let data = input.data;
+        let run = |lags| adf_test(&data, model, lags);
+        let max_lags = super::series_count("max_lags", input.max_lags, |m| {
+            run(AdfLags::Aic { max: Some(m) })
+        })?;
+        let lags = super::series_count("lags", input.lags, |p| run(AdfLags::Fixed(p)))?;
+        let lags = match (max_lags, lags) {
             (Some(_), Some(_)) => {
                 return Err(WireError::new(
                     code::INVALID_OPTION,
@@ -1831,17 +1809,10 @@ pub(crate) mod hypothesis {
                 )
                 .about("lags"))
             }
-            (_, Some(p)) => crate::testing::AdfLags::Fixed(p),
-            (max, None) => crate::testing::AdfLags::Aic { max },
+            (_, Some(p)) => AdfLags::Fixed(p),
+            (max, None) => AdfLags::Aic { max },
         };
-        let r = crate::testing::adf_test(&data, model, lags).ok_or_else(|| {
-            WireError::degenerate_data(
-                "adf_test: the test regression is degenerate -- singular, or an exact \
-                 fit of the differences (a deterministic series), so the t-ratio is \
-                 undefined",
-            )
-            .about("data")
-        })?;
+        let r = run(lags)?;
         Ok(AdfDto {
             statistic: r.statistic,
             n_lags: r.n_lags,
@@ -1947,23 +1918,11 @@ pub(crate) mod hypothesis {
             .as_deref()
             .map(|name| super::named("lag_rule", name, &KPSS_LAG_RULES))
             .transpose()?;
-        let data = at_least(input.data, 10, "data")?;
-        let n = data.len();
-        let fixed = match input.lags {
-            Some(Whole(l)) if !(0.0..=(n - 1) as f64).contains(&l) => {
-                return Err(WireError::out_of_range(
-                    "lags",
-                    Bound::Closed(0.0),
-                    Bound::Closed((n - 1) as f64),
-                    l,
-                    format!(
-                        "lags: {n} values allow a truncation lag of 0 to {}, got {l}",
-                        n - 1
-                    ),
-                ))
-            }
-            l => l.map(Whole::count),
-        };
+        let data = input.data;
+        let run = |lags| crate::testing::kpss_test(&data, model, lags);
+        let fixed = super::series_count("lags", input.lags, |l| {
+            run(crate::testing::KpssLags::Fixed(l))
+        })?;
         let lags = match (rule, fixed) {
             (Some(_), Some(_)) => {
                 return Err(WireError::new(
@@ -1977,13 +1936,7 @@ pub(crate) mod hypothesis {
             (Some(rule), None) => rule,
             (None, None) => crate::testing::KpssLags::Hobijn,
         };
-        let r = crate::testing::kpss_test(&data, model, lags).ok_or_else(|| {
-            WireError::degenerate_data(
-                "kpss_test: the series has no variation about its level (or trend), so \
-                 the statistic is undefined",
-            )
-            .about("data")
-        })?;
+        let r = run(lags)?;
         Ok(KpssDto {
             statistic: r.statistic,
             n_lags: r.n_lags,
@@ -3837,34 +3790,12 @@ pub(crate) struct PacfDto {
     pub(crate) confidence_threshold: f64,
 }
 
-/// The lag range of an autocorrelation request: `max_lag` within
-/// `[1, highest]`, absent = `min(⌊10·log₁₀ n⌋, highest)`.
-fn max_lag(value: Option<Whole>, n: usize, highest: usize) -> Result<usize, WireError> {
-    match value {
-        None => Ok((((n as f64).log10() * 10.0).floor() as usize).clamp(1, highest)),
-        Some(Whole(k)) if (1.0..=highest as f64).contains(&k) => Ok(Whole(k).count()),
-        Some(Whole(k)) => Err(WireError::out_of_range(
-            "max_lag",
-            Bound::Closed(1.0),
-            Bound::Closed(highest as f64),
-            k,
-            format!("max_lag: {n} values allow lags 1 to {highest}, got {k}"),
-        )),
-    }
-}
-
-fn no_autocorrelation() -> WireError {
-    WireError::degenerate_data(
-        "data: the series does not vary, so its autocorrelation is undefined",
-    )
-    .about("data")
-}
-
 pub(crate) fn acf_dto(input: AutocorrelationInputDto) -> Result<AcfDto, WireError> {
-    let data = at_least(input.data, 2, "data")?;
-    let n = data.len();
-    let lag = max_lag(input.max_lag, n, n - 1)?;
-    let r = crate::correlation::acf(&data, lag).ok_or_else(no_autocorrelation)?;
+    let data = input.data;
+    let lag = series_count("max_lag", input.max_lag, |k| {
+        crate::correlation::acf(&data, Some(k))
+    })?;
+    let r = crate::correlation::acf(&data, lag)?;
     Ok(AcfDto {
         acf: r.acf,
         confidence_threshold: r.confidence_threshold,
@@ -3873,16 +3804,89 @@ pub(crate) fn acf_dto(input: AutocorrelationInputDto) -> Result<AcfDto, WireErro
 }
 
 pub(crate) fn pacf_dto(input: AutocorrelationInputDto) -> Result<PacfDto, WireError> {
-    // Lags below n / 2 (statsmodels' limit): beyond it the recursion runs on
-    // autocorrelations estimated from too few pairs.
-    let data = at_least(input.data, 4, "data")?;
-    let n = data.len();
-    let lag = max_lag(input.max_lag, n, n / 2 - 1)?;
-    let r = crate::correlation::pacf(&data, lag).ok_or_else(no_autocorrelation)?;
+    let data = input.data;
+    let lag = series_count("max_lag", input.max_lag, |k| {
+        crate::correlation::pacf(&data, Some(k))
+    })?;
+    let r = crate::correlation::pacf(&data, lag)?;
     Ok(PacfDto {
         pacf: r.pacf,
         confidence_threshold: r.confidence_threshold,
     })
+}
+
+/// A count option of a time-series statistic, whose domain the statistic
+/// states and which depends on the data.
+///
+/// The value is read as sent -- negative, or past what a count holds -- so it
+/// is judged here, against the domain the statistic itself reports: asked
+/// with a value it refuses (`usize::MAX`), it answers with the data's
+/// refusal, if the data has one, or the option's domain. Judging the option
+/// before the statistic runs keeps the data's refusals ahead of the
+/// option's, and the option's ahead of a combination of options the
+/// transport refuses (`lags` with `max_lags`).
+pub(crate) fn series_count<T>(
+    option: &'static str,
+    value: Option<Whole>,
+    probe: impl FnOnce(usize) -> Result<T, crate::error::TimeSeriesError>,
+) -> Result<Option<usize>, WireError> {
+    use crate::error::TimeSeriesError as E;
+    let Some(Whole(v)) = value else {
+        return Ok(None);
+    };
+    match probe(usize::MAX) {
+        Err(E::OptionOutOfRange {
+            option: o,
+            min,
+            max,
+            ..
+        }) if o == option => {
+            if (min..=max).contains(&v) {
+                Ok(Some(Whole(v).count()))
+            } else {
+                Err(E::OptionOutOfRange {
+                    option,
+                    got: v,
+                    min,
+                    max,
+                }
+                .into())
+            }
+        }
+        Err(other) => Err(other.into()),
+        // No count is refused by no domain: the value stands.
+        Ok(_) => Ok(Some(Whole(v).count())),
+    }
+}
+
+impl From<crate::error::TimeSeriesError> for WireError {
+    fn from(error: crate::error::TimeSeriesError) -> Self {
+        use crate::error::TimeSeriesError as E;
+        let message = format!("data: {error}");
+        match error {
+            E::ValueNotFinite { index } => {
+                WireError::new(code::VALUE_NOT_FINITE, Some(index), message).about("data")
+            }
+            E::TooFewObservations { needed, got } => {
+                WireError::too_few("data", needed, got, message)
+            }
+            E::OptionOutOfRange {
+                option,
+                got,
+                min,
+                max,
+            } => WireError::out_of_range(
+                option,
+                Bound::Closed(min),
+                Bound::Closed(max),
+                got,
+                format!("{error}"),
+            ),
+            E::NoVariation | E::DegenerateRegression => {
+                WireError::degenerate_data(message).about("data")
+            }
+        }
+    }
 }
 
 // ── Seasonality ──────────────────────────────────────────────────────────────
