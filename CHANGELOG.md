@@ -10,6 +10,12 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Added
 
+- `acf` and `pacf` through every transport (WASM, C ABI `uanalytics_acf` /
+  `uanalytics_pacf`, .NET `AnalyticsClient.Acf` / `Pacf`): lags up to `max_lag`
+  (default statsmodels' `min(10 log10 n, n - 1)`, below `n / 2` for the partial
+  one). `AcfResult` gains `bartlett_limits` -- the per-lag 95 % band by Bartlett's
+  formula that an ACF plot draws -- beside the white-noise threshold, which now
+  uses the exact z (1.95996) rather than 1.96. Both match statsmodels to 1e-12.
 - `VERSION`: the crate's own version (`CARGO_PKG_VERSION`) as a constant at the
   crate root, so a consumer can report what it was built against without
   reading a lock file -- which names the wrong version once the crate is linked

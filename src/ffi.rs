@@ -1422,6 +1422,22 @@ wire_export!(
 );
 
 wire_export!(
+    /// Sample autocorrelation `{data, max_lag?}` → `{acf, confidence_threshold,
+    /// bartlett_limits}` (lags 0 to max_lag; Bartlett's 95 % limits per lag).
+    uanalytics_acf,
+    crate::wire::AutocorrelationInputDto,
+    |r| crate::wire::acf_dto(r)
+);
+
+wire_export!(
+    /// Sample partial autocorrelation `{data, max_lag?}` → `{pacf,
+    /// confidence_threshold}` (lags 1 to max_lag, below n / 2).
+    uanalytics_pacf,
+    crate::wire::AutocorrelationInputDto,
+    |r| crate::wire::pacf_dto(r)
+);
+
+wire_export!(
     /// Whether a family describes `{data}`: `{data, distribution, replicates?,
     /// seed?}` → `{distribution, parameters, statistic, p_value, replicates}` —
     /// Anderson–Darling A² against the fit, parametric-bootstrap p-value.
@@ -1801,6 +1817,50 @@ mod tests {
             (b["code"].as_str(), b["parameter"].as_str()),
             (Some("invalid_input"), Some("data"))
         );
+    }
+
+    #[test]
+    fn acf_and_pacf_default_their_lags_and_name_what_they_refuse() {
+        let data: Vec<f64> = (0..40)
+            .map(|i| ((i as f64) * 0.9).sin() + 0.01 * i as f64)
+            .collect();
+        // Default max_lag: min(floor(10 log10 40) = 16, 39) for acf, and below
+        // n / 2 = 20 for pacf.
+        let (code, b) = call(
+            uanalytics_acf,
+            &serde_json::json!({ "data": data }).to_string(),
+        );
+        assert_eq!(code, 0, "{b}");
+        assert_eq!(b["acf"].as_array().unwrap().len(), 17);
+        assert_eq!(b["bartlett_limits"].as_array().unwrap().len(), 16);
+        let (code, b) = call(
+            uanalytics_pacf,
+            &serde_json::json!({ "data": data }).to_string(),
+        );
+        assert_eq!(code, 0, "{b}");
+        assert_eq!(b["pacf"].as_array().unwrap().len(), 16);
+
+        let (_, b) = call(
+            uanalytics_pacf,
+            &serde_json::json!({ "data": data, "max_lag": 20 }).to_string(),
+        );
+        assert_eq!(b["code"], "parameter_out_of_range", "{b}");
+        assert_eq!(
+            (b["parameter"].clone(), b["max"].clone()),
+            ("max_lag".into(), 19.0.into())
+        );
+        let (_, b) = call(
+            uanalytics_acf,
+            &serde_json::json!({ "data": data, "max_lag": 0 }).to_string(),
+        );
+        assert_eq!(
+            (b["code"].clone(), b["min"].clone()),
+            ("parameter_out_of_range".into(), 1.0.into())
+        );
+        let (_, b) = call(uanalytics_acf, r#"{"data": [2, 2, 2, 2]}"#);
+        assert_eq!(b["code"], "invalid_input", "{b}");
+        let (_, b) = call(uanalytics_pacf, r#"{"data": [1, 2, 3]}"#);
+        assert_eq!(b["code"], "insufficient_data", "{b}");
     }
 
     #[test]

@@ -453,6 +453,18 @@ public sealed record EwmaResult(IReadOnlyList<EwmaPoint> Points, IReadOnlyList<i
 /// <summary>A period that passed the periodogram threshold and the ACF check.</summary>
 public sealed record PeriodCandidate(int Period, double Acf, int Bin, double Power, double PowerShare);
 
+/// <summary>
+/// Sample autocorrelation for lags 0 to the largest asked (<see cref="Acf"/>[0] is 1), the 95 %
+/// white-noise threshold z / √n, and the 95 % Bartlett limits for lags 1 onward
+/// (<see cref="BartlettLimits"/>[k − 1] for lag k: zero autocorrelation beyond lag k − 1).
+/// </summary>
+public sealed record AcfResult(
+    IReadOnlyList<double> Acf, double ConfidenceThreshold, IReadOnlyList<double> BartlettLimits);
+
+/// <summary>Sample partial autocorrelation for lags 1 to the largest asked, and the 95 %
+/// threshold z / √n.</summary>
+public sealed record PacfResult(IReadOnlyList<double> Pacf, double ConfidenceThreshold);
+
 /// <summary>Dominant period of a series; <see cref="Period"/> is <c>null</c> when none is found.</summary>
 public sealed record PeriodResult(
     int? Period, IReadOnlyList<PeriodCandidate> Candidates, int N, double AcfThreshold, double PowerThreshold);

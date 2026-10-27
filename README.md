@@ -887,6 +887,14 @@ detect_changepoints(input: {
 detect_changepoints_multi(input: { signals: number[][], cost?, penalty?, min_segment_len? }):
   { changepoints: number[], n_segments: number }   // channels of equal length
 
+// Autocorrelation. max_lag absent = min(floor(10 log10 n), n - 1) (and below n / 2
+// for pacf, statsmodels' limit); outside 1..that -> parameter_out_of_range.
+acf(input: { data: number[], max_lag?: number }):  // >= 2 values, not constant
+  { acf: number[],                // lags 0..max_lag, acf[0] = 1 (denominator n)
+    confidence_threshold: number, // 95 % white-noise band z / sqrt(n)
+    bartlett_limits: number[] }   // lag k at [k - 1]: 95 % band by Bartlett's formula
+pacf(input: { data: number[], max_lag?: number }): // >= 4 values; Durbin-Levinson
+  { pacf: number[], confidence_threshold: number }  // lags 1..max_lag
 // Seasonality — AutoPeriod (Vlachos et al., 2005); >= 8 finite values
 estimate_period(input: { data: number[] }): {
   period: number | null,          // null = no periodicity passed both stages (explicit, not an error)
@@ -1026,6 +1034,8 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_fit_best` | `fit_best(data)` | `{ data: [...] }` |
 | `uanalytics_goodness_of_fit` | `goodness_of_fit(input)` | `input` as is |
 | `uanalytics_estimate_period` | `estimate_period(input)` | `input` as is |
+| `uanalytics_acf` | `acf(input)` | `input` as is |
+| `uanalytics_pacf` | `pacf(input)` | `input` as is |
 | `uanalytics_spectral_residual` | `spectral_residual(input)` | `input` as is |
 
 The composition documented for JavaScript holds here too: `imr_chart` (or

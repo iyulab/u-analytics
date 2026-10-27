@@ -46,6 +46,8 @@ namespace UAnalytics;
 [JsonSerializable(typeof(CusumResult))]
 [JsonSerializable(typeof(EwmaResult))]
 [JsonSerializable(typeof(PeriodResult))]
+[JsonSerializable(typeof(AcfResult))]
+[JsonSerializable(typeof(PacfResult))]
 [JsonSerializable(typeof(SpectralResidualResult))]
 [JsonSerializable(typeof(CorrelationMatrixResult))]
 [JsonSerializable(typeof(RegressionResult))]

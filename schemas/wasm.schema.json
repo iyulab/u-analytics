@@ -1,5 +1,36 @@
 {
   "$defs": {
+    "AcfDto": {
+      "properties": {
+        "acf": {
+          "description": "Lags 0 to `max_lag`; `acf[0]` is 1.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "bartlett_limits": {
+          "description": "95 % limits for lags 1 to `max_lag` by Bartlett's formula.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "confidence_threshold": {
+          "description": "95 % white-noise threshold, z / √n.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "acf",
+        "confidence_threshold",
+        "bartlett_limits"
+      ],
+      "type": "object"
+    },
     "AdfDto": {
       "properties": {
         "levels": {
@@ -241,6 +272,30 @@
         "cl",
         "lcl",
         "out_of_control"
+      ],
+      "type": "object"
+    },
+    "AutocorrelationInputDto": {
+      "additionalProperties": false,
+      "description": "Input for `acf` and `pacf`.",
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "max_lag": {
+          "description": "Largest lag; absent = `min(⌊10·log₁₀ n⌋, n − 1)` for `acf`, and below\n`n / 2` as well for `pacf` (statsmodels' defaults and limit).",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
       ],
       "type": "object"
     },
@@ -1736,6 +1791,28 @@
       ],
       "type": "object"
     },
+    "PacfDto": {
+      "properties": {
+        "confidence_threshold": {
+          "description": "95 % threshold, z / √n.",
+          "format": "double",
+          "type": "number"
+        },
+        "pacf": {
+          "description": "Lags 1 to `max_lag`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "pacf",
+        "confidence_threshold"
+      ],
+      "type": "object"
+    },
     "PeltInputDto": {
       "additionalProperties": false,
       "properties": {
@@ -2933,6 +3010,22 @@
       ],
       "type": "object"
     },
+    "acf.input": {
+      "additionalProperties": false,
+      "description": "The arguments of acf(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/AutocorrelationInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "acf.output": {
+      "$ref": "#/$defs/AcfDto"
+    },
     "adf_test.input": {
       "additionalProperties": false,
       "description": "The arguments of adf_test(input), by name; the WebAssembly function takes them in that order.",
@@ -3897,6 +3990,22 @@
     },
     "p_chart.output": {
       "$ref": "#/$defs/PChartDto"
+    },
+    "pacf.input": {
+      "additionalProperties": false,
+      "description": "The arguments of pacf(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/AutocorrelationInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "pacf.output": {
+      "$ref": "#/$defs/PacfDto"
     },
     "paired_t_test.input": {
       "additionalProperties": false,

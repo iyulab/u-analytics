@@ -17,8 +17,8 @@ use wasm_bindgen::prelude::*;
 // The shapes below are the wire contract, shared with the C FFI so the two
 // transports cannot drift apart again. See `crate::wire`.
 use crate::wire::{
-    c_chart_dto, capability_dto, correlation_matrix_dto, count_pairs, count_rows, cusum_dto,
-    default_correlation_method, ewma_dto, failure_site, fit_best_dto, g_chart_dto,
+    acf_dto, c_chart_dto, capability_dto, correlation_matrix_dto, count_pairs, count_rows,
+    cusum_dto, default_correlation_method, ewma_dto, failure_site, fit_best_dto, g_chart_dto,
     gage_rr_anova_dto, gage_rr_xbar_r_dto, goodness_of_fit_dto,
     hypothesis::{
         adf_dto, anderson_darling_dto, chi_squared_gof_dto, chi_squared_independence_dto,
@@ -26,8 +26,8 @@ use crate::wire::{
         one_sample_t_dto, one_way_anova_dto, p_adjust_dto, paired_t_dto, shapiro_wilk_dto,
         two_sample_t_dto, wilcoxon_dto, AdfInputDto,
     },
-    imr_dto, laney_p_dto, laney_u_dto, multi_pelt_dto, np_chart_dto, p_chart_dto, pelt_dto,
-    percentile_capability_dto,
+    imr_dto, laney_p_dto, laney_u_dto, multi_pelt_dto, np_chart_dto, p_chart_dto, pacf_dto,
+    pelt_dto, percentile_capability_dto,
     point_process::{
         check_truncation, laplace_dto, mil_hdbk_189_dto, power_law_dto, ObservationDto,
     },
@@ -38,10 +38,11 @@ use crate::wire::{
         WeibullReliabilityInputDto,
     },
     rules_from_json, run_rules_dto, sample_size_value, simple_regression_dto, t_chart_dto,
-    u_chart_dto, xbar_r_dto, xbar_s_dto, AttributeStandardDto, CapabilityInputDto,
-    CorrelationInputDto, CusumInputDto, EwmaInputDto, GageRRInputDto, GoodnessOfFitInputDto,
-    LimitsInputDto, MultiPeltInputDto, PeltInputDto, PercentileCapabilityInputDto,
-    RegressionInputDto, SeasonalityInputDto, SpectralResidualInputDto, WireError,
+    u_chart_dto, xbar_r_dto, xbar_s_dto, AttributeStandardDto, AutocorrelationInputDto,
+    CapabilityInputDto, CorrelationInputDto, CusumInputDto, EwmaInputDto, GageRRInputDto,
+    GoodnessOfFitInputDto, LimitsInputDto, MultiPeltInputDto, PeltInputDto,
+    PercentileCapabilityInputDto, RegressionInputDto, SeasonalityInputDto,
+    SpectralResidualInputDto, WireError,
 };
 
 // ---------------------------------------------------------------------------
@@ -1534,6 +1535,32 @@ pub fn boxcox_capability(
 /// `n / 2` are admissible. Each candidate carries the ACF at its lag (its
 /// strength), the periodogram bin that produced it (1-based, of the padded
 /// transform), that bin's power and share of the total.
+/// Sample autocorrelation of a series (at least 2 values) for lags 0 to
+/// `max_lag` (absent = `min(⌊10·log₁₀ n⌋, n − 1)`): `{ acf, confidence_threshold,
+/// bartlett_limits }`. `confidence_threshold` is the 95 % white-noise band
+/// z / √n; `bartlett_limits[k − 1]` is the 95 % band for lag k by Bartlett's
+/// formula (zero autocorrelation beyond lag k − 1) — the band an ACF plot draws.
+/// Biased estimator (denominator n), as statsmodels' `acf`.
+#[wasm_bindgen(unchecked_return_type = "AcfDto")]
+pub fn acf(
+    #[wasm_bindgen(unchecked_param_type = "AutocorrelationInputDto")] input: JsValue,
+) -> Result<JsValue, JsValue> {
+    let input: AutocorrelationInputDto = from_js(input, "input")?;
+    to_js(&acf_dto(input).map_err(js_err)?)
+}
+
+/// Sample partial autocorrelation of a series (at least 4 values) for lags 1 to
+/// `max_lag` (below n / 2; absent = `min(⌊10·log₁₀ n⌋, ⌊n/2⌋ − 1)`):
+/// `{ pacf, confidence_threshold }`, by Durbin-Levinson on the biased ACF
+/// (statsmodels' `pacf(method="ldb")`). `confidence_threshold` is z / √n.
+#[wasm_bindgen(unchecked_return_type = "PacfDto")]
+pub fn pacf(
+    #[wasm_bindgen(unchecked_param_type = "AutocorrelationInputDto")] input: JsValue,
+) -> Result<JsValue, JsValue> {
+    let input: AutocorrelationInputDto = from_js(input, "input")?;
+    to_js(&pacf_dto(input).map_err(js_err)?)
+}
+
 #[wasm_bindgen(unchecked_return_type = "SeasonalityDto")]
 pub fn estimate_period(
     #[wasm_bindgen(unchecked_param_type = "SeasonalityInputDto")] input: JsValue,
@@ -3128,10 +3155,10 @@ mod engine_card_tests {
     use super::*;
     use crate::engine_card::{arg, optional, Schemas};
     use crate::wire::{
-        counter, hypothesis, point_process, reliability, CapabilityDto, ChartPointDto,
+        counter, hypothesis, point_process, reliability, AcfDto, CapabilityDto, ChartPointDto,
         CorrelationMatrixDto, CusumDto, DistributionFitDto, EwmaDto, FixedLimitChartDto, GChartDto,
         GageRRAnovaResultDto, GageRRResultDto, GoodnessOfFitResultDto, ImrChartDto, LaneyPChartDto,
-        LaneyUChartDto, PChartDto, PeltResultDto, PercentileCapabilityDto, RegressionDto,
+        LaneyUChartDto, PChartDto, PacfDto, PeltResultDto, PercentileCapabilityDto, RegressionDto,
         SeasonalityDto, SpectralResidualDto, TChartDto, UChartDto, XbarRChartDto, XbarSChartDto,
     };
 
@@ -3242,6 +3269,16 @@ mod engine_card_tests {
             "fit_best",
             vec![arg("data", numbers())],
             s.of::<Vec<DistributionFitDto>>(),
+        );
+        s.op(
+            "acf",
+            vec![arg("input", s.of::<AutocorrelationInputDto>())],
+            s.of::<AcfDto>(),
+        );
+        s.op(
+            "pacf",
+            vec![arg("input", s.of::<AutocorrelationInputDto>())],
+            s.of::<PacfDto>(),
         );
         s.op(
             "goodness_of_fit",

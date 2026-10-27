@@ -161,6 +161,8 @@ public class RequestContractTests
         ["CorrelationMatrix(kendall)"] = c => c.CorrelationMatrix([Series, Step()[..20]], CorrelationMethod.Kendall),
         ["SimpleRegression"] = c => c.SimpleRegression([1, 2, 3, 4], [3, 5, 7.1, 9]),
         ["FitBest"] = c => c.FitBest(Positive),
+        ["Acf"] = c => c.Acf(Series, 5),
+        ["Pacf"] = c => c.Pacf(Series, 5),
         ["GoodnessOfFit"] = c => c.GoodnessOfFit(Positive, DistributionFamily.Weibull, replicates: 19, seed: 1),
         ["GoodnessOfFit(Normal)"] = c => c.GoodnessOfFit(Series, DistributionFamily.Normal, replicates: 9),
         ["GoodnessOfFit(LogNormal)"] = c => c.GoodnessOfFit(Series, DistributionFamily.LogNormal, replicates: 9),

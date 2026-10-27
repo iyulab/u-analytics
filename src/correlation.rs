@@ -584,9 +584,14 @@ pub struct AcfResult {
     /// Autocorrelation values for lags 0, 1, ..., max_lag.
     /// `acf[0]` is always 1.0.
     pub acf: Vec<f64>,
-    /// 95% confidence threshold = 1.96 / √n.
-    /// Values with |acf\[k\]| > threshold (for k > 0) are significant.
+    /// 95% white-noise threshold = z₀.₉₇₅ / √n: under the hypothesis that the
+    /// series is white noise, |acf\[k\]| above it (k > 0) is significant.
     pub confidence_threshold: f64,
+    /// 95% limits for lags 1, ..., max_lag by Bartlett's formula,
+    /// z₀.₉₇₅ · √((1 + 2 Σⱼ₌₁ᵏ⁻¹ r(j)²) / n): for lag k, under the hypothesis
+    /// that the autocorrelation is zero beyond lag k − 1 (an MA(k − 1)
+    /// process). The bands an ACF plot draws to choose an MA order.
+    pub bartlett_limits: Vec<f64>,
 }
 
 /// Result of partial autocorrelation analysis.
@@ -594,9 +599,13 @@ pub struct AcfResult {
 pub struct PacfResult {
     /// Partial autocorrelation values for lags 1, ..., max_lag.
     pub pacf: Vec<f64>,
-    /// 95% confidence threshold = 1.96 / √n.
+    /// 95% threshold = z₀.₉₇₅ / √n (Quenouille): for lag k, under the
+    /// hypothesis of an AR(k − 1) process, |pacf| above it is significant.
     pub confidence_threshold: f64,
 }
+
+/// z₀.₉₇₅, the two-sided 95 % standard normal point.
+const Z_975: f64 = 1.959_963_984_540_054;
 
 /// Compute the sample autocorrelation function (ACF).
 ///
@@ -639,8 +648,11 @@ pub fn acf(data: &[f64], max_lag: usize) -> Option<AcfResult> {
     // Lag-0 autocovariance (biased variance)
     let c0: f64 = data.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / nf;
 
-    if c0 <= 0.0 {
-        return None; // constant series
+    // A constant series: no variation beyond the rounding of its mean, judged
+    // against the series' own size (a fixed floor would misjudge small units).
+    let mean_square: f64 = data.iter().map(|&x| x * x).sum::<f64>() / nf;
+    if c0 <= 1e-20 * mean_square {
+        return None;
     }
 
     let mut acf_vals = Vec::with_capacity(max_lag + 1);
@@ -656,16 +668,27 @@ pub fn acf(data: &[f64], max_lag: usize) -> Option<AcfResult> {
         acf_vals.push(ck / c0);
     }
 
-    let threshold = 1.96 / nf.sqrt();
+    let threshold = Z_975 / nf.sqrt();
+    let mut cumulative = 0.0;
+    let bartlett_limits = acf_vals[1..]
+        .iter()
+        .map(|r| {
+            let limit = Z_975 * ((1.0 + 2.0 * cumulative) / nf).sqrt();
+            cumulative += r * r;
+            limit
+        })
+        .collect();
 
     Some(AcfResult {
         acf: acf_vals,
         confidence_threshold: threshold,
+        bartlett_limits,
     })
 }
 
 /// Compute the sample partial autocorrelation function (PACF) via
-/// Durbin-Levinson recursion.
+/// Durbin-Levinson recursion on the biased sample ACF (statsmodels'
+/// `pacf(method="ldb")`).
 ///
 /// PACF at lag *h* measures the correlation between xₜ and xₜ₊ₕ after
 /// removing the linear effect of intermediate lags.
@@ -700,7 +723,7 @@ pub fn pacf(data: &[f64], max_lag: usize) -> Option<PacfResult> {
         return None;
     }
 
-    // First compute ACF
+    // First compute ACF (which refuses a non-finite value)
     let acf_result = acf(data, max_lag)?;
     let rho = &acf_result.acf;
     let max_lag = rho.len() - 1; // actual max lag (may be clamped)
@@ -717,7 +740,7 @@ pub fn pacf(data: &[f64], max_lag: usize) -> Option<PacfResult> {
     if max_lag == 1 {
         return Some(PacfResult {
             pacf: pacf_vals,
-            confidence_threshold: 1.96 / (n as f64).sqrt(),
+            confidence_threshold: Z_975 / (n as f64).sqrt(),
         });
     }
 
@@ -752,8 +775,89 @@ pub fn pacf(data: &[f64], max_lag: usize) -> Option<PacfResult> {
 
     Some(PacfResult {
         pacf: pacf_vals,
-        confidence_threshold: 1.96 / (n as f64).sqrt(),
+        confidence_threshold: Z_975 / (n as f64).sqrt(),
     })
+}
+
+/// ACF (with Bartlett's limits) and PACF against statsmodels 0.15.0
+/// (`acf(x, nlags=8, fft=False, alpha=0.05)`, `pacf(x, nlags=8, method="ldb")`).
+#[cfg(test)]
+mod statsmodels_reference {
+    use super::*;
+
+    const X: [f64; 24] = [
+        2.3, 3.1, 4.0, 3.6, 2.9, 2.2, 2.8, 3.9, 4.6, 4.1, 3.3, 2.5, 2.7, 3.8, 4.9, 4.4, 3.5, 2.6,
+        3.0, 4.2, 5.1, 4.5, 3.4, 2.9,
+    ];
+
+    fn close(got: &[f64], want: &[f64], what: &str) {
+        assert_eq!(got.len(), want.len(), "{what}");
+        for (k, (g, w)) in got.iter().zip(want).enumerate() {
+            assert!((g - w).abs() < 1e-12, "{what}[{k}]: {g} vs {w}");
+        }
+    }
+
+    #[test]
+    fn acf_and_bartlett_limits_reproduce_statsmodels() {
+        let r = acf(&X, 8).unwrap();
+        close(
+            &r.acf,
+            &[
+                1.0,
+                0.486403576681892,
+                -0.36186808082372074,
+                -0.6951594797553611,
+                -0.2634125570953007,
+                0.42164395757528844,
+                0.6593055663079663,
+                0.26106100487729356,
+                -0.3171014941549895,
+            ],
+            "acf",
+        );
+        close(
+            &r.bartlett_limits,
+            &[
+                0.40007597302960923,
+                0.48559020426940086,
+                0.5269888881332575,
+                0.6575826795727397,
+                0.6742603293351266,
+                0.7152198020271394,
+                0.80665422242141,
+                0.8200659919957791,
+            ],
+            "bartlett",
+        );
+        assert!((r.confidence_threshold - 0.40007597302960923).abs() < 1e-12);
+    }
+
+    #[test]
+    fn pacf_reproduces_statsmodels_ldb() {
+        let r = pacf(&X, 8).unwrap();
+        close(
+            &r.pacf,
+            &[
+                0.486403576681892,
+                -0.7839238375815395,
+                0.00047345408884359627,
+                0.1902495235598503,
+                0.19973005383776718,
+                0.1225767860916582,
+                0.05567632845800997,
+                0.03539504608148146,
+            ],
+            "pacf",
+        );
+    }
+
+    #[test]
+    fn a_small_unit_is_not_a_constant_series() {
+        let small: Vec<f64> = X.iter().map(|v| v * 1e-150).collect();
+        let r = acf(&small, 8).unwrap();
+        assert!((r.acf[1] - 0.486403576681892).abs() < 1e-12);
+        assert!(acf(&[3.0; 10], 3).is_none());
+    }
 }
 
 #[cfg(test)]

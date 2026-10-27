@@ -3638,6 +3638,93 @@ pub(crate) fn run_rules_dto(
     Ok(point_dtos(&points))
 }
 
+// ── Autocorrelation ──────────────────────────────────────────────────────────
+
+/// Input for `acf` and `pacf`.
+#[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AutocorrelationInputDto {
+    pub(crate) data: Vec<f64>,
+    /// Largest lag; absent = `min(⌊10·log₁₀ n⌋, n − 1)` for `acf`, and below
+    /// `n / 2` as well for `pacf` (statsmodels' defaults and limit).
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) max_lag: Option<Whole>,
+}
+
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct AcfDto {
+    /// Lags 0 to `max_lag`; `acf[0]` is 1.
+    pub(crate) acf: Vec<f64>,
+    /// 95 % white-noise threshold, z / √n.
+    pub(crate) confidence_threshold: f64,
+    /// 95 % limits for lags 1 to `max_lag` by Bartlett's formula.
+    pub(crate) bartlett_limits: Vec<f64>,
+}
+
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct PacfDto {
+    /// Lags 1 to `max_lag`.
+    pub(crate) pacf: Vec<f64>,
+    /// 95 % threshold, z / √n.
+    pub(crate) confidence_threshold: f64,
+}
+
+/// The lag range of an autocorrelation request: `max_lag` within
+/// `[1, highest]`, absent = `min(⌊10·log₁₀ n⌋, highest)`.
+fn max_lag(value: Option<Whole>, n: usize, highest: usize) -> Result<usize, WireError> {
+    match value {
+        None => Ok((((n as f64).log10() * 10.0).floor() as usize).clamp(1, highest)),
+        Some(Whole(k)) if (1.0..=highest as f64).contains(&k) => Ok(Whole(k).count()),
+        Some(Whole(k)) => Err(WireError::out_of_range(
+            "max_lag",
+            Bound::Closed(1.0),
+            Bound::Closed(highest as f64),
+            k,
+            format!("max_lag: {n} values allow lags 1 to {highest}, got {k}"),
+        )),
+    }
+}
+
+fn no_autocorrelation() -> WireError {
+    WireError::invalid_input("data: the series does not vary, so its autocorrelation is undefined")
+        .about("data")
+}
+
+pub(crate) fn acf_dto(input: AutocorrelationInputDto) -> Result<AcfDto, WireError> {
+    let data = at_least(input.data, 2, "data")?;
+    let n = data.len();
+    let lag = max_lag(input.max_lag, n, n - 1)?;
+    let r = crate::correlation::acf(&data, lag).ok_or_else(no_autocorrelation)?;
+    Ok(AcfDto {
+        acf: r.acf,
+        confidence_threshold: r.confidence_threshold,
+        bartlett_limits: r.bartlett_limits,
+    })
+}
+
+pub(crate) fn pacf_dto(input: AutocorrelationInputDto) -> Result<PacfDto, WireError> {
+    // Lags below n / 2 (statsmodels' limit): beyond it the recursion runs on
+    // autocorrelations estimated from too few pairs.
+    let data = at_least(input.data, 4, "data")?;
+    let n = data.len();
+    let lag = max_lag(input.max_lag, n, n / 2 - 1)?;
+    let r = crate::correlation::pacf(&data, lag).ok_or_else(no_autocorrelation)?;
+    Ok(PacfDto {
+        pacf: r.pacf,
+        confidence_threshold: r.confidence_threshold,
+    })
+}
+
 // ── Seasonality ──────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]

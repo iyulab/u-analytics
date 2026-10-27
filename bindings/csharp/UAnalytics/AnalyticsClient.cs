@@ -649,6 +649,29 @@ public sealed class AnalyticsClient : IDisposable
             ("sigma", Request.Num("sigma", sigma)), ("lambda", Request.Num("lambda", lambda)),
             ("l_factor", Request.Num("l_factor", lFactor)));
 
+    // ── Autocorrelation ──
+
+    /// <summary>
+    /// Sample autocorrelation of <paramref name="data"/> (at least 2 values) for lags 0 to
+    /// <paramref name="maxLag"/> (<c>null</c>: min(⌊10·log₁₀ n⌋, n − 1)), with the 95 %
+    /// white-noise threshold and Bartlett's 95 % limits per lag — what an ACF plot draws.
+    /// Biased estimator (denominator n), as statsmodels' <c>acf</c>.
+    /// </summary>
+    public AcfResult Acf(double[] data, int? maxLag = null)
+        => Call(NativeInterop.uanalytics_acf, AnalyticsJson.Default.AcfResult,
+            ("data", Request.Nums("data", data)),
+            ("max_lag", maxLag is { } k ? JsonValue.Create(k) : null));
+
+    /// <summary>
+    /// Sample partial autocorrelation of <paramref name="data"/> (at least 4 values) for lags 1
+    /// to <paramref name="maxLag"/> (below n / 2; <c>null</c>: min(⌊10·log₁₀ n⌋, ⌊n/2⌋ − 1)),
+    /// by Durbin-Levinson on the biased ACF (statsmodels' <c>pacf(method="ldb")</c>).
+    /// </summary>
+    public PacfResult Pacf(double[] data, int? maxLag = null)
+        => Call(NativeInterop.uanalytics_pacf, AnalyticsJson.Default.PacfResult,
+            ("data", Request.Nums("data", data)),
+            ("max_lag", maxLag is { } k ? JsonValue.Create(k) : null));
+
     // ── Seasonality ──
 
     /// <summary>

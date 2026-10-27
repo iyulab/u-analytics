@@ -1,6 +1,12 @@
 {
   "$comment": "The keys and names each C entry point reads, measured from the entry points (src/ffi/request_keys.rs). Regenerate: UPDATE_REQUEST_KEYS=1 cargo test --features ffi --lib request_keys",
   "entry_points": {
+    "uanalytics_acf": {
+      "properties": {
+        "data": {},
+        "max_lag": {}
+      }
+    },
     "uanalytics_adf_test": {
       "properties": {
         "data": {},
@@ -331,6 +337,12 @@
       "properties": {
         "p_bar": {},
         "samples": {}
+      }
+    },
+    "uanalytics_pacf": {
+      "properties": {
+        "data": {},
+        "max_lag": {}
       }
     },
     "uanalytics_paired_t_test": {
