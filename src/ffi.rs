@@ -1432,6 +1432,27 @@ wire_export!(
 );
 
 wire_export!(
+    /// Multiple linear regression `{predictors, y, predict?, level?}` →
+    /// coefficients (intercept first), their standard errors, t and p values,
+    /// R², the F test, residuals, fitted values, VIF, the coefficients'
+    /// covariance and, for each `predict` point, the fit with the confidence
+    /// interval of the mean and the prediction interval — the WebAssembly
+    /// binding's `multiple_regression`.
+    uanalytics_multiple_regression,
+    crate::wire::MultipleRegressionInputDto,
+    |r| crate::wire::multiple_regression_dto(r)
+);
+
+wire_export!(
+    /// Error measures of predictions `{observed, predicted, parameters?}` →
+    /// `{n, mean_error, mean_absolute_error, rmse, cv_rmse, nmbe, parameters}`,
+    /// the WebAssembly binding's `prediction_errors`.
+    uanalytics_prediction_errors,
+    crate::wire::PredictionErrorsInputDto,
+    |r| crate::wire::prediction_errors_dto(r)
+);
+
+wire_export!(
     /// Every continuous family that fits `{data}`, best AIC first:
     /// `[{distribution, parameters: {name: value}, log_likelihood, aic, bic,
     /// anderson_darling}]`.
@@ -1836,6 +1857,168 @@ mod tests {
             (b["code"].as_str(), b["parameter"].as_str()),
             (Some("degenerate_data"), Some("data"))
         );
+    }
+
+    #[test]
+    fn multiple_regression_round_trips_and_names_what_it_refuses() {
+        let req = serde_json::json!({
+            "predictors": [[1, 2, 3, 4, 5, 6, 7, 8], [2, 1, 3, 2, 4, 3, 5, 4]],
+            "y": [5.1, 5.0, 9.2, 8.9, 13.1, 12.0, 17.2, 15.9],
+            "predict": [[4.5, 9], [3, 6]],
+            "level": 0.9
+        });
+        let (code, b) = call(uanalytics_multiple_regression, &req.to_string());
+        assert_eq!(code, 0, "{b}");
+        let wire =
+            crate::wire::multiple_regression_dto(serde_json::from_value(req).unwrap()).unwrap();
+        assert_eq!(b, serde_json::to_value(&wire).unwrap());
+        assert_eq!(b["coefficients"].as_array().unwrap().len(), 3);
+        assert_eq!(b["covariance"].as_array().unwrap().len(), 3);
+        assert_eq!(b["df_residual"], 5);
+        let p = &b["predictions"][1];
+        assert!(
+            p["prediction"]["lower"].as_f64() < p["confidence"]["lower"].as_f64()
+                && p["confidence"]["upper"].as_f64() < p["prediction"]["upper"].as_f64(),
+            "{p}"
+        );
+
+        let refuse = |body: serde_json::Value| {
+            let (code, b) = call(uanalytics_multiple_regression, &body.to_string());
+            assert_eq!(code, ERR_COMPUTE, "{b}");
+            b
+        };
+        let b = refuse(serde_json::json!({ "predictors": [[1, 2, 3], [1, 2]], "y": [1, 2, 3] }));
+        assert_eq!(
+            (
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["index"].as_u64(),
+                b["expected"].as_f64(),
+                b["got"].as_f64()
+            ),
+            (
+                Some("dimension_mismatch"),
+                Some("predictors"),
+                Some(1),
+                Some(3.0),
+                Some(2.0)
+            ),
+            "{b}"
+        );
+        let b = refuse(serde_json::json!({ "predictors": [[1, 2, 3], [3, 1, 2]], "y": [1, 2, 3] }));
+        assert_eq!(
+            (b["code"].as_str(), b["min"].as_f64(), b["got"].as_f64()),
+            (Some("insufficient_data"), Some(4.0), Some(3.0)),
+            "{b}"
+        );
+        let b = refuse(
+            serde_json::json!({ "predictors": [[1, 2, 3, 4], [5, 5, 5, 5]], "y": [1, 2, 4, 3] }),
+        );
+        assert_eq!(
+            (
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["index"].as_u64()
+            ),
+            (Some("degenerate_data"), Some("predictors"), Some(1)),
+            "{b}"
+        );
+        // x2 = 2 · x1: no variable is constant, the design is still singular.
+        let b = refuse(
+            serde_json::json!({ "predictors": [[1, 2, 3, 4, 5], [2, 4, 6, 8, 10]], "y": [1, 3, 2, 5, 4] }),
+        );
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("degenerate_data"), Some("predictors")),
+            "{b}"
+        );
+        let b = refuse(
+            serde_json::json!({ "predictors": [[1, 2, 3, 4, 5]], "y": [1, 3, 2, 5, 4], "predict": [[1], [2]] }),
+        );
+        assert_eq!(
+            (
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["expected"].as_f64()
+            ),
+            (Some("dimension_mismatch"), Some("predict"), Some(1.0)),
+            "{b}"
+        );
+        let b = refuse(
+            serde_json::json!({ "predictors": [[1, 2, 3, 4, 5]], "y": [1, 3, 2, 5, 4], "level": 1 }),
+        );
+        assert_eq!(
+            (
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["exclusive_max"].as_f64(),
+                b["max"].is_null()
+            ),
+            (
+                Some("parameter_out_of_range"),
+                Some("level"),
+                Some(1.0),
+                true
+            ),
+            "{b}"
+        );
+    }
+
+    #[test]
+    fn prediction_errors_round_trip_and_name_what_they_refuse() {
+        let req = serde_json::json!({
+            "observed": [11, 9, 12, 8], "predicted": [10, 10, 10, 8], "parameters": 2
+        });
+        let (code, b) = call(uanalytics_prediction_errors, &req.to_string());
+        assert_eq!(code, 0, "{b}");
+        assert!(
+            (b["rmse"].as_f64().unwrap() - 3f64.sqrt()).abs() < 1e-12,
+            "{b}"
+        );
+        assert!((b["nmbe"].as_f64().unwrap() - 0.1).abs() < 1e-12, "{b}");
+        let (_, b) = call(
+            uanalytics_prediction_errors,
+            &serde_json::json!({ "observed": [1, -1], "predicted": [0, 0] }).to_string(),
+        );
+        assert!(b["cv_rmse"].is_null() && b["nmbe"].is_null(), "{b}");
+
+        let refuse = |body: serde_json::Value| {
+            let (code, b) = call(uanalytics_prediction_errors, &body.to_string());
+            assert_eq!(code, ERR_COMPUTE, "{b}");
+            b
+        };
+        let b = refuse(serde_json::json!({ "observed": [1, 2, 3], "predicted": [1, 2] }));
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("dimension_mismatch"), Some("predicted")),
+            "{b}"
+        );
+        let b = refuse(
+            serde_json::json!({ "observed": [1, 2, 3], "predicted": [1, 2, 3], "parameters": 3 }),
+        );
+        assert_eq!(
+            (
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["min"].as_f64(),
+                b["max"].as_f64(),
+                b["got"].as_f64()
+            ),
+            (
+                Some("parameter_out_of_range"),
+                Some("parameters"),
+                Some(0.0),
+                Some(2.0),
+                Some(3.0)
+            ),
+            "{b}"
+        );
+        let b = refuse(
+            serde_json::json!({ "observed": [1, 2, 3], "predicted": [1, 2, 3], "parameters": -1 }),
+        );
+        assert_eq!(b["code"].as_str(), Some("parameter_out_of_range"), "{b}");
+        let b = refuse(serde_json::json!({ "observed": [], "predicted": [] }));
+        assert_eq!(b["code"].as_str(), Some("empty_input"), "{b}");
     }
 
     #[test]

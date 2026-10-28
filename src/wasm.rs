@@ -40,9 +40,9 @@ use crate::wire::{
     rules_from_json, run_rules_dto, sample_size_value, simple_regression_dto, t_chart_dto,
     u_chart_dto, xbar_r_dto, xbar_s_dto, AttributeStandardDto, AutocorrelationInputDto,
     CapabilityInputDto, CorrelationInputDto, CusumInputDto, EwmaInputDto, GageRRInputDto,
-    GoodnessOfFitInputDto, LimitsInputDto, MultiPeltInputDto, PeltInputDto,
-    PercentileCapabilityInputDto, RegressionInputDto, SeasonalityInputDto,
-    SpectralResidualInputDto, StlInputDto, WireError,
+    GoodnessOfFitInputDto, LimitsInputDto, MultiPeltInputDto, MultipleRegressionInputDto,
+    PeltInputDto, PercentileCapabilityInputDto, PredictionErrorsInputDto, RegressionInputDto,
+    SeasonalityInputDto, SpectralResidualInputDto, StlInputDto, WireError,
 };
 
 // ---------------------------------------------------------------------------
@@ -744,18 +744,100 @@ pub fn correlation_matrix(
     to_js(&correlation_matrix_dto(input).map_err(js_err)?)
 }
 
+/// `{ predict?, level? }` for [`simple_regression`].
+#[derive(serde::Deserialize, Default, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[tsify(missing_as_null)]
+#[serde(deny_unknown_fields)]
+struct RegressionOptions {
+    /// New x values to predict at.
+    #[serde(default)]
+    #[tsify(optional, type = "number[] | null")]
+    predict: Option<Vec<f64>>,
+    /// Two-sided level of the intervals, in (0, 1). Omitted: 0.95.
+    #[serde(default)]
+    #[tsify(optional, type = "number | null")]
+    level: Option<f64>,
+}
+
 /// Simple linear regression of `y` on `x` (same length, at least 3, `x` not
 /// constant): slope, intercept, R², their standard errors, t and p values, the
-/// F test, residuals and fitted values. A t or F with no finite value (an exact
-/// fit) is `null`.
+/// F test, residuals, fitted values and the intercept-slope covariance. A t or
+/// F with no finite value (an exact fit) is `null`. `options.predict` lists new
+/// x values; `predictions` gives each its `fit`, `se_fit`, the `confidence`
+/// interval of the mean and the `prediction` interval of a new observation at
+/// `options.level` (default 0.95).
 #[wasm_bindgen(unchecked_return_type = "RegressionDto")]
 pub fn simple_regression(
     #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] x: JsValue,
     #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] y: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "RegressionOptions | null")] options: Option<
+        JsValue,
+    >,
 ) -> Result<JsValue, JsValue> {
     let x = read_numbers(&x, "x").map_err(js_err)?;
     let y = read_numbers(&y, "y").map_err(js_err)?;
-    to_js(&simple_regression_dto(RegressionInputDto { x, y }).map_err(js_err)?)
+    let options: RegressionOptions = match options {
+        Some(v) if !v.is_null() && !v.is_undefined() => from_js(v, "options")?,
+        _ => RegressionOptions::default(),
+    };
+    to_js(
+        &simple_regression_dto(RegressionInputDto {
+            x,
+            y,
+            predict: options.predict,
+            level: options.level,
+        })
+        .map_err(js_err)?,
+    )
+}
+
+/// Multiple linear regression of `y` on `predictors` (one array per predictor,
+/// each as long as `y`; at least p + 2 observations).
+///
+/// # Input JSON
+///
+/// `{ predictors, y, predict?, level? }`. `predict` holds new points laid out as
+/// `predictors` (one array per predictor, all the same length); `level` is the
+/// two-sided level of their intervals, in (0, 1), default 0.95.
+///
+/// # Output JSON
+///
+/// `{ coefficients, std_errors, t_statistics, p_values, r_squared,
+/// adjusted_r_squared, f_statistic, f_p_value, residual_se, df_residual,
+/// residuals, fitted, vif, covariance, level, predictions }`: coefficients with
+/// the intercept first, `covariance[i][j]` the coefficients' covariance, and
+/// for each `predict` point its `fit`, `se_fit`, the `confidence` interval of
+/// the mean and the `prediction` interval of a new observation. A constant
+/// predictor, or one the others determine exactly, is `degenerate_data`.
+#[wasm_bindgen(unchecked_return_type = "MultipleRegressionDto")]
+pub fn multiple_regression(
+    #[wasm_bindgen(unchecked_param_type = "MultipleRegressionInputDto")] input: JsValue,
+) -> Result<JsValue, JsValue> {
+    let input: MultipleRegressionInputDto = from_js(input, "input")?;
+    to_js(&crate::wire::multiple_regression_dto(input).map_err(js_err)?)
+}
+
+/// Error measures of `predicted` against `observed` (errors are observed −
+/// predicted).
+///
+/// # Input JSON
+///
+/// `{ observed, predicted, parameters? }`, the arrays of one length.
+/// `parameters` (default 0, below n) is the number of parameters the model
+/// estimated from these observations: the RMSE and NMBE divide by n − p.
+///
+/// # Output JSON
+///
+/// `{ n, mean_error, mean_absolute_error, rmse, cv_rmse, nmbe, parameters }`:
+/// `cv_rmse` = rmse / mean(observed), `nmbe` = Σ errors / ((n − p) ·
+/// mean(observed)) -- fractions, `null` when the mean of `observed` is 0.
+#[wasm_bindgen(unchecked_return_type = "PredictionErrorsDto")]
+pub fn prediction_errors(
+    #[wasm_bindgen(unchecked_param_type = "PredictionErrorsInputDto")] input: JsValue,
+) -> Result<JsValue, JsValue> {
+    let input: PredictionErrorsInputDto = from_js(input, "input")?;
+    to_js(&crate::wire::prediction_errors_dto(input).map_err(js_err)?)
 }
 
 /// Every continuous family that fits `data` (at least 2 values, not all equal),
@@ -3318,8 +3400,22 @@ mod engine_card_tests {
         );
         s.op(
             "simple_regression",
-            vec![arg("x", numbers()), arg("y", numbers())],
+            vec![
+                arg("x", numbers()),
+                arg("y", numbers()),
+                optional("options", s.of::<Option<RegressionOptions>>()),
+            ],
             s.of::<RegressionDto>(),
+        );
+        s.op(
+            "multiple_regression",
+            vec![arg("input", s.of::<MultipleRegressionInputDto>())],
+            s.of::<crate::wire::MultipleRegressionDto>(),
+        );
+        s.op(
+            "prediction_errors",
+            vec![arg("input", s.of::<PredictionErrorsInputDto>())],
+            s.of::<crate::wire::PredictionErrorsDto>(),
         );
         s.op(
             "fit_best",

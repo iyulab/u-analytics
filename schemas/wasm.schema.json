@@ -1846,6 +1846,193 @@
       ],
       "type": "object"
     },
+    "MultipleRegressionDto": {
+      "description": "Ordinary least squares `y = b0 + b1·x1 + … + bp·xp`.",
+      "properties": {
+        "adjusted_r_squared": {
+          "format": "double",
+          "type": "number"
+        },
+        "coefficients": {
+          "description": "Intercept first, then one per predictor.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "covariance": {
+          "description": "`covariance[i][j]`: covariance of coefficients `i` and `j`.",
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "df_residual": {
+          "description": "n − p − 1.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "f_p_value": {
+          "format": "double",
+          "type": "number"
+        },
+        "f_statistic": {
+          "description": "`null` when the fit is exact.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "fitted": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "level": {
+          "description": "Level of the intervals in `predictions`.",
+          "format": "double",
+          "type": "number"
+        },
+        "p_values": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "predictions": {
+          "description": "One per point of `predict`, in order; empty without `predict`.",
+          "items": {
+            "$ref": "#/$defs/PredictionDto"
+          },
+          "type": "array"
+        },
+        "r_squared": {
+          "format": "double",
+          "type": "number"
+        },
+        "residual_se": {
+          "format": "double",
+          "type": "number"
+        },
+        "residuals": {
+          "description": "`y[i]` minus its fitted value, in input order.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "std_errors": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "t_statistics": {
+          "description": "`null` where a standard error is 0 (an exact fit).",
+          "items": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "type": "array"
+        },
+        "vif": {
+          "description": "One per predictor; `null` for a predictor the others determine exactly.",
+          "items": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "coefficients",
+        "std_errors",
+        "t_statistics",
+        "p_values",
+        "r_squared",
+        "adjusted_r_squared",
+        "f_p_value",
+        "residual_se",
+        "df_residual",
+        "residuals",
+        "fitted",
+        "vif",
+        "covariance",
+        "level",
+        "predictions"
+      ],
+      "type": "object"
+    },
+    "MultipleRegressionInputDto": {
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "default": null,
+          "description": "Two-sided level of the intervals, in (0, 1). Omitted: 0.95.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "predict": {
+          "default": null,
+          "description": "New points to predict at, laid out as `predictors`: one array per\npredictor, all the same length.",
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "predictors": {
+          "description": "One array per predictor, each as long as `y`.",
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "y": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "predictors",
+        "y"
+      ],
+      "type": "object"
+    },
     "ObservationDto": {
       "description": "How observation ended: `{ truncation: \"time\", end }` — watched until\n`end` — or `{ truncation: \"failure\" }` — stopped at the last event.",
       "oneOf": [
@@ -2204,6 +2391,115 @@
       ],
       "type": "object"
     },
+    "PredictionDto": {
+      "description": "A regression's prediction at one new point: the fitted mean, its standard\nerror, the confidence interval of the mean and the prediction interval of\na new observation.",
+      "properties": {
+        "confidence": {
+          "$ref": "#/$defs/IntervalDto"
+        },
+        "fit": {
+          "format": "double",
+          "type": "number"
+        },
+        "prediction": {
+          "$ref": "#/$defs/IntervalDto"
+        },
+        "se_fit": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "fit",
+        "se_fit",
+        "confidence",
+        "prediction"
+      ],
+      "type": "object"
+    },
+    "PredictionErrorsDto": {
+      "description": "Error measures of predictions against observations (errors are observed −\npredicted).",
+      "properties": {
+        "cv_rmse": {
+          "description": "`rmse` over the mean of `observed`; `null` when that mean is 0.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "mean_absolute_error": {
+          "format": "double",
+          "type": "number"
+        },
+        "mean_error": {
+          "format": "double",
+          "type": "number"
+        },
+        "n": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "nmbe": {
+          "description": "Sum of errors over `(n − parameters) · mean(observed)`; `null` when\nthat mean is 0.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "parameters": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rmse": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "n",
+        "mean_error",
+        "mean_absolute_error",
+        "rmse",
+        "parameters"
+      ],
+      "type": "object"
+    },
+    "PredictionErrorsInputDto": {
+      "additionalProperties": false,
+      "properties": {
+        "observed": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "parameters": {
+          "description": "Parameters the model estimated from these observations, below their\ncount: the RMSE and NMBE divide by n − parameters. Omitted: 0.",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "predicted": {
+          "description": "As long as `observed`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "observed",
+        "predicted"
+      ],
+      "type": "object"
+    },
     "RegressionDto": {
       "description": "Ordinary least squares `y = intercept + slope · x`.",
       "properties": {
@@ -2242,6 +2538,11 @@
           "format": "double",
           "type": "number"
         },
+        "intercept_slope_covariance": {
+          "description": "Covariance of the intercept and slope estimates.",
+          "format": "double",
+          "type": "number"
+        },
         "intercept_t": {
           "description": "`null` when the fit is exact (a standard error of 0).",
           "format": "double",
@@ -2249,6 +2550,18 @@
             "number",
             "null"
           ]
+        },
+        "level": {
+          "description": "Level of the intervals in `predictions`.",
+          "format": "double",
+          "type": "number"
+        },
+        "predictions": {
+          "description": "One per `predict` value, in order; empty without `predict`.",
+          "items": {
+            "$ref": "#/$defs/PredictionDto"
+          },
+          "type": "array"
         },
         "r_squared": {
           "format": "double",
@@ -2299,8 +2612,39 @@
         "residual_se",
         "f_p_value",
         "residuals",
-        "fitted"
+        "fitted",
+        "intercept_slope_covariance",
+        "level",
+        "predictions"
       ],
+      "type": "object"
+    },
+    "RegressionOptions": {
+      "additionalProperties": false,
+      "description": "`{ predict?, level? }` for [`simple_regression`].",
+      "properties": {
+        "level": {
+          "default": null,
+          "description": "Two-sided level of the intervals, in (0, 1). Omitted: 0.95.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "predict": {
+          "default": null,
+          "description": "New x values to predict at.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "SeasonalityDto": {
@@ -4161,6 +4505,22 @@
     "mil_hdbk_189_test.output": {
       "$ref": "#/$defs/TrendTestDto"
     },
+    "multiple_regression.input": {
+      "additionalProperties": false,
+      "description": "The arguments of multiple_regression(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/MultipleRegressionInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "multiple_regression.output": {
+      "$ref": "#/$defs/MultipleRegressionDto"
+    },
     "np_chart.input": {
       "additionalProperties": false,
       "description": "The arguments of np_chart(defectives, sample_size), by name; the WebAssembly function takes them in that order.",
@@ -4383,6 +4743,22 @@
       "format": "double",
       "type": "number"
     },
+    "prediction_errors.input": {
+      "additionalProperties": false,
+      "description": "The arguments of prediction_errors(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/PredictionErrorsInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "prediction_errors.output": {
+      "$ref": "#/$defs/PredictionErrorsDto"
+    },
     "process_capability.input": {
       "additionalProperties": false,
       "description": "The arguments of process_capability(input), by name; the WebAssembly function takes them in that order.",
@@ -4508,8 +4884,18 @@
     },
     "simple_regression.input": {
       "additionalProperties": false,
-      "description": "The arguments of simple_regression(x, y), by name; the WebAssembly function takes them in that order.",
+      "description": "The arguments of simple_regression(x, y, options), by name; the WebAssembly function takes them in that order.",
       "properties": {
+        "options": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RegressionOptions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "x": {
           "items": {
             "format": "double",

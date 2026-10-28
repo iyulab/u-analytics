@@ -8,6 +8,35 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- `regression::predict_simple_intervals` and `regression::predict_multiple_intervals`: at new
+  points, the fit, its standard error, the confidence interval of the mean response and the
+  prediction interval of a new observation (Student's t on the residual degrees of freedom), as
+  statsmodels' `get_prediction`. `MultipleRegressionResult::covariance` (the coefficients'
+  covariance, MSE (X'X)⁻¹ -- R's `vcov`) and `SimpleRegressionResult::intercept_slope_covariance`
+  carry what they need. **Breaking** for code that builds either result as a struct literal.
+- `accuracy::prediction_errors`: mean error, mean absolute error, RMSE, CV(RMSE) and NMBE of
+  predictions against observations, the RMSE and NMBE over n − p for a model with p parameters
+  (ASHRAE Guideline 14's CV(RMSE) and NMBE).
+- Multiple regression through every transport: WebAssembly `multiple_regression`, C
+  `uanalytics_multiple_regression`, .NET `AnalyticsClient.MultipleRegression` (returning
+  `MultipleRegressionResult`) -- coefficients, standard errors, t and p values, R², the F test,
+  residuals, fitted values, VIF, the covariance and, for the points given as `predict`, the
+  predictions with both intervals at `level` (default 0.95). A constant predictor, or one the
+  others determine exactly, is refused as `degenerate_data` (`parameter` `"predictors"`, the
+  index when one is constant); a predictor of another length as `dimension_mismatch` at its
+  index; too few observations as `insufficient_data` (`min` p + 2).
+- `simple_regression` (all transports; .NET `SimpleRegression(x, y, predict, level)`) takes the
+  same optional `predict` and `level` and returns `predictions`, `level` and
+  `intercept_slope_covariance`.
+- Prediction errors through every transport: WebAssembly `prediction_errors`, C
+  `uanalytics_prediction_errors`, .NET `AnalyticsClient.PredictionErrors` (returning
+  `PredictionErrorsResult`). `cv_rmse` and `nmbe` are fractions, `null` when the observations
+  average 0; `parameters` outside 0..n − 1 is `parameter_out_of_range`.
+- `level` outside (0, 1) is `parameter_out_of_range` with `exclusive_min` 0 and `exclusive_max` 1.
+
+
 ## [0.30.0] - 2026-10-28
 
 Depends on u-numflow 0.15. The .NET client is `UAnalytics` 0.24.1 (this engine; no C ABI change).

@@ -17,7 +17,8 @@
 //! - [`seasonality`] — Periodogram and dominant-period estimation (AutoPeriod)
 //! - [`decomposition`] — Seasonal-trend decomposition by Loess (STL)
 //! - [`correlation`] — Correlation analysis (Pearson, Spearman, Kendall, matrices)
-//! - [`regression`] — Regression analysis (simple, multiple OLS, VIF)
+//! - [`regression`] — Regression analysis (simple, multiple OLS, VIF, prediction intervals)
+//! - [`accuracy`] — Error measures of predictions (MAE, RMSE, CV(RMSE), NMBE)
 //! - [`distribution`] — Distribution analysis (ECDF, histogram bins, QQ-plot, KS test)
 //! - [`testing`] — Hypothesis testing (t-tests, ANOVA, chi-squared, normality)
 //! - [`error`] — Refusals shared by more than one module ([`error::TimeSeriesError`])
@@ -37,6 +38,7 @@
 /// ```
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub mod accuracy;
 pub mod capability;
 pub mod correlation;
 pub mod counter;

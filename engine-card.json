@@ -879,7 +879,7 @@
     },
     {
       "id": "simple_regression",
-      "summary": "Simple linear regression of y on x: slope, intercept, R^2, their standard errors, t and p values, the F test, fitted values and residuals; a statistic with no finite value (an exact fit) is null.",
+      "summary": "Simple linear regression of y on x: slope, intercept, R^2, their standard errors, t and p values, the F test, fitted values, residuals and the intercept-slope covariance; a statistic with no finite value (an exact fit) is null. At new x values: the fit, its standard error, the confidence interval of the mean and the prediction interval of a new observation.",
       "input": {
         "schema": "schemas/wasm.schema.json#/$defs/simple_regression.input",
         "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
@@ -923,11 +923,132 @@
             "method": "compares the p-value of a case whose upper tail is below 1e-11 with the reference's",
             "tolerance": "1e-9 (relative)",
             "test": "src/regression.rs::scipy_tail_reference::simple_regression_p_values_keep_their_tail"
+          },
+          {
+            "claim": "The fit, its standard error and both intervals at new points equal the reference's, including points outside the data.",
+            "reference_kind": "reference_implementation",
+            "reference": "statsmodels 0.15.0, OLS(y, add_constant(x)).fit().get_prediction(...).summary_frame(alpha)",
+            "method": "compares a seeded 12-point regression at 90 % at four new x values (left of, inside and far right of the data)",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/regression.rs::statsmodels_prediction_reference::simple_intervals_match_statsmodels"
           }
         ],
         "limits": [
           "Checked against the reference above for the cases that test lists; other data are not compared.",
           "The test re-derives the reference's formula; it does not compare with values the reference prints."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "multiple_regression",
+      "summary": "Multiple linear regression of y on several predictors by ordinary least squares: coefficients (intercept first), their standard errors, t and p values, R^2 and adjusted R^2, the F test, residuals, fitted values, variance inflation factors and the coefficients' covariance; at new points the fit, its standard error, the confidence interval of the mean and the prediction interval of a new observation.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/multiple_regression.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/multiple_regression.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The coefficients' covariance and, at new points, the fit, its standard error and both intervals equal the reference's for predictors on scales from 1 to 5000.",
+            "reference_kind": "reference_implementation",
+            "reference": "statsmodels 0.15.0, OLS(y, add_constant(X)).fit() -- cov_params() and get_prediction(...).summary_frame(alpha)",
+            "method": "compares a seeded 15-point regression on three predictors at 95 % at two new points, one outside the data",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/regression.rs::statsmodels_prediction_reference::multiple_intervals_and_covariance_match_statsmodels"
+          },
+          {
+            "claim": "Predictors written in a unit 1e-9 or 1e6 times their own give the same R^2, p-values and VIF, and coefficients that scale with the unit.",
+            "reference_kind": "literature",
+            "reference": "Montgomery, Peck & Vining (2012), Introduction to Linear Regression Analysis, 5th ed. -- a change of a regressor's unit rescales its coefficient and leaves the fit unchanged",
+            "method": "fits a seeded 24-point regression on two predictors in their own unit and scaled by 1e-9 and 1e6",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/regression.rs::scipy_tail_reference::multiple_regression_and_conditioning_do_not_depend_on_the_unit"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for the cases those tests list; other data are not compared.",
+          "Singular designs are refused rather than solved by a generalized inverse."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "prediction_errors",
+      "summary": "Error measures of predictions against observations: mean error, mean absolute error, RMSE, CV(RMSE) and NMBE (normalized mean bias error), with the RMSE and NMBE denominators reduced by the number of parameters the model estimated.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/prediction_errors.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/prediction_errors.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Each measure follows its definition: means over n, RMSE and NMBE over n - p, CV(RMSE) and NMBE relative to the mean of the observations, and no ratio when that mean is 0.",
+            "reference_kind": "literature",
+            "reference": "ASHRAE Guideline 14-2014, Annex B; Hyndman & Koehler (2006), International Journal of Forecasting 22(4)",
+            "method": "worked example computed by hand, with and without p, and a zero-mean case",
+            "tolerance": "1e-15",
+            "test": "src/accuracy.rs::tests::the_definitions_by_hand"
+          },
+          {
+            "claim": "A change of unit scales the RMSE and leaves CV(RMSE) and NMBE unchanged.",
+            "reference_kind": "literature",
+            "reference": "Hyndman & Koehler (2006), International Journal of Forecasting 22(4) -- scale-dependent (RMSE) and scale-free relative measures",
+            "method": "scales observations and predictions by 1e-9 and 1e9",
+            "tolerance": "1e-12 (ratios), 1e-9 relative (RMSE)",
+            "test": "src/accuracy.rs::tests::a_change_of_unit_scales_the_absolute_measures_only"
+          }
+        ],
+        "limits": [
+          "The test re-derives the definitions; it does not compare with another implementation."
         ]
       },
       "performance": {

@@ -549,7 +549,16 @@ public enum CorrelationMethod
 public sealed record CorrelationMatrixResult(IReadOnlyList<IReadOnlyList<double>> Matrix);
 
 /// <summary>
+/// A regression's prediction at a new point: the fitted mean <see cref="Fit"/>, its standard
+/// error <see cref="SeFit"/>, the confidence interval of the mean response and the prediction
+/// interval of a new observation (Student's t on the residual degrees of freedom).
+/// </summary>
+public sealed record RegressionPrediction(
+    double Fit, double SeFit, ConfidenceInterval Confidence, ConfidenceInterval Prediction);
+
+/// <summary>
 /// Simple linear regression. A t or F with no finite value (an exact fit) is <c>null</c>.
+/// <see cref="Predictions"/> has one entry per requested x, at <see cref="Level"/>.
 /// </summary>
 public sealed record RegressionResult(
     double Slope, double Intercept,
@@ -561,7 +570,44 @@ public sealed record RegressionResult(
     double? FStatistic,
     [property: JsonPropertyName("f_p_value")] double FPValue,
     IReadOnlyList<double> Residuals,
-    IReadOnlyList<double> Fitted);
+    IReadOnlyList<double> Fitted,
+    double InterceptSlopeCovariance,
+    double Level,
+    IReadOnlyList<RegressionPrediction> Predictions);
+
+/// <summary>
+/// Multiple linear regression. <see cref="Coefficients"/> start with the intercept;
+/// <c>Covariance[i][j]</c> is the covariance of coefficients i and j; a t or F with no finite
+/// value (an exact fit) is <c>null</c>, as is the VIF of a predictor the others determine
+/// exactly. <see cref="Predictions"/> has one entry per requested point, at
+/// <see cref="Level"/>.
+/// </summary>
+public sealed record MultipleRegressionResult(
+    IReadOnlyList<double> Coefficients,
+    IReadOnlyList<double> StdErrors,
+    IReadOnlyList<double?> TStatistics,
+    IReadOnlyList<double> PValues,
+    double RSquared, double AdjustedRSquared,
+    double? FStatistic,
+    [property: JsonPropertyName("f_p_value")] double FPValue,
+    double ResidualSe,
+    int DfResidual,
+    IReadOnlyList<double> Residuals,
+    IReadOnlyList<double> Fitted,
+    IReadOnlyList<double?> Vif,
+    IReadOnlyList<IReadOnlyList<double>> Covariance,
+    double Level,
+    IReadOnlyList<RegressionPrediction> Predictions);
+
+/// <summary>
+/// Error measures of predictions against observations (errors are observed − predicted):
+/// means over n, <see cref="Rmse"/> and <see cref="Nmbe"/> over n − <see cref="Parameters"/>;
+/// <see cref="CvRmse"/> and <see cref="Nmbe"/> are fractions of the observations' mean,
+/// <c>null</c> when that mean is 0.
+/// </summary>
+public sealed record PredictionErrorsResult(
+    int N, double MeanError, double MeanAbsoluteError, double Rmse,
+    double? CvRmse, double? Nmbe, int Parameters);
 
 /// <summary>
 /// One fitted continuous family: which one, its parameters by name, its log-likelihood, AIC

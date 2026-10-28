@@ -334,6 +334,14 @@
         "times": {}
       }
     },
+    "uanalytics_multiple_regression": {
+      "properties": {
+        "level": {},
+        "predict": {},
+        "predictors": {},
+        "y": {}
+      }
+    },
     "uanalytics_np_chart": {
       "properties": {
         "defectives": {},
@@ -411,6 +419,13 @@
         "ppm": {}
       }
     },
+    "uanalytics_prediction_errors": {
+      "properties": {
+        "observed": {},
+        "parameters": {},
+        "predicted": {}
+      }
+    },
     "uanalytics_process_capability": {
       "properties": {
         "confidence": {},
@@ -466,6 +481,8 @@
     },
     "uanalytics_simple_regression": {
       "properties": {
+        "level": {},
+        "predict": {},
         "x": {},
         "y": {}
       }

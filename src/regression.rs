@@ -53,6 +53,10 @@ pub struct SimpleRegressionResult {
     pub residuals: Vec<f64>,
     /// Fitted values (ŷᵢ).
     pub fitted: Vec<f64>,
+    /// Covariance of the intercept and slope estimates, −x̄ · MSE / Sxx.
+    /// With `intercept_se` and `slope_se` it gives the variance of the fitted
+    /// mean at any x (see [`predict_simple_intervals`]).
+    pub intercept_slope_covariance: f64,
     /// Sample size.
     pub n: usize,
 }
@@ -84,6 +88,10 @@ pub struct MultipleRegressionResult {
     pub fitted: Vec<f64>,
     /// VIF (Variance Inflation Factor) for each predictor (excludes intercept).
     pub vif: Vec<f64>,
+    /// Covariance matrix of the coefficients, MSE · (X'X)⁻¹, row-major
+    /// `(p+1) × (p+1)` in the order of `coefficients` (intercept first) --
+    /// R's `vcov`. Its diagonal is the square of `std_errors`.
+    pub covariance: Vec<f64>,
     /// Sample size.
     pub n: usize,
     /// Number of predictors (excluding intercept).
@@ -173,6 +181,7 @@ pub fn simple_linear_regression(x: &[f64], y: &[f64]) -> Option<SimpleRegression
     let ss_x: f64 = x.iter().map(|&xi| (xi - x_mean).powi(2)).sum();
     let slope_se = (mse / ss_x).sqrt();
     let intercept_se = (mse * (1.0 / nf + x_mean * x_mean / ss_x)).sqrt();
+    let intercept_slope_covariance = -x_mean * mse / ss_x;
 
     // t-statistics
     let slope_t = if slope_se > 1e-300 {
@@ -214,6 +223,7 @@ pub fn simple_linear_regression(x: &[f64], y: &[f64]) -> Option<SimpleRegression
         f_p_value,
         residuals,
         fitted,
+        intercept_slope_covariance,
         n,
     })
 }
@@ -361,12 +371,18 @@ pub fn multiple_linear_regression(
 
     // Standard errors: SE(β) = sqrt(diag((X'X)⁻¹) · MSE)
     let xtx_inv = xtx.inverse().ok()?;
+    let mut covariance = Vec::with_capacity(ncols * ncols);
+    for i in 0..ncols {
+        for j in 0..ncols {
+            covariance.push(xtx_inv.get(i, j) * col_scale[i] * col_scale[j] * mse);
+        }
+    }
     let mut std_errors = Vec::with_capacity(ncols);
     let mut t_statistics = Vec::with_capacity(ncols);
     let mut p_values = Vec::with_capacity(ncols);
 
     for (j, &coeff_j) in coefficients.iter().enumerate() {
-        let se = (xtx_inv.get(j, j) * col_scale[j] * col_scale[j] * mse).sqrt();
+        let se = covariance[j * ncols + j].sqrt();
         std_errors.push(se);
         let t = if se > 1e-300 {
             coeff_j / se
@@ -408,6 +424,7 @@ pub fn multiple_linear_regression(
         residuals,
         fitted,
         vif,
+        covariance,
         n,
         p,
     })
@@ -497,6 +514,167 @@ pub fn predict_multiple(
         result.push(yi);
     }
     Some(result)
+}
+
+/// A fitted regression's prediction at one new point, with its uncertainty.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RegressionPrediction {
+    /// The point prediction ŷ₀.
+    pub fit: f64,
+    /// Standard error of the fitted mean at the point, √(x₀' V x₀) with V the
+    /// coefficients' covariance.
+    pub se_fit: f64,
+    /// Confidence interval of the mean response at the point:
+    /// ŷ₀ ± t · `se_fit`.
+    pub confidence_lower: f64,
+    /// Upper end of the confidence interval.
+    pub confidence_upper: f64,
+    /// Prediction interval of a new observation at the point:
+    /// ŷ₀ ± t · √(MSE + `se_fit`²).
+    pub prediction_lower: f64,
+    /// Upper end of the prediction interval.
+    pub prediction_upper: f64,
+}
+
+/// The intervals of a prediction `fit` whose mean has variance `var_fit`,
+/// with residual variance `mse` on `df` degrees of freedom, at two-sided
+/// `level`.
+fn prediction_at(fit: f64, var_fit: f64, mse: f64, df: f64, level: f64) -> RegressionPrediction {
+    let t = special::t_distribution_quantile(0.5 + level / 2.0, df);
+    // Rounding can leave x₀'Vx₀ a hair below zero at a point the fit passes
+    // through exactly.
+    let se_fit = var_fit.max(0.0).sqrt();
+    let se_new = (mse + var_fit.max(0.0)).sqrt();
+    RegressionPrediction {
+        fit,
+        se_fit,
+        confidence_lower: fit - t * se_fit,
+        confidence_upper: fit + t * se_fit,
+        prediction_lower: fit - t * se_new,
+        prediction_upper: fit + t * se_new,
+    }
+}
+
+/// Predictions of a simple regression at `x_new`, each with the confidence
+/// interval of the mean response and the prediction interval of a new
+/// observation at two-sided `level` (Student's t on n − 2 degrees of freedom).
+///
+/// Var(ŷ₀) = SE(β₀)² + x₀² SE(β₁)² + 2 x₀ Cov(β₀, β₁) = MSE (1/n + (x₀ − x̄)²/Sxx).
+///
+/// # Returns
+///
+/// `None` when `level` is not strictly between 0 and 1, or an `x_new` value is
+/// not finite.
+///
+/// # References
+///
+/// Montgomery, Peck & Vining (2012). "Introduction to Linear Regression
+/// Analysis", 5th edition, §2.4.2 and §2.5.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::regression::{predict_simple_intervals, simple_linear_regression};
+///
+/// let x = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+/// let y = [2.2, 3.9, 6.1, 8.2, 9.8, 12.1];
+/// let model = simple_linear_regression(&x, &y).unwrap();
+/// let p = predict_simple_intervals(&model, &[3.5, 10.0], 0.95).unwrap();
+/// // Wider for a new observation than for the mean, and wider away from x̄.
+/// assert!(p[0].prediction_upper - p[0].prediction_lower > p[0].confidence_upper - p[0].confidence_lower);
+/// assert!(p[1].se_fit > p[0].se_fit);
+/// ```
+pub fn predict_simple_intervals(
+    model: &SimpleRegressionResult,
+    x_new: &[f64],
+    level: f64,
+) -> Option<Vec<RegressionPrediction>> {
+    if !(level > 0.0 && level < 1.0) || x_new.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let df = model.n as f64 - 2.0;
+    let mse = model.residual_se * model.residual_se;
+    Some(
+        x_new
+            .iter()
+            .map(|&x0| {
+                let var_fit = model.intercept_se * model.intercept_se
+                    + x0 * x0 * model.slope_se * model.slope_se
+                    + 2.0 * x0 * model.intercept_slope_covariance;
+                prediction_at(model.intercept + model.slope * x0, var_fit, mse, df, level)
+            })
+            .collect(),
+    )
+}
+
+/// Predictions of a multiple regression at the new points `predictors_new`
+/// (one slice per predictor, in the training order), each with the
+/// confidence interval of the mean response and the prediction interval of a
+/// new observation at two-sided `level` (Student's t on n − p − 1 degrees of
+/// freedom).
+///
+/// Var(ŷ₀) = x₀' V x₀, x₀ = (1, x₀₁, …, x₀ₚ) and V the coefficients'
+/// covariance ([`MultipleRegressionResult::covariance`]).
+///
+/// # Returns
+///
+/// `None` when the predictor count differs from the model's, the slices
+/// differ in length, a value is not finite, or `level` is not strictly
+/// between 0 and 1.
+///
+/// # References
+///
+/// Montgomery, Peck & Vining (2012). "Introduction to Linear Regression
+/// Analysis", 5th edition, §3.4.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::regression::{multiple_linear_regression, predict_multiple_intervals};
+///
+/// let x1 = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+/// let x2 = [2.0, 1.0, 3.0, 2.0, 4.0, 3.0, 5.0, 4.0];
+/// let y = [5.1, 5.0, 9.2, 8.9, 13.1, 12.0, 17.2, 15.9];
+/// let model = multiple_linear_regression(&[&x1, &x2], &y).unwrap();
+/// let p = predict_multiple_intervals(&model, &[&[4.5], &[3.0]], 0.95).unwrap();
+/// assert!(p[0].prediction_lower < p[0].fit && p[0].fit < p[0].prediction_upper);
+/// ```
+pub fn predict_multiple_intervals(
+    model: &MultipleRegressionResult,
+    predictors_new: &[&[f64]],
+    level: f64,
+) -> Option<Vec<RegressionPrediction>> {
+    if !(level > 0.0 && level < 1.0) {
+        return None;
+    }
+    let fits = predict_multiple(model, predictors_new)?;
+    if predictors_new
+        .iter()
+        .any(|p| p.iter().any(|v| !v.is_finite()))
+    {
+        return None;
+    }
+    let k = model.p + 1;
+    let df = model.n as f64 - k as f64;
+    let mse = model.residual_se * model.residual_se;
+    Some(
+        fits.iter()
+            .enumerate()
+            .map(|(i, &fit)| {
+                let x0: Vec<f64> = std::iter::once(1.0)
+                    .chain(predictors_new.iter().map(|p| p[i]))
+                    .collect();
+                let var_fit: f64 = (0..k)
+                    .map(|a| {
+                        (0..k)
+                            .map(|b| x0[a] * model.covariance[a * k + b] * x0[b])
+                            .sum::<f64>()
+                    })
+                    .sum();
+                prediction_at(fit, var_fit, mse, df, level)
+            })
+            .collect(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1169,6 +1347,141 @@ mod scipy_tail_reference {
                 cond,
                 "condition number",
             );
+        }
+    }
+}
+
+/// Prediction intervals and the coefficient covariance against statsmodels
+/// 0.15.0 (`OLS(...).fit().get_prediction(...).summary_frame(alpha)`,
+/// `cov_params()`) on seeded data rounded to 3 places: a simple regression at
+/// 90 % with points left of, inside and far right of the data, and three
+/// predictors on scales from 1 to 5000 at 95 %.
+#[cfg(test)]
+#[allow(clippy::approx_constant)] // seeded data, not mathematical constants
+mod statsmodels_prediction_reference {
+    use super::*;
+
+    // Generated by pi_ref.py - statsmodels 0.15.0, seed 20261028.
+    const SX: &[f64] = &[
+        0.321, 3.382, 13.09, 0.433, 11.207, 1.243, 13.577, 12.607, 3.653, 3.965, 11.199, 16.295,
+    ];
+    const SY: &[f64] = &[
+        1.864, 10.159, 26.906, 4.994, 22.783, 9.397, 26.273, 24.293, 9.363, 9.846, 23.056, 29.43,
+    ];
+    const SXN: &[f64] = &[-5.0, 0.0, 10.0, 31.5];
+    const S_MEAN: &[f64] = &[
+        -4.004473932920135,
+        4.156565438454745,
+        20.478644181204505,
+        55.57111347811649,
+    ];
+    const S_MEAN_SE: &[f64] = &[
+        1.0916157424918431,
+        0.7485088578492345,
+        0.4868022389382572,
+        1.9451041579807988,
+    ];
+    const S_MEAN_CI_LOWER: &[f64] = &[
+        -5.982985027235801,
+        2.799922233522837,
+        19.596334048631235,
+        52.04568781195695,
+    ];
+    const S_MEAN_CI_UPPER: &[f64] = &[
+        -2.0259628386044684,
+        5.513208643386653,
+        21.360954313777775,
+        59.09653914427602,
+    ];
+    const S_OBS_CI_LOWER: &[f64] = &[
+        -7.441261322990979,
+        1.0360715352868972,
+        17.533228661407467,
+        51.06271824900933,
+    ];
+    const S_OBS_CI_UPPER: &[f64] = &[
+        -0.5676865428492905,
+        7.277059341622593,
+        23.424059701001543,
+        60.079508707223646,
+    ];
+    const MX1: &[f64] = &[
+        8.195, 0.642, 0.336, 6.144, 0.722, 9.91, 3.078, 2.241, 6.569, 9.172, 5.051, 8.676, 4.217,
+        2.188, 6.705,
+    ];
+    const MX2: &[f64] = &[
+        0.949, -2.284, 1.833, -0.66, -4.189, -3.649, -0.08, 1.587, 3.075, 4.395, 2.358, -4.012,
+        -0.279, 4.502, 3.984,
+    ];
+    const MX3: &[f64] = &[
+        3826.5, 3834.4, 3708.9, 1362.4, 2662.0, 2973.7, 3001.6, 4864.0, 2948.0, 1882.4, 2032.4,
+        4144.4, 2666.3, 2747.4, 2715.4,
+    ];
+    const MY: &[f64] = &[
+        28.737, 14.267, 13.838, 17.156, 10.139, 31.8, 15.884, 19.999, 21.378, 20.225, 16.187,
+        33.594, 18.621, 10.903, 19.907,
+    ];
+    const MN1: &[f64] = &[5.0, 12.0];
+    const MN2: &[f64] = &[0.0, -6.0];
+    const MN3: &[f64] = &[3000.0, 800.0];
+    const M_MEAN: &[f64] = &[19.808760915895164, 28.616648153275186];
+    const M_MEAN_SE: &[f64] = &[0.3007541072279165, 1.2540843118704124];
+    const M_MEAN_CI_LOWER: &[f64] = &[19.14680558904991, 25.856427193344672];
+    const M_MEAN_CI_UPPER: &[f64] = &[20.470716242740416, 31.3768691132057];
+    const M_OBS_CI_LOWER: &[f64] = &[17.202883874579435, 24.878837290302403];
+    const M_OBS_CI_UPPER: &[f64] = &[22.414637957210893, 32.354459016247965];
+    const M_COV: &[f64] = &[
+        1.7052113874211179,
+        -0.07001041367117572,
+        -0.03185830538231558,
+        -0.0004156285010374516,
+        -0.07001041367117572,
+        0.009234030588502234,
+        0.000334157657603741,
+        8.061392712052953e-06,
+        -0.03185830538231558,
+        0.000334157657603741,
+        0.0109414882400463,
+        8.173035100524671e-06,
+        -0.0004156285010374516,
+        8.061392712052953e-06,
+        8.173035100524671e-06,
+        1.229360269395184e-07,
+    ];
+
+    fn close(got: f64, want: f64, what: &str) {
+        let tol = 1e-9 * want.abs().max(1.0);
+        assert!((got - want).abs() <= tol, "{what}: {got} vs {want}");
+    }
+
+    #[test]
+    fn simple_intervals_match_statsmodels() {
+        let model = simple_linear_regression(SX, SY).expect("fits");
+        let p = predict_simple_intervals(&model, SXN, 0.90).expect("intervals");
+        for (i, r) in p.iter().enumerate() {
+            close(r.fit, S_MEAN[i], "fit");
+            close(r.se_fit, S_MEAN_SE[i], "se_fit");
+            close(r.confidence_lower, S_MEAN_CI_LOWER[i], "mean lower");
+            close(r.confidence_upper, S_MEAN_CI_UPPER[i], "mean upper");
+            close(r.prediction_lower, S_OBS_CI_LOWER[i], "obs lower");
+            close(r.prediction_upper, S_OBS_CI_UPPER[i], "obs upper");
+        }
+    }
+
+    #[test]
+    fn multiple_intervals_and_covariance_match_statsmodels() {
+        let model = multiple_linear_regression(&[MX1, MX2, MX3], MY).expect("fits");
+        for (got, want) in model.covariance.iter().zip(M_COV) {
+            close(*got, *want, "covariance");
+        }
+        let p = predict_multiple_intervals(&model, &[MN1, MN2, MN3], 0.95).expect("intervals");
+        for (i, r) in p.iter().enumerate() {
+            close(r.fit, M_MEAN[i], "fit");
+            close(r.se_fit, M_MEAN_SE[i], "se_fit");
+            close(r.confidence_lower, M_MEAN_CI_LOWER[i], "mean lower");
+            close(r.confidence_upper, M_MEAN_CI_UPPER[i], "mean upper");
+            close(r.prediction_lower, M_OBS_CI_LOWER[i], "obs lower");
+            close(r.prediction_upper, M_OBS_CI_UPPER[i], "obs upper");
         }
     }
 }

@@ -647,7 +647,22 @@ fn entry_points() -> Vec<(&'static str, Entry, Value)> {
         ep(
             "uanalytics_simple_regression",
             uanalytics_simple_regression,
-            json!({ "x": [1, 2, 3, 4], "y": [3, 5, 7.1, 9] }),
+            json!({ "x": [1, 2, 3, 4], "y": [3, 5, 7.1, 9], "predict": [5], "level": 0.9 }),
+        ),
+        ep(
+            "uanalytics_multiple_regression",
+            uanalytics_multiple_regression,
+            json!({
+                "predictors": [[1, 2, 3, 4, 5, 6], [2, 1, 3, 2, 4, 3]],
+                "y": [5.1, 5.0, 9.2, 8.9, 13.1, 12.0],
+                "predict": [[7], [5]],
+                "level": 0.9
+            }),
+        ),
+        ep(
+            "uanalytics_prediction_errors",
+            uanalytics_prediction_errors,
+            json!({ "observed": [10, 12, 11], "predicted": [10.5, 11.5, 11], "parameters": 1 }),
         ),
         ep(
             "uanalytics_fit_best",

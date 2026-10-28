@@ -23,7 +23,8 @@ hypothesis testing for industrial quality engineering.
 | `seasonality` | Periodogram (zero-padded FFT) and dominant-period estimation — AutoPeriod: permutation-thresholded peaks refined on the ACF |
 | `decomposition` | Seasonal-trend decomposition by Loess (STL, Cleveland et al. 1990) into trend, seasonal and remainder, with robust outlier weights and the strengths of trend and seasonality |
 | `correlation` | Correlation analysis (Pearson, Spearman, Kendall, partial, correlation matrices) |
-| `regression` | Regression analysis (simple OLS, multiple OLS, VIF multicollinearity) |
+| `regression` | Regression analysis (simple OLS, multiple OLS, VIF multicollinearity), the coefficients' covariance, and at new points the confidence interval of the mean and the prediction interval of a new observation |
+| `accuracy` | Error measures of a model's predictions against observations — mean error, MAE, RMSE, CV(RMSE) and NMBE, with the residual degrees of freedom (ASHRAE Guideline 14's definitions) |
 | `distribution` | Distribution analysis (ECDF, histogram bins — Sturges/Scott/FD/Fixed, QQ-plot, KS test) |
 | `testing` | Hypothesis testing (t-tests, ANOVA, chi-squared, normality — SW/AD/JB) |
 
@@ -812,10 +813,37 @@ kpss_test(input: { data: number[], model?: "level" | "trend",
 // Association and fitting
 correlation_matrix(variables: number[][], options?: { method?: "pearson" | "spearman" | "kendall" } | null):
   { matrix: number[][] }        // >= 2 variables of one length >= 3; a constant one -> degenerate_data at its index
-simple_regression(x: number[] | Float64Array, y: number[] | Float64Array):
+simple_regression(x: number[] | Float64Array, y: number[] | Float64Array,
+                  options?: { predict?: number[] | null, level?: number | null } | null):
   { slope, intercept, r_squared, adjusted_r_squared, slope_se, intercept_se,
     slope_t: number | null, intercept_t: number | null, slope_p, intercept_p, residual_se,
-    f_statistic: number | null, f_p_value, residuals: number[], fitted: number[] }  // null t/F: exact fit
+    f_statistic: number | null, f_p_value, residuals: number[], fitted: number[],  // null t/F: exact fit
+    intercept_slope_covariance: number, level: number,       // level: default 0.95, in (0, 1)
+    predictions: { fit, se_fit, confidence: { lower, upper },  // mean response at that x
+                   prediction: { lower, upper } }[] }       // a new observation; one per predict value
+multiple_regression(input: {
+  predictors: number[][],   // one array per predictor, each as long as y; >= p + 2 observations
+  y: number[],
+  predict?: number[][] | null,  // new points, laid out as predictors (one array per predictor)
+  level?: number | null,        // of the intervals, in (0, 1); default 0.95
+}): { coefficients: number[],   // intercept first
+      std_errors, t_statistics: (number | null)[], p_values, r_squared, adjusted_r_squared,
+      f_statistic: number | null, f_p_value, residual_se, df_residual: number,  // n - p - 1
+      residuals, fitted, vif: (number | null)[],
+      covariance: number[][],   // of the coefficients, MSE (X'X)^-1 (R's vcov)
+      level, predictions: { fit, se_fit, confidence: { lower, upper }, prediction: { lower, upper } }[] }
+// A constant predictor (index i) or one the others determine exactly -> degenerate_data.
+// Intervals use Student's t on the residual degrees of freedom: the mean's is
+// fit ± t·se_fit, a new observation's fit ± t·sqrt(residual_se² + se_fit²).
+prediction_errors(input: { observed: number[], predicted: number[],  // one length
+                           parameters?: number | null }):           // p, 0..n-1, default 0
+  { n, mean_error, mean_absolute_error,    // over n; errors are observed - predicted
+    rmse,                                   // sqrt(Σe² / (n - p))
+    cv_rmse: number | null,                 // rmse / mean(observed)
+    nmbe: number | null,                    // Σe / ((n - p) · mean(observed)); null when that mean is 0
+    parameters }
+// With p the regression's coefficient count, cv_rmse and nmbe are ASHRAE
+// Guideline 14's CV(RMSE) and NMBE -- as fractions (x 100 for percent).
 fit_best(data: number[] | Float64Array):  // >= 2 values, not all equal; best AIC first
   { distribution: string, parameters: Record<string, number>, log_likelihood, aic, bic,
     anderson_darling: number }[]   // A² against each fit -- smaller is closer
@@ -1092,7 +1120,9 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_adf_test` | `adf_test(input)` | `input` as is |
 | `uanalytics_kpss_test` | `kpss_test(input)` | `input` as is |
 | `uanalytics_correlation_matrix` | `correlation_matrix(variables, { method? })` | `{ variables, method? }` |
-| `uanalytics_simple_regression` | `simple_regression(x, y)` | `{ x, y }` |
+| `uanalytics_simple_regression` | `simple_regression(x, y, { predict?, level? })` | `{ x, y, predict?, level? }` |
+| `uanalytics_multiple_regression` | `multiple_regression(input)` | `input` as is |
+| `uanalytics_prediction_errors` | `prediction_errors(input)` | `input` as is |
 | `uanalytics_fit_best` | `fit_best(data)` | `{ data: [...] }` |
 | `uanalytics_goodness_of_fit` | `goodness_of_fit(input)` | `input` as is |
 | `uanalytics_estimate_period` | `estimate_period(input)` | `input` as is |

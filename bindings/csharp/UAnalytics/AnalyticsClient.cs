@@ -761,12 +761,50 @@ public sealed class AnalyticsClient : IDisposable
     /// at least 3, <paramref name="x"/> not constant). Returns <c>slope</c>, <c>intercept</c>,
     /// <c>r_squared</c>, <c>adjusted_r_squared</c>, their standard errors, <c>slope_t</c> /
     /// <c>intercept_t</c> and p values, <c>residual_se</c>, <c>f_statistic</c> /
-    /// <c>f_p_value</c>, <c>residuals</c> and <c>fitted</c>. A t or F with no finite value
-    /// (an exact fit) is <c>null</c>.
+    /// <c>f_p_value</c>, <c>residuals</c>, <c>fitted</c> and the intercept-slope covariance. A
+    /// t or F with no finite value (an exact fit) is <c>null</c>. At each <paramref name="predict"/>
+    /// value, <see cref="RegressionResult.Predictions"/> gives the fit, its standard error, the
+    /// confidence interval of the mean and the prediction interval of a new observation at
+    /// <paramref name="level"/> (in (0, 1); <c>null</c> takes 0.95).
     /// </summary>
-    public RegressionResult SimpleRegression(double[] x, double[] y)
+    public RegressionResult SimpleRegression(double[] x, double[] y, double[]? predict = null,
+        double? level = null)
         => Call(NativeInterop.uanalytics_simple_regression, AnalyticsJson.Default.RegressionResult,
-            ("x", Request.Nums("x", x)), ("y", Request.Nums("y", y)));
+            ("x", Request.Nums("x", x)), ("y", Request.Nums("y", y)),
+            ("predict", predict is null ? null : Request.Nums("predict", predict)),
+            ("level", Request.Num("level", level)));
+
+    /// <summary>
+    /// Multiple linear regression of <paramref name="y"/> on <paramref name="predictors"/> (one
+    /// array per predictor, each as long as <paramref name="y"/>; at least p + 2 observations).
+    /// Returns the coefficients (intercept first), their standard errors, t and p values, R²,
+    /// the F test, residuals, fitted values, VIF and the coefficients' covariance. At each point
+    /// of <paramref name="predict"/> — laid out as <paramref name="predictors"/>, one array per
+    /// predictor — <see cref="MultipleRegressionResult.Predictions"/> gives the fit, its
+    /// standard error, the confidence interval of the mean and the prediction interval of a
+    /// new observation at <paramref name="level"/> (in (0, 1); <c>null</c> takes 0.95). A
+    /// constant predictor, or one the others determine exactly, is refused as
+    /// <c>degenerate_data</c>.
+    /// </summary>
+    public MultipleRegressionResult MultipleRegression(double[][] predictors, double[] y,
+        double[][]? predict = null, double? level = null)
+        => Call(NativeInterop.uanalytics_multiple_regression, AnalyticsJson.Default.MultipleRegressionResult,
+            ("predictors", Request.Rows("predictors", predictors)), ("y", Request.Nums("y", y)),
+            ("predict", predict is null ? null : Request.Rows("predict", predict)),
+            ("level", Request.Num("level", level)));
+
+    /// <summary>
+    /// Error measures of <paramref name="predicted"/> against <paramref name="observed"/> (the
+    /// same length): mean error, mean absolute error, RMSE, CV(RMSE) and NMBE.
+    /// <paramref name="parameters"/> (0 to n − 1) is the number of parameters the model
+    /// estimated from these observations — the RMSE and NMBE divide by n − p, as ASHRAE
+    /// Guideline 14 defines them for a regression with p coefficients.
+    /// </summary>
+    public PredictionErrorsResult PredictionErrors(double[] observed, double[] predicted, int parameters = 0)
+        => Call(NativeInterop.uanalytics_prediction_errors, AnalyticsJson.Default.PredictionErrorsResult,
+            ("observed", Request.Nums("observed", observed)),
+            ("predicted", Request.Nums("predicted", predicted)),
+            ("parameters", JsonValue.Create(parameters)));
 
     // ── Distribution ──
 

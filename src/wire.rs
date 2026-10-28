@@ -3446,6 +3446,61 @@ pub(crate) fn correlation_matrix_dto(
 pub(crate) struct RegressionInputDto {
     pub(crate) x: Vec<f64>,
     pub(crate) y: Vec<f64>,
+    /// New x values to predict at; each gets the confidence interval of the
+    /// mean and the prediction interval of a new observation.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number[] | null"))]
+    pub(crate) predict: Option<Vec<f64>>,
+    /// Two-sided level of the intervals, in (0, 1). Omitted: 0.95.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) level: Option<f64>,
+}
+
+/// A regression's prediction at one new point: the fitted mean, its standard
+/// error, the confidence interval of the mean and the prediction interval of
+/// a new observation.
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+pub(crate) struct PredictionDto {
+    pub(crate) fit: f64,
+    pub(crate) se_fit: f64,
+    pub(crate) confidence: IntervalDto,
+    pub(crate) prediction: IntervalDto,
+}
+
+impl From<crate::regression::RegressionPrediction> for PredictionDto {
+    fn from(p: crate::regression::RegressionPrediction) -> Self {
+        PredictionDto {
+            fit: p.fit,
+            se_fit: p.se_fit,
+            confidence: IntervalDto {
+                lower: p.confidence_lower,
+                upper: p.confidence_upper,
+            },
+            prediction: IntervalDto {
+                lower: p.prediction_lower,
+                upper: p.prediction_upper,
+            },
+        }
+    }
+}
+
+/// The intervals' level: `level` in (0, 1), 0.95 when omitted.
+fn interval_level(level: Option<f64>) -> Result<f64, WireError> {
+    let level = level.unwrap_or(0.95);
+    if level > 0.0 && level < 1.0 {
+        Ok(level)
+    } else {
+        Err(WireError::out_of_range(
+            "level",
+            Bound::Open(0.0),
+            Bound::Open(1.0),
+            level,
+            format!("level must be strictly between 0 and 1, got {level}"),
+        ))
+    }
 }
 
 /// Ordinary least squares `y = intercept + slope · x`.
@@ -3473,6 +3528,12 @@ pub(crate) struct RegressionDto {
     /// `y[i]` minus its fitted value, in input order.
     pub(crate) residuals: Vec<f64>,
     pub(crate) fitted: Vec<f64>,
+    /// Covariance of the intercept and slope estimates.
+    pub(crate) intercept_slope_covariance: f64,
+    /// Level of the intervals in `predictions`.
+    pub(crate) level: f64,
+    /// One per `predict` value, in order; empty without `predict`.
+    pub(crate) predictions: Vec<PredictionDto>,
 }
 
 fn finite(v: f64) -> Option<f64> {
@@ -3480,7 +3541,13 @@ fn finite(v: f64) -> Option<f64> {
 }
 
 pub(crate) fn simple_regression_dto(input: RegressionInputDto) -> Result<RegressionDto, WireError> {
-    let RegressionInputDto { x, y } = input;
+    let RegressionInputDto {
+        x,
+        y,
+        predict,
+        level,
+    } = input;
+    let level = interval_level(level)?;
     if y.len() != x.len() {
         return Err(WireError::new(
             code::DIMENSION_MISMATCH,
@@ -3514,8 +3581,258 @@ pub(crate) fn simple_regression_dto(input: RegressionInputDto) -> Result<Regress
         residual_se: r.residual_se,
         f_statistic: finite(r.f_statistic),
         f_p_value: r.f_p_value,
+        predictions: crate::regression::predict_simple_intervals(
+            &r,
+            predict.as_deref().unwrap_or_default(),
+            level,
+        )
+        .expect("level checked above; values are finite")
+        .into_iter()
+        .map(PredictionDto::from)
+        .collect(),
+        intercept_slope_covariance: r.intercept_slope_covariance,
+        level,
         residuals: r.residuals,
         fitted: r.fitted,
+    })
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MultipleRegressionInputDto {
+    /// One array per predictor, each as long as `y`.
+    pub(crate) predictors: Vec<Vec<f64>>,
+    pub(crate) y: Vec<f64>,
+    /// New points to predict at, laid out as `predictors`: one array per
+    /// predictor, all the same length.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number[][] | null"))]
+    pub(crate) predict: Option<Vec<Vec<f64>>>,
+    /// Two-sided level of the intervals, in (0, 1). Omitted: 0.95.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) level: Option<f64>,
+}
+
+/// Ordinary least squares `y = b0 + b1·x1 + … + bp·xp`.
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct MultipleRegressionDto {
+    /// Intercept first, then one per predictor.
+    pub(crate) coefficients: Vec<f64>,
+    pub(crate) std_errors: Vec<f64>,
+    /// `null` where a standard error is 0 (an exact fit).
+    #[cfg_attr(feature = "wasm", tsify(type = "(number | null)[]"))]
+    pub(crate) t_statistics: Vec<Option<f64>>,
+    pub(crate) p_values: Vec<f64>,
+    pub(crate) r_squared: f64,
+    pub(crate) adjusted_r_squared: f64,
+    /// `null` when the fit is exact.
+    pub(crate) f_statistic: Option<f64>,
+    pub(crate) f_p_value: f64,
+    pub(crate) residual_se: f64,
+    /// n − p − 1.
+    pub(crate) df_residual: usize,
+    /// `y[i]` minus its fitted value, in input order.
+    pub(crate) residuals: Vec<f64>,
+    pub(crate) fitted: Vec<f64>,
+    /// One per predictor; `null` for a predictor the others determine exactly.
+    #[cfg_attr(feature = "wasm", tsify(type = "(number | null)[]"))]
+    pub(crate) vif: Vec<Option<f64>>,
+    /// `covariance[i][j]`: covariance of coefficients `i` and `j`.
+    pub(crate) covariance: Vec<Vec<f64>>,
+    /// Level of the intervals in `predictions`.
+    pub(crate) level: f64,
+    /// One per point of `predict`, in order; empty without `predict`.
+    pub(crate) predictions: Vec<PredictionDto>,
+}
+
+pub(crate) fn multiple_regression_dto(
+    input: MultipleRegressionInputDto,
+) -> Result<MultipleRegressionDto, WireError> {
+    let MultipleRegressionInputDto {
+        predictors,
+        y,
+        predict,
+        level,
+    } = input;
+    let level = interval_level(level)?;
+    if predictors.is_empty() {
+        return Err(WireError::empty_input("predictors"));
+    }
+    for (i, x) in predictors.iter().enumerate() {
+        if x.len() != y.len() {
+            return Err(WireError::new(
+                code::DIMENSION_MISMATCH,
+                Some(i),
+                format!("predictors[{i}] has {} values; y has {}", x.len(), y.len()),
+            )
+            .about("predictors")
+            .with("expected", Detail::Num(y.len() as f64))
+            .with("got", Detail::Num(x.len() as f64)));
+        }
+    }
+    let p = predictors.len();
+    let y = at_least(y, p + 2, "y")?;
+    if let Some(i) = first_constant(&predictors) {
+        return Err(WireError::new(
+            code::DEGENERATE_DATA,
+            Some(i),
+            format!("predictors[{i}]: every value is the same, so its coefficient is not defined"),
+        )
+        .about("predictors"));
+    }
+    let columns: Vec<&[f64]> = predictors.iter().map(Vec::as_slice).collect();
+    let r = crate::regression::multiple_linear_regression(&columns, &y).ok_or_else(|| {
+        WireError::degenerate_data(
+            "predictors: one is a linear combination of the others, so the coefficients are not defined",
+        )
+        .about("predictors")
+    })?;
+    let new = predict.unwrap_or_else(|| vec![Vec::new(); p]);
+    if new.len() != p {
+        return Err(WireError::new(
+            code::DIMENSION_MISMATCH,
+            None,
+            format!(
+                "predict has {} arrays; the model has {p} predictors",
+                new.len()
+            ),
+        )
+        .about("predict")
+        .with("expected", Detail::Num(p as f64))
+        .with("got", Detail::Num(new.len() as f64)));
+    }
+    if let Some(i) = new.iter().position(|v| v.len() != new[0].len()) {
+        return Err(WireError::new(
+            code::DIMENSION_MISMATCH,
+            Some(i),
+            format!(
+                "predict[{i}] has {} values; predict[0] has {}",
+                new[i].len(),
+                new[0].len()
+            ),
+        )
+        .about("predict")
+        .with("expected", Detail::Num(new[0].len() as f64))
+        .with("got", Detail::Num(new[i].len() as f64)));
+    }
+    let new_columns: Vec<&[f64]> = new.iter().map(Vec::as_slice).collect();
+    let predictions = crate::regression::predict_multiple_intervals(&r, &new_columns, level)
+        .expect("counts, lengths and level checked above; values are finite")
+        .into_iter()
+        .map(PredictionDto::from)
+        .collect();
+    let k = p + 1;
+    Ok(MultipleRegressionDto {
+        coefficients: r.coefficients,
+        std_errors: r.std_errors,
+        t_statistics: r.t_statistics.into_iter().map(finite).collect(),
+        p_values: r.p_values,
+        r_squared: r.r_squared,
+        adjusted_r_squared: r.adjusted_r_squared,
+        f_statistic: finite(r.f_statistic),
+        f_p_value: r.f_p_value,
+        residual_se: r.residual_se,
+        df_residual: r.n - k,
+        residuals: r.residuals,
+        fitted: r.fitted,
+        vif: r.vif.into_iter().map(finite).collect(),
+        covariance: r.covariance.chunks(k).map(<[f64]>::to_vec).collect(),
+        level,
+        predictions,
+    })
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PredictionErrorsInputDto {
+    pub(crate) observed: Vec<f64>,
+    /// As long as `observed`.
+    pub(crate) predicted: Vec<f64>,
+    /// Parameters the model estimated from these observations, below their
+    /// count: the RMSE and NMBE divide by n − parameters. Omitted: 0.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) parameters: Option<Whole>,
+}
+
+/// Error measures of predictions against observations (errors are observed −
+/// predicted).
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct PredictionErrorsDto {
+    pub(crate) n: usize,
+    pub(crate) mean_error: f64,
+    pub(crate) mean_absolute_error: f64,
+    pub(crate) rmse: f64,
+    /// `rmse` over the mean of `observed`; `null` when that mean is 0.
+    pub(crate) cv_rmse: Option<f64>,
+    /// Sum of errors over `(n − parameters) · mean(observed)`; `null` when
+    /// that mean is 0.
+    pub(crate) nmbe: Option<f64>,
+    pub(crate) parameters: usize,
+}
+
+pub(crate) fn prediction_errors_dto(
+    input: PredictionErrorsInputDto,
+) -> Result<PredictionErrorsDto, WireError> {
+    let PredictionErrorsInputDto {
+        observed,
+        predicted,
+        parameters,
+    } = input;
+    if predicted.len() != observed.len() {
+        return Err(WireError::new(
+            code::DIMENSION_MISMATCH,
+            None,
+            format!(
+                "predicted has {} values; observed has {}",
+                predicted.len(),
+                observed.len()
+            ),
+        )
+        .about("predicted")
+        .with("expected", Detail::Num(observed.len() as f64))
+        .with("got", Detail::Num(predicted.len() as f64)));
+    }
+    if observed.is_empty() {
+        return Err(WireError::empty_input("observed"));
+    }
+    let n = observed.len();
+    let parameters = match parameters {
+        None => 0,
+        Some(Whole(v)) if v >= 0.0 && v < n as f64 => v as usize,
+        Some(Whole(v)) => {
+            return Err(WireError::out_of_range(
+                "parameters",
+                Bound::Closed(0.0),
+                Bound::Closed((n - 1) as f64),
+                v,
+                format!("parameters must be from 0 to n - 1 = {}, got {v}", n - 1),
+            ))
+        }
+    };
+    let e = crate::accuracy::prediction_errors(&observed, &predicted, parameters)
+        .expect("lengths and parameters checked above; values are finite");
+    Ok(PredictionErrorsDto {
+        n: e.n,
+        mean_error: e.mean_error,
+        mean_absolute_error: e.mean_absolute_error,
+        rmse: e.rmse,
+        cv_rmse: e.cv_rmse,
+        nmbe: e.nmbe,
+        parameters: e.parameters,
     })
 }
 
