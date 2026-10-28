@@ -19,6 +19,8 @@
 //! Holt, C.C. (1957). "Forecasting Seasonals and Trends by
 //! Exponentially Weighted Moving Averages", ONR Memo 52.
 
+use super::forecast::{one_step_mse, residuals, valid_level, with_intervals, SmoothingForecast};
+
 /// Result of Holt's linear smoothing at each time step.
 #[derive(Debug, Clone)]
 pub struct HoltResult {
@@ -28,14 +30,51 @@ pub struct HoltResult {
     pub trend: Vec<f64>,
     /// Fitted values (level + trend from previous step).
     pub fitted: Vec<f64>,
+    /// The level smoothing constant α.
+    pub alpha: f64,
+    /// The trend smoothing constant β.
+    pub beta: f64,
 }
 
 impl HoltResult {
+    /// The index of the first one-step error the smoother learns from: the
+    /// initial level and trend (`data[0]`, `data[1] − data[0]`) reproduce the
+    /// first two observations.
+    pub const FIRST_ERROR: usize = 2;
+
     /// Returns a forecast h steps ahead from the last observation.
     pub fn forecast(&self, h: usize) -> f64 {
         let last_l = *self.level.last().expect("level must be non-empty");
         let last_t = *self.trend.last().expect("trend must be non-empty");
         last_l + h as f64 * last_t
+    }
+
+    /// `data[t] − fitted[t]`, `None` at the initialisation.
+    pub fn residuals(&self, data: &[f64]) -> Vec<Option<f64>> {
+        residuals(data, &self.fitted, Self::FIRST_ERROR)
+    }
+
+    /// Forecasts 1..=`horizon` steps ahead with the prediction interval of
+    /// ETS(A,A,N) at two-sided `level` ([`super::forecast`]); `data` is the
+    /// series smoothed (for σ). `None` when `level` is not in (0, 1).
+    pub fn forecasts(
+        &self,
+        data: &[f64],
+        horizon: usize,
+        level: f64,
+    ) -> Option<Vec<SmoothingForecast>> {
+        if !valid_level(level) {
+            return None;
+        }
+        let (alpha, beta) = (self.alpha, self.beta);
+        let c = move |j: usize| alpha * (1.0 + j as f64 * beta);
+        Some(with_intervals(
+            horizon,
+            level,
+            one_step_mse(data, &self.fitted, Self::FIRST_ERROR),
+            Some(&c),
+            |h| self.forecast(h),
+        ))
     }
 }
 
@@ -110,6 +149,8 @@ impl HoltLinear {
             level,
             trend,
             fitted,
+            alpha: self.alpha,
+            beta: self.beta,
         })
     }
 }

@@ -1453,6 +1453,16 @@ wire_export!(
 );
 
 wire_export!(
+    /// Exponential smoothing `{data, method, alpha, beta?, gamma?, period?,
+    /// seasonality?, horizon?, level?}` → `{components: {level, trend, seasonal},
+    /// fitted, residuals, sigma, level, forecasts: [{step, mean, prediction}]}`,
+    /// the WebAssembly binding's `exponential_smoothing`.
+    uanalytics_exponential_smoothing,
+    crate::wire::SmoothingInputDto,
+    |r| crate::wire::exponential_smoothing_dto(r)
+);
+
+wire_export!(
     /// Every continuous family that fits `{data}`, best AIC first:
     /// `[{distribution, parameters: {name: value}, log_likelihood, aic, bic,
     /// anderson_darling}]`.
@@ -2019,6 +2029,120 @@ mod tests {
         assert_eq!(b["code"].as_str(), Some("parameter_out_of_range"), "{b}");
         let b = refuse(serde_json::json!({ "observed": [], "predicted": [] }));
         assert_eq!(b["code"].as_str(), Some("empty_input"), "{b}");
+    }
+
+    #[test]
+    fn exponential_smoothing_round_trips_and_names_what_it_refuses() {
+        let pattern = [6.0, -3.0, -4.0, 1.0];
+        let data: Vec<f64> = (0..24)
+            .map(|i| 100.0 + 1.5 * i as f64 + pattern[i % 4] + 0.3 * ((i * 7) % 5) as f64)
+            .collect();
+        let req = serde_json::json!({
+            "data": data, "method": "holt_winters", "alpha": 0.3, "beta": 0.1, "gamma": 0.25,
+            "period": 4, "horizon": 6, "level": 0.9
+        });
+        let (code, b) = call(uanalytics_exponential_smoothing, &req.to_string());
+        assert_eq!(code, 0, "{b}");
+        let wire =
+            crate::wire::exponential_smoothing_dto(serde_json::from_value(req).unwrap()).unwrap();
+        assert_eq!(b, serde_json::to_value(&wire).unwrap());
+        assert_eq!(b["forecasts"].as_array().unwrap().len(), 6);
+        assert!(
+            b["residuals"][3].is_null() && b["residuals"][4].is_number(),
+            "{b}"
+        );
+        assert!(b["forecasts"][5]["prediction"]["lower"].is_number(), "{b}");
+        // Multiplicative: point forecasts, no closed-form interval.
+        let (_, b) = call(
+            uanalytics_exponential_smoothing,
+            &serde_json::json!({
+                "data": data, "method": "holt_winters", "alpha": 0.3, "beta": 0.1,
+                "gamma": 0.25, "period": 4, "seasonality": "multiplicative", "horizon": 2
+            })
+            .to_string(),
+        );
+        assert!(b["forecasts"][0]["prediction"].is_null(), "{b}");
+        let (_, b) = call(
+            uanalytics_exponential_smoothing,
+            &serde_json::json!({ "data": [3, 5, 4], "method": "simple", "alpha": 0.5 }).to_string(),
+        );
+        assert!(
+            b["components"]["trend"].is_null() && b["forecasts"].as_array().unwrap().is_empty(),
+            "{b}"
+        );
+
+        let refuse = |body: serde_json::Value| {
+            let (code, b) = call(uanalytics_exponential_smoothing, &body.to_string());
+            assert_eq!(code, ERR_COMPUTE, "{b}");
+            b
+        };
+        let b = refuse(
+            serde_json::json!({ "data": data, "method": "holt_winters", "alpha": 0.3, "beta": 0.1, "gamma": 0.2, "period": 13 }),
+        );
+        assert_eq!(
+            (b["code"].as_str(), b["min"].as_f64(), b["got"].as_f64()),
+            (Some("insufficient_data"), Some(26.0), Some(24.0)),
+            "{b}"
+        );
+        let b = refuse(serde_json::json!({ "data": data, "method": "holt", "alpha": 0.3 }));
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("invalid_option"), Some("beta")),
+            "{b}"
+        );
+        let b = refuse(
+            serde_json::json!({ "data": data, "method": "simple", "alpha": 0.3, "period": 4 }),
+        );
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("invalid_option"), Some("period")),
+            "{b}"
+        );
+        let b = refuse(serde_json::json!({ "data": data, "method": "simple", "alpha": 1 }));
+        assert_eq!(
+            (
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["exclusive_max"].as_f64()
+            ),
+            (Some("parameter_out_of_range"), Some("alpha"), Some(1.0)),
+            "{b}"
+        );
+        let b = refuse(serde_json::json!({ "data": data, "method": "arima", "alpha": 0.3 }));
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("unknown_option"), Some("method")),
+            "{b}"
+        );
+        let mut negative = data.clone();
+        negative[5] = -1.0;
+        let b = refuse(serde_json::json!({
+            "data": negative, "method": "holt_winters", "alpha": 0.3, "beta": 0.1, "gamma": 0.2,
+            "period": 4, "seasonality": "multiplicative"
+        }));
+        assert_eq!(
+            (
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["index"].as_u64(),
+                b["exclusive_min"].as_f64()
+            ),
+            (
+                Some("parameter_out_of_range"),
+                Some("data"),
+                Some(5),
+                Some(0.0)
+            ),
+            "{b}"
+        );
+        let b = refuse(
+            serde_json::json!({ "data": data, "method": "simple", "alpha": 0.3, "horizon": -1 }),
+        );
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("parameter_out_of_range"), Some("horizon")),
+            "{b}"
+        );
     }
 
     #[test]

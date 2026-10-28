@@ -3836,6 +3836,314 @@ pub(crate) fn prediction_errors_dto(
     })
 }
 
+// ── Exponential smoothing ──────────────────────────────────────────────────
+
+/// The smoothers `exponential_smoothing` runs.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum SmoothingMethod {
+    Simple,
+    Holt,
+    HoltWinters,
+}
+
+/// `exponential_smoothing`'s `method` names.
+pub(crate) const SMOOTHING_METHODS: [(&str, SmoothingMethod); 3] = [
+    ("simple", SmoothingMethod::Simple),
+    ("holt", SmoothingMethod::Holt),
+    ("holt_winters", SmoothingMethod::HoltWinters),
+];
+
+/// `exponential_smoothing`'s `seasonality` names.
+pub(crate) const SEASONALITIES: [(&str, crate::smoothing::Seasonality); 2] = [
+    ("additive", crate::smoothing::Seasonality::Additive),
+    (
+        "multiplicative",
+        crate::smoothing::Seasonality::Multiplicative,
+    ),
+];
+
+/// Most steps a forecast reaches.
+pub(crate) const MAX_HORIZON: f64 = 100_000.0;
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SmoothingInputDto {
+    pub(crate) data: Vec<f64>,
+    /// `"simple"` (level), `"holt"` (level and trend) or `"holt_winters"`
+    /// (level, trend and season).
+    #[cfg_attr(
+        feature = "wasm",
+        tsify(type = "\"simple\" | \"holt\" | \"holt_winters\"")
+    )]
+    #[cfg_attr(
+        all(test, feature = "wasm"),
+        schemars(schema_with = "crate::wire::card_schema::smoothing_method")
+    )]
+    pub(crate) method: String,
+    /// Level smoothing constant, in (0, 1).
+    pub(crate) alpha: f64,
+    /// Trend smoothing constant, in (0, 1): `holt` and `holt_winters` only.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) beta: Option<f64>,
+    /// Seasonal smoothing constant, in (0, 1): `holt_winters` only.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) gamma: Option<f64>,
+    /// Seasonal period, at least 2: `holt_winters` only.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) period: Option<Whole>,
+    /// `"additive"` (default) or `"multiplicative"`: `holt_winters` only.
+    #[serde(default)]
+    #[cfg_attr(
+        feature = "wasm",
+        tsify(optional, type = "\"additive\" | \"multiplicative\" | null")
+    )]
+    #[cfg_attr(
+        all(test, feature = "wasm"),
+        schemars(schema_with = "crate::wire::card_schema::seasonality_or_null")
+    )]
+    pub(crate) seasonality: Option<String>,
+    /// Steps to forecast past the last observation, 0 to 100 000. Omitted: 0.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) horizon: Option<Whole>,
+    /// Two-sided level of the prediction intervals, in (0, 1). Omitted: 0.95.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) level: Option<f64>,
+}
+
+/// The smoothed components, one value per observation.
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct SmoothingComponentsDto {
+    pub(crate) level: Vec<f64>,
+    /// `null` for `simple`.
+    pub(crate) trend: Option<Vec<f64>>,
+    /// `null` unless `holt_winters`; the first cycle's are the initial ones.
+    pub(crate) seasonal: Option<Vec<f64>>,
+}
+
+/// A forecast `step` periods after the last observation.
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct ForecastDto {
+    pub(crate) step: usize,
+    pub(crate) mean: f64,
+    /// `null` for multiplicative seasonality, which has no closed form.
+    pub(crate) prediction: Option<IntervalDto>,
+}
+
+/// Exponential smoothing of a series and its forecasts.
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct SmoothingDto {
+    pub(crate) components: SmoothingComponentsDto,
+    /// One-step-ahead in-sample forecasts.
+    pub(crate) fitted: Vec<f64>,
+    /// `data[t] − fitted[t]`; `null` where `fitted` is the initialisation (the
+    /// first value for `simple`, two for `holt`, the first cycle for
+    /// `holt_winters`).
+    #[cfg_attr(feature = "wasm", tsify(type = "(number | null)[]"))]
+    pub(crate) residuals: Vec<Option<f64>>,
+    /// Root mean squared one-step error over the non-null residuals.
+    pub(crate) sigma: f64,
+    /// Level of the prediction intervals.
+    pub(crate) level: f64,
+    pub(crate) forecasts: Vec<ForecastDto>,
+}
+
+/// A smoothing constant: given, in (0, 1).
+fn smoothing_constant(parameter: &'static str, value: f64) -> Result<f64, WireError> {
+    if value > 0.0 && value < 1.0 {
+        Ok(value)
+    } else {
+        Err(WireError::out_of_range(
+            parameter,
+            Bound::Open(0.0),
+            Bound::Open(1.0),
+            value,
+            format!("{parameter} must be strictly between 0 and 1, got {value}"),
+        ))
+    }
+}
+
+pub(crate) fn exponential_smoothing_dto(
+    input: SmoothingInputDto,
+) -> Result<SmoothingDto, WireError> {
+    use crate::smoothing::{HoltLinear, HoltWinters, SimpleExponentialSmoothing};
+    use SmoothingMethod::{Holt, HoltWinters as Hw, Simple};
+
+    let method = named("method", &input.method, &SMOOTHING_METHODS)?;
+    let level = interval_level(input.level)?;
+    let alpha = smoothing_constant("alpha", input.alpha)?;
+    let horizon = match input.horizon {
+        None => 0,
+        Some(Whole(h)) if (0.0..=MAX_HORIZON).contains(&h) => h as usize,
+        Some(Whole(h)) => {
+            return Err(WireError::out_of_range(
+                "horizon",
+                Bound::Closed(0.0),
+                Bound::Closed(MAX_HORIZON),
+                h,
+                format!("horizon must be from 0 to {MAX_HORIZON}, got {h}"),
+            ))
+        }
+    };
+    // Each method reads its own constants: one it needs must be there, one
+    // it does not read must not be.
+    let reads = |parameter: &'static str, given: bool, wanted: bool| -> Result<(), WireError> {
+        match (given, wanted) {
+            (true, false) => Err(WireError::new(
+                code::INVALID_OPTION,
+                None,
+                format!("{parameter} is not read by method {:?}", input.method),
+            )
+            .about(parameter)),
+            (false, true) => Err(WireError::new(
+                code::INVALID_OPTION,
+                None,
+                format!("method {:?} needs {parameter}", input.method),
+            )
+            .about(parameter)),
+            _ => Ok(()),
+        }
+    };
+    reads("beta", input.beta.is_some(), method != Simple)?;
+    reads("gamma", input.gamma.is_some(), method == Hw)?;
+    reads("period", input.period.is_some(), method == Hw)?;
+    // `seasonality` is optional where it is read.
+    let seasonality_given = input.seasonality.is_some();
+    reads(
+        "seasonality",
+        seasonality_given,
+        method == Hw && seasonality_given,
+    )?;
+    let data = input.data;
+
+    let interval = |f: crate::smoothing::SmoothingForecast| ForecastDto {
+        step: f.step,
+        mean: f.mean,
+        prediction: f
+            .lower
+            .zip(f.upper)
+            .map(|(lower, upper)| IntervalDto { lower, upper }),
+    };
+    let sigma = |residuals: &[Option<f64>]| {
+        let e: Vec<f64> = residuals.iter().flatten().copied().collect();
+        (e.iter().map(|v| v * v).sum::<f64>() / e.len() as f64).sqrt()
+    };
+    match method {
+        Simple => {
+            let data = at_least(data, 2, "data")?;
+            let r = SimpleExponentialSmoothing::new(alpha)
+                .expect("alpha checked above")
+                .smooth(&data)
+                .expect("data is not empty");
+            let residuals = r.residuals(&data);
+            Ok(SmoothingDto {
+                forecasts: r
+                    .forecasts(&data, horizon, level)
+                    .expect("level checked above")
+                    .into_iter()
+                    .map(interval)
+                    .collect(),
+                sigma: sigma(&residuals),
+                residuals,
+                fitted: r.fitted,
+                components: SmoothingComponentsDto {
+                    level: r.smoothed,
+                    trend: None,
+                    seasonal: None,
+                },
+                level,
+            })
+        }
+        Holt => {
+            let beta = smoothing_constant("beta", input.beta.expect("checked present"))?;
+            let data = at_least(data, 3, "data")?;
+            let r = HoltLinear::new(alpha, beta)
+                .expect("constants checked above")
+                .smooth(&data)
+                .expect("at least two values");
+            let residuals = r.residuals(&data);
+            Ok(SmoothingDto {
+                forecasts: r
+                    .forecasts(&data, horizon, level)
+                    .expect("level checked above")
+                    .into_iter()
+                    .map(interval)
+                    .collect(),
+                sigma: sigma(&residuals),
+                residuals,
+                fitted: r.fitted,
+                components: SmoothingComponentsDto {
+                    level: r.level,
+                    trend: Some(r.trend),
+                    seasonal: None,
+                },
+                level,
+            })
+        }
+        Hw => {
+            let beta = smoothing_constant("beta", input.beta.expect("checked present"))?;
+            let gamma = smoothing_constant("gamma", input.gamma.expect("checked present"))?;
+            let Whole(period) = input.period.expect("checked present");
+            if period < 2.0 {
+                return Err(WireError::out_of_range(
+                    "period",
+                    Bound::Closed(2.0),
+                    Bound::Unbounded,
+                    period,
+                    format!("period must be at least 2, got {period}"),
+                ));
+            }
+            let seasonality = match &input.seasonality {
+                Some(name) => named("seasonality", name, &SEASONALITIES)?,
+                None => crate::smoothing::Seasonality::Additive,
+            };
+            let m = period as usize;
+            let data = at_least(data, 2 * m, "data")?;
+            if seasonality == crate::smoothing::Seasonality::Multiplicative {
+                each_within(&data, "data", Bound::Open(0.0), Bound::Unbounded)?;
+            }
+            let r = HoltWinters::new(alpha, beta, gamma, m, seasonality)
+                .expect("constants and period checked above")
+                .smooth(&data)
+                .expect("two cycles of data, positive when multiplicative");
+            let residuals = r.residuals(&data);
+            Ok(SmoothingDto {
+                forecasts: r
+                    .forecasts(&data, horizon, level)
+                    .expect("level checked above")
+                    .into_iter()
+                    .map(interval)
+                    .collect(),
+                sigma: sigma(&residuals),
+                residuals,
+                fitted: r.fitted,
+                components: SmoothingComponentsDto {
+                    level: r.level,
+                    trend: Some(r.trend),
+                    seasonal: Some(r.seasonal),
+                },
+                level,
+            })
+        }
+    }
+}
+
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
@@ -6676,6 +6984,15 @@ pub(crate) mod card_schema {
 
     pub(crate) fn pelt_cost(_: &mut SchemaGenerator) -> Schema {
         names(&super::PELT_COSTS)
+    }
+
+    pub(crate) fn smoothing_method(_: &mut SchemaGenerator) -> Schema {
+        names(&super::SMOOTHING_METHODS)
+    }
+
+    /// `exponential_smoothing`'s optional `seasonality`.
+    pub(crate) fn seasonality_or_null(_: &mut SchemaGenerator) -> Schema {
+        or_null(names(&super::SEASONALITIES))
     }
 
     pub(crate) fn correlation_method(_: &mut SchemaGenerator) -> Schema {

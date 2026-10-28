@@ -15,6 +15,8 @@
 //!
 //! Brown, R.G. (1956). *Exponential Smoothing for Predicting Demand*.
 
+use super::forecast::{one_step_mse, residuals, valid_level, with_intervals, SmoothingForecast};
+
 /// Result of simple exponential smoothing at each time step.
 #[derive(Debug, Clone)]
 pub struct SesResult {
@@ -22,6 +24,45 @@ pub struct SesResult {
     pub smoothed: Vec<f64>,
     /// One-step-ahead forecast for the next period.
     pub forecast: f64,
+    /// One-step-ahead in-sample forecasts: `fitted[t] = smoothed[t − 1]`, and
+    /// `fitted[0]` the initial level `data[0]`.
+    pub fitted: Vec<f64>,
+    /// The smoothing constant α.
+    pub alpha: f64,
+}
+
+impl SesResult {
+    /// The index of the first one-step error the smoother learns from: before
+    /// it the fitted value is the initialisation.
+    pub const FIRST_ERROR: usize = 1;
+
+    /// `data[t] − fitted[t]`, `None` at the initialisation.
+    pub fn residuals(&self, data: &[f64]) -> Vec<Option<f64>> {
+        residuals(data, &self.fitted, Self::FIRST_ERROR)
+    }
+
+    /// Forecasts 1..=`horizon` steps ahead with the prediction interval of
+    /// ETS(A,N,N) at two-sided `level` ([`super::forecast`]); `data` is the
+    /// series smoothed (for σ). `None` when `level` is not in (0, 1).
+    pub fn forecasts(
+        &self,
+        data: &[f64],
+        horizon: usize,
+        level: f64,
+    ) -> Option<Vec<SmoothingForecast>> {
+        if !valid_level(level) {
+            return None;
+        }
+        let alpha = self.alpha;
+        let c = move |_: usize| alpha;
+        Some(with_intervals(
+            horizon,
+            level,
+            one_step_mse(data, &self.fitted, Self::FIRST_ERROR),
+            Some(&c),
+            |_| self.forecast,
+        ))
+    }
 }
 
 /// Simple Exponential Smoothing.
@@ -57,16 +98,24 @@ impl SimpleExponentialSmoothing {
         }
 
         let mut smoothed = Vec::with_capacity(data.len());
+        let mut fitted = Vec::with_capacity(data.len());
         let mut s = data[0];
+        fitted.push(s);
         smoothed.push(s);
 
         for &x in &data[1..] {
+            fitted.push(s);
             s = self.alpha * x + (1.0 - self.alpha) * s;
             smoothed.push(s);
         }
 
         let forecast = s;
-        Some(SesResult { smoothed, forecast })
+        Some(SesResult {
+            smoothed,
+            forecast,
+            fitted,
+            alpha: self.alpha,
+        })
     }
 }
 

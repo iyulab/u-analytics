@@ -35,6 +35,28 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   `PredictionErrorsResult`). `cv_rmse` and `nmbe` are fractions, `null` when the observations
   average 0; `parameters` outside 0..n − 1 is `parameter_out_of_range`.
 - `level` outside (0, 1) is `parameter_out_of_range` with `exclusive_min` 0 and `exclusive_max` 1.
+- Exponential smoothing through every transport: WebAssembly `exponential_smoothing`, C
+  `uanalytics_exponential_smoothing`, .NET `AnalyticsClient.ExponentialSmoothing` (returning
+  `ExponentialSmoothingResult`; enums `SmoothingMethod`, `Seasonality`). `method` `"simple"`,
+  `"holt"` or `"holt_winters"` with the constants given; the components, one-step fitted values,
+  residuals (`null` over the initialisation), the RMS one-step error and `horizon` forecasts with
+  prediction intervals at `level`. A constant the method does not read, or one it needs and
+  lacks, is `invalid_option`; too few values for the method is `insufficient_data` (Holt-Winters:
+  `min` 2 · period); multiplicative seasonality on a value <= 0 is `parameter_out_of_range` at
+  its index.
+- `SimpleExponentialSmoothing`, `HoltLinear` and `HoltWinters` results have `forecasts(data,
+  horizon, level)`: point forecasts with the prediction intervals of ETS(A,N,N), ETS(A,A,N) and
+  ETS(A,A,A) (Hyndman et al. 2008, class 1) -- as statsmodels' `ETSModel` with the same initial
+  states -- and none for multiplicative seasonality, which has no closed form; and
+  `residuals(data)`, `None` over the initialisation. `SesResult` gains `fitted` (one-step) and
+  `alpha`; `HoltResult` `alpha` and `beta`.
+
+### Changed
+
+- **Breaking**: `HoltWintersResult::forecast(h)` takes only the step -- the result now carries
+  its `alpha`, `beta`, `gamma`, `period` and `seasonality` instead of the caller passing the
+  period and the seasonality again (a mismatched pair gave a wrong forecast silently). Results
+  built as struct literals need the new fields.
 
 
 ## [0.30.0] - 2026-10-28

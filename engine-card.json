@@ -2951,6 +2951,64 @@
       }
     },
     {
+      "id": "exponential_smoothing",
+      "summary": "Exponential smoothing of a series -- simple (level), Holt (level and trend) or Holt-Winters (level, trend and additive or multiplicative season) with given smoothing constants: the components, one-step fitted values and residuals, and forecasts with the prediction intervals of the additive-error state-space model.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/exponential_smoothing.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/exponential_smoothing.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The one-step fitted values, point forecasts and prediction intervals of simple, Holt and additive Holt-Winters smoothing equal the additive-error state-space model's with the same constants and initial states.",
+            "reference_kind": "reference_implementation",
+            "reference": "statsmodels 0.15.0, ETSModel(endog, error='add', trend, seasonal, initialization_method='known').smooth(params).get_prediction(...).summary_frame(alpha=0.1)",
+            "method": "compares a seeded random walk (simple), a noisy line (Holt) and a period-4 seasonal line (Holt-Winters), 30 to 32 values rounded to three places, every fitted value and six steps of forecasts",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/smoothing/forecast.rs::statsmodels_reference::additive_holt_winters_matches_ets_aaa"
+          },
+          {
+            "claim": "The h-step forecast variance follows the closed form of the class-1 exponential smoothing models.",
+            "reference_kind": "literature",
+            "reference": "Hyndman, Koehler, Ord & Snyder (2008), Forecasting with Exponential Smoothing: The State Space Approach, Springer, Table 6.1",
+            "method": "the same comparisons for simple and Holt smoothing (ETS(A,N,N), ETS(A,A,N))",
+            "tolerance": "1e-9 (relative)",
+            "test": "src/smoothing/forecast.rs::statsmodels_reference::holt_matches_ets_aan"
+          }
+        ],
+        "limits": [
+          "The smoothing constants are given, not estimated.",
+          "Multiplicative seasonality gives point forecasts only: its forecast variance has no closed form.",
+          "The initial states are the classical ones (first value; first two values; the first cycle's mean and two cycles' slope), not optimised."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
       "id": "sigma_to_ppm",
       "summary": "A sigma quality level as a defect rate in parts per million, by the Motorola convention with the 1.5-sigma shift: 10^6 (1 - Phi(sigma - 1.5)).",
       "input": {

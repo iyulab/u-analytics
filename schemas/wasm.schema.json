@@ -1117,6 +1117,36 @@
       ],
       "type": "object"
     },
+    "ForecastDto": {
+      "description": "A forecast `step` periods after the last observation.",
+      "properties": {
+        "mean": {
+          "format": "double",
+          "type": "number"
+        },
+        "prediction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IntervalDto"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`null` for multiplicative seasonality, which has no closed form."
+        },
+        "step": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "step",
+        "mean"
+      ],
+      "type": "object"
+    },
     "GChartDto": {
       "properties": {
         "g_bar": {
@@ -2720,6 +2750,185 @@
       ],
       "type": "object"
     },
+    "SmoothingComponentsDto": {
+      "description": "The smoothed components, one value per observation.",
+      "properties": {
+        "level": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "seasonal": {
+          "description": "`null` unless `holt_winters`; the first cycle's are the initial ones.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "trend": {
+          "description": "`null` for `simple`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "level"
+      ],
+      "type": "object"
+    },
+    "SmoothingDto": {
+      "description": "Exponential smoothing of a series and its forecasts.",
+      "properties": {
+        "components": {
+          "$ref": "#/$defs/SmoothingComponentsDto"
+        },
+        "fitted": {
+          "description": "One-step-ahead in-sample forecasts.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "forecasts": {
+          "items": {
+            "$ref": "#/$defs/ForecastDto"
+          },
+          "type": "array"
+        },
+        "level": {
+          "description": "Level of the prediction intervals.",
+          "format": "double",
+          "type": "number"
+        },
+        "residuals": {
+          "description": "`data[t] − fitted[t]`; `null` where `fitted` is the initialisation (the\nfirst value for `simple`, two for `holt`, the first cycle for\n`holt_winters`).",
+          "items": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "type": "array"
+        },
+        "sigma": {
+          "description": "Root mean squared one-step error over the non-null residuals.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "components",
+        "fitted",
+        "residuals",
+        "sigma",
+        "level",
+        "forecasts"
+      ],
+      "type": "object"
+    },
+    "SmoothingInputDto": {
+      "additionalProperties": false,
+      "properties": {
+        "alpha": {
+          "description": "Level smoothing constant, in (0, 1).",
+          "format": "double",
+          "type": "number"
+        },
+        "beta": {
+          "default": null,
+          "description": "Trend smoothing constant, in (0, 1): `holt` and `holt_winters` only.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "gamma": {
+          "default": null,
+          "description": "Seasonal smoothing constant, in (0, 1): `holt_winters` only.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "horizon": {
+          "description": "Steps to forecast past the last observation, 0 to 100 000. Omitted: 0.",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "level": {
+          "default": null,
+          "description": "Two-sided level of the prediction intervals, in (0, 1). Omitted: 0.95.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "method": {
+          "description": "`\"simple\"` (level), `\"holt\"` (level and trend) or `\"holt_winters\"`\n(level, trend and season).",
+          "enum": [
+            "simple",
+            "holt",
+            "holt_winters"
+          ],
+          "type": "string"
+        },
+        "period": {
+          "description": "Seasonal period, at least 2: `holt_winters` only.",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "seasonality": {
+          "anyOf": [
+            {
+              "enum": [
+                "additive",
+                "multiplicative"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`\"additive\"` (default) or `\"multiplicative\"`: `holt_winters` only."
+        }
+      },
+      "required": [
+        "data",
+        "method",
+        "alpha"
+      ],
+      "type": "object"
+    },
     "SpectralResidualDto": {
       "properties": {
         "anomalies": {
@@ -4040,6 +4249,22 @@
     },
     "ewma.output": {
       "$ref": "#/$defs/EwmaDto"
+    },
+    "exponential_smoothing.input": {
+      "additionalProperties": false,
+      "description": "The arguments of exponential_smoothing(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/SmoothingInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "exponential_smoothing.output": {
+      "$ref": "#/$defs/SmoothingDto"
     },
     "fisher_exact_test.input": {
       "additionalProperties": false,

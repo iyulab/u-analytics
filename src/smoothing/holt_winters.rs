@@ -33,6 +33,8 @@
 //! Winters, P.R. (1960). "Forecasting Sales by Exponentially Weighted
 //! Moving Averages", *Management Science* 6(3), pp. 324-342.
 
+use super::forecast::{one_step_mse, residuals, valid_level, with_intervals, SmoothingForecast};
+
 /// Seasonality type.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Seasonality {
@@ -49,32 +51,85 @@ pub struct HoltWintersResult {
     pub level: Vec<f64>,
     /// Trend estimates.
     pub trend: Vec<f64>,
-    /// Seasonal factors (length = data length + initial period).
+    /// Seasonal components, one per observation (the first cycle's are the
+    /// initial ones).
     pub seasonal: Vec<f64>,
-    /// Fitted values (one-step-ahead in-sample forecasts).
+    /// Fitted values (one-step-ahead in-sample forecasts); over the first
+    /// cycle they are the initialisation, which reproduces the data.
     pub fitted: Vec<f64>,
+    /// The level smoothing constant α.
+    pub alpha: f64,
+    /// The trend smoothing constant β.
+    pub beta: f64,
+    /// The seasonal smoothing constant γ.
+    pub gamma: f64,
+    /// The seasonal period m.
+    pub period: usize,
+    /// Additive or multiplicative.
+    pub seasonality: Seasonality,
 }
 
 impl HoltWintersResult {
-    /// Returns a forecast h steps ahead from the last observation.
-    ///
-    /// # Parameters
-    /// - `h`: steps ahead (1-indexed)
-    /// - `period`: seasonal period m
-    /// - `seasonality`: additive or multiplicative
-    pub fn forecast(&self, h: usize, period: usize, seasonality: Seasonality) -> f64 {
+    /// Returns a forecast h steps ahead (from 1) of the last observation.
+    pub fn forecast(&self, h: usize) -> f64 {
         let last_l = *self.level.last().expect("level must be non-empty");
         let last_t = *self.trend.last().expect("trend must be non-empty");
 
         // Seasonal factor: use the most recent completed cycle
         let s_len = self.seasonal.len();
-        let idx = s_len - period + ((h - 1) % period);
+        let idx = s_len - self.period + ((h - 1) % self.period);
         let s = self.seasonal[idx];
 
-        match seasonality {
+        match self.seasonality {
             Seasonality::Additive => last_l + h as f64 * last_t + s,
             Seasonality::Multiplicative => (last_l + h as f64 * last_t) * s,
         }
+    }
+
+    /// The index of the first one-step error the smoother learns from: the
+    /// first cycle is the initialisation.
+    pub fn first_error(&self) -> usize {
+        self.period
+    }
+
+    /// `data[t] − fitted[t]`, `None` over the first cycle.
+    pub fn residuals(&self, data: &[f64]) -> Vec<Option<f64>> {
+        residuals(data, &self.fitted, self.first_error())
+    }
+
+    /// Forecasts 1..=`horizon` steps ahead at two-sided `level`, with the
+    /// prediction interval of ETS(A,A,A) when the seasonality is additive and
+    /// none when it is multiplicative ([`super::forecast`]); `data` is the
+    /// series smoothed (for σ). `None` when `level` is not in (0, 1).
+    pub fn forecasts(
+        &self,
+        data: &[f64],
+        horizon: usize,
+        level: f64,
+    ) -> Option<Vec<SmoothingForecast>> {
+        if !valid_level(level) {
+            return None;
+        }
+        let (alpha, beta, gamma, m) = (self.alpha, self.beta, self.gamma, self.period);
+        let c = move |j: usize| {
+            alpha * (1.0 + j as f64 * beta)
+                + if j % m == 0 {
+                    gamma * (1.0 - alpha)
+                } else {
+                    0.0
+                }
+        };
+        let c: Option<&dyn Fn(usize) -> f64> = match self.seasonality {
+            Seasonality::Additive => Some(&c),
+            Seasonality::Multiplicative => None,
+        };
+        Some(with_intervals(
+            horizon,
+            level,
+            one_step_mse(data, &self.fitted, self.first_error()),
+            c,
+            |h| self.forecast(h),
+        ))
     }
 }
 
@@ -230,6 +285,11 @@ impl HoltWinters {
             trend,
             seasonal,
             fitted,
+            alpha: self.alpha,
+            beta: self.beta,
+            gamma: self.gamma,
+            period: m,
+            seasonality: self.seasonality,
         })
     }
 }
@@ -273,8 +333,8 @@ mod tests {
         let result = hw.smooth(&data).unwrap();
 
         // Forecast should continue the pattern
-        let f1 = result.forecast(1, 4, Seasonality::Additive);
-        let f4 = result.forecast(4, 4, Seasonality::Additive);
+        let f1 = result.forecast(1);
+        let f4 = result.forecast(4);
 
         // Both should be in reasonable range
         assert!(f1 > 100.0, "forecast(1) = {f1}");

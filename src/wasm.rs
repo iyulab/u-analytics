@@ -42,7 +42,7 @@ use crate::wire::{
     CapabilityInputDto, CorrelationInputDto, CusumInputDto, EwmaInputDto, GageRRInputDto,
     GoodnessOfFitInputDto, LimitsInputDto, MultiPeltInputDto, MultipleRegressionInputDto,
     PeltInputDto, PercentileCapabilityInputDto, PredictionErrorsInputDto, RegressionInputDto,
-    SeasonalityInputDto, SpectralResidualInputDto, StlInputDto, WireError,
+    SeasonalityInputDto, SmoothingInputDto, SpectralResidualInputDto, StlInputDto, WireError,
 };
 
 // ---------------------------------------------------------------------------
@@ -818,6 +818,36 @@ pub fn multiple_regression(
     to_js(&crate::wire::multiple_regression_dto(input).map_err(js_err)?)
 }
 
+/// Exponential smoothing of `data` and its forecasts.
+///
+/// # Input JSON
+///
+/// `{ data, method, alpha, beta?, gamma?, period?, seasonality?, horizon?, level? }`.
+/// `method` is `"simple"` (level; at least 2 values), `"holt"` (level and
+/// trend, needs `beta`; at least 3) or `"holt_winters"` (level, trend and
+/// season, needs `beta`, `gamma` and `period` >= 2; at least two cycles,
+/// `seasonality` `"additive"` (default) or `"multiplicative"`, which needs
+/// positive data). The constants are in (0, 1); a constant the method does not
+/// read, or one it needs and lacks, is `invalid_option`. `horizon` steps are
+/// forecast (default 0); `level` is the intervals' (default 0.95).
+///
+/// # Output JSON
+///
+/// `{ components: { level, trend, seasonal }, fitted, residuals, sigma, level,
+/// forecasts: [{ step, mean, prediction: { lower, upper } | null }] }`.
+/// `residuals` are `null` where `fitted` is the initialisation; `sigma` is the
+/// root mean squared one-step error. The prediction intervals are those of
+/// the additive-error state-space model (ETS(A,N,N), (A,A,N), (A,A,A) --
+/// Hyndman et al. 2008); multiplicative seasonality has no closed form, so its
+/// forecasts carry `null`.
+#[wasm_bindgen(unchecked_return_type = "SmoothingDto")]
+pub fn exponential_smoothing(
+    #[wasm_bindgen(unchecked_param_type = "SmoothingInputDto")] input: JsValue,
+) -> Result<JsValue, JsValue> {
+    let input: SmoothingInputDto = from_js(input, "input")?;
+    to_js(&crate::wire::exponential_smoothing_dto(input).map_err(js_err)?)
+}
+
 /// Error measures of `predicted` against `observed` (errors are observed −
 /// predicted).
 ///
@@ -832,6 +862,7 @@ pub fn multiple_regression(
 /// `{ n, mean_error, mean_absolute_error, rmse, cv_rmse, nmbe, parameters }`:
 /// `cv_rmse` = rmse / mean(observed), `nmbe` = Σ errors / ((n − p) ·
 /// mean(observed)) -- fractions, `null` when the mean of `observed` is 0.
+
 #[wasm_bindgen(unchecked_return_type = "PredictionErrorsDto")]
 pub fn prediction_errors(
     #[wasm_bindgen(unchecked_param_type = "PredictionErrorsInputDto")] input: JsValue,
@@ -3411,6 +3442,11 @@ mod engine_card_tests {
             "multiple_regression",
             vec![arg("input", s.of::<MultipleRegressionInputDto>())],
             s.of::<crate::wire::MultipleRegressionDto>(),
+        );
+        s.op(
+            "exponential_smoothing",
+            vec![arg("input", s.of::<SmoothingInputDto>())],
+            s.of::<crate::wire::SmoothingDto>(),
         );
         s.op(
             "prediction_errors",

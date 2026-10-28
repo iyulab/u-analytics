@@ -533,6 +533,51 @@ public sealed record StlResult(
 
 // ── Correlation, regression, distributions ──
 
+/// <summary>Exponential smoothing method.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<SmoothingMethod>))]
+public enum SmoothingMethod
+{
+    /// <summary>Level only (simple exponential smoothing).</summary>
+    [JsonStringEnumMemberName("simple")] Simple,
+    /// <summary>Level and trend (Holt's linear method).</summary>
+    [JsonStringEnumMemberName("holt")] Holt,
+    /// <summary>Level, trend and season (Holt-Winters).</summary>
+    [JsonStringEnumMemberName("holt_winters")] HoltWinters,
+}
+
+/// <summary>How a Holt-Winters season combines with level and trend.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<Seasonality>))]
+public enum Seasonality
+{
+    /// <summary>Added to level and trend.</summary>
+    [JsonStringEnumMemberName("additive")] Additive,
+    /// <summary>Multiplies level and trend (positive data).</summary>
+    [JsonStringEnumMemberName("multiplicative")] Multiplicative,
+}
+
+/// <summary>
+/// Smoothed components, one value per observation; <see cref="Trend"/> is <c>null</c> for
+/// <see cref="SmoothingMethod.Simple"/>, <see cref="Seasonal"/> unless
+/// <see cref="SmoothingMethod.HoltWinters"/>.
+/// </summary>
+public sealed record SmoothingComponents(
+    IReadOnlyList<double> Level, IReadOnlyList<double>? Trend, IReadOnlyList<double>? Seasonal);
+
+/// <summary>
+/// A forecast <see cref="Step"/> periods after the last observation, with its prediction
+/// interval — <c>null</c> for multiplicative seasonality, which has no closed form.
+/// </summary>
+public sealed record SmoothingForecast(int Step, double Mean, ConfidenceInterval? Prediction);
+
+/// <summary>
+/// Exponential smoothing: the components, one-step fitted values and residuals (<c>null</c>
+/// where the fitted value is the initialisation), <see cref="Sigma"/> the root mean squared
+/// one-step error, and the forecasts with prediction intervals at <see cref="Level"/>.
+/// </summary>
+public sealed record ExponentialSmoothingResult(
+    SmoothingComponents Components, IReadOnlyList<double> Fitted, IReadOnlyList<double?> Residuals,
+    double Sigma, double Level, IReadOnlyList<SmoothingForecast> Forecasts);
+
 /// <summary>Correlation coefficient.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<CorrelationMethod>))]
 public enum CorrelationMethod

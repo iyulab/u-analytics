@@ -660,6 +660,21 @@ fn entry_points() -> Vec<(&'static str, Entry, Value)> {
             }),
         ),
         ep(
+            "uanalytics_exponential_smoothing",
+            uanalytics_exponential_smoothing,
+            json!({
+                "data": (0..32).map(|i| 10.0 + f64::from(i % 4)).collect::<Vec<f64>>(),
+                "method": "holt_winters",
+                "alpha": 0.3,
+                "beta": 0.1,
+                "gamma": 0.2,
+                "period": 4,
+                "seasonality": "multiplicative",
+                "horizon": 4,
+                "level": 0.9
+            }),
+        ),
+        ep(
             "uanalytics_prediction_errors",
             uanalytics_prediction_errors,
             json!({ "observed": [10, 12, 11], "predicted": [10.5, 11.5, 11], "parameters": 1 }),

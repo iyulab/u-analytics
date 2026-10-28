@@ -19,7 +19,7 @@ hypothesis testing for industrial quality engineering.
 | `point_process` | Event-time trend of one unit (a repairable system's failures, a service's incidents): Laplace and MIL-HDBK-189 tests against a constant rate, power-law process (Crow-AMSAA) fit |
 | `counter` | Increments of a cumulative counter (a meter's register, an hour meter, a production or byte counter), each classified — normal, declared reset or replacement, wrap through a known modulus, or unexplained — and summed over intervals |
 | `detection` | Change-point detection (CUSUM, EWMA, PELT) and one-shot anomaly scoring by spectral residual saliency (Ren et al. 2019) |
-| `smoothing` | Time series smoothing (SES, Holt linear trend, Holt-Winters seasonal) |
+| `smoothing` | Time series smoothing (SES, Holt linear trend, Holt-Winters seasonal) and forecasts, with the prediction intervals of the additive-error state-space models |
 | `seasonality` | Periodogram (zero-padded FFT) and dominant-period estimation — AutoPeriod: permutation-thresholded peaks refined on the ACF |
 | `decomposition` | Seasonal-trend decomposition by Loess (STL, Cleveland et al. 1990) into trend, seasonal and remainder, with robust outlier weights and the strengths of trend and seasonality |
 | `correlation` | Correlation analysis (Pearson, Spearman, Kendall, partial, correlation matrices) |
@@ -835,6 +835,26 @@ multiple_regression(input: {
 // A constant predictor (index i) or one the others determine exactly -> degenerate_data.
 // Intervals use Student's t on the residual degrees of freedom: the mean's is
 // fit ± t·se_fit, a new observation's fit ± t·sqrt(residual_se² + se_fit²).
+// Exponential smoothing with given constants (each in (0, 1)) and its forecasts.
+exponential_smoothing(input: {
+  data: number[],
+  method: "simple" | "holt" | "holt_winters",  // level; + trend; + season
+  alpha: number,
+  beta?: number | null,      // holt, holt_winters (required there, refused elsewhere: invalid_option)
+  gamma?: number | null,     // holt_winters
+  period?: number | null,    // holt_winters, >= 2; data >= 2 * period (simple >= 2, holt >= 3)
+  seasonality?: "additive" | "multiplicative" | null,  // holt_winters; multiplicative needs data > 0
+  horizon?: number | null,   // steps to forecast, 0..100000, default 0
+  level?: number | null,     // of the prediction intervals, default 0.95
+}): { components: { level: number[], trend: number[] | null, seasonal: number[] | null },
+      fitted: number[],                    // one-step-ahead
+      residuals: (number | null)[],        // null where fitted is the initialisation
+      sigma: number,                       // RMS one-step error
+      level: number,
+      forecasts: { step, mean, prediction: { lower, upper } | null }[] }
+// The intervals are the additive-error state-space model's (ETS(A,N,N), (A,A,N),
+// (A,A,A); Hyndman et al. 2008) -- statsmodels' ETSModel with the same initial
+// states. Multiplicative seasonality has no closed form: prediction is null.
 prediction_errors(input: { observed: number[], predicted: number[],  // one length
                            parameters?: number | null }):           // p, 0..n-1, default 0
   { n, mean_error, mean_absolute_error,    // over n; errors are observed - predicted
@@ -1123,6 +1143,7 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_simple_regression` | `simple_regression(x, y, { predict?, level? })` | `{ x, y, predict?, level? }` |
 | `uanalytics_multiple_regression` | `multiple_regression(input)` | `input` as is |
 | `uanalytics_prediction_errors` | `prediction_errors(input)` | `input` as is |
+| `uanalytics_exponential_smoothing` | `exponential_smoothing(input)` | `input` as is |
 | `uanalytics_fit_best` | `fit_best(data)` | `{ data: [...] }` |
 | `uanalytics_goodness_of_fit` | `goodness_of_fit(input)` | `input` as is |
 | `uanalytics_estimate_period` | `estimate_period(input)` | `input` as is |

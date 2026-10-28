@@ -18,9 +18,12 @@
 //! - Winters, P.R. (1960). "Forecasting Sales by Exponentially Weighted
 //!   Moving Averages", *Management Science* 6(3), pp. 324-342.
 
+mod forecast;
 mod holt;
 mod holt_winters;
 mod ses;
+
+pub use forecast::SmoothingForecast;
 
 pub use holt::{HoltLinear, HoltResult};
 pub use holt_winters::{HoltWinters, HoltWintersResult, Seasonality};

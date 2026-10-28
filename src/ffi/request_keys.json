@@ -171,6 +171,30 @@
         "target": {}
       }
     },
+    "uanalytics_exponential_smoothing": {
+      "properties": {
+        "alpha": {},
+        "beta": {},
+        "data": {},
+        "gamma": {},
+        "horizon": {},
+        "level": {},
+        "method": {
+          "enum": [
+            "simple",
+            "holt",
+            "holt_winters"
+          ]
+        },
+        "period": {},
+        "seasonality": {
+          "enum": [
+            "additive",
+            "multiplicative"
+          ]
+        }
+      }
+    },
     "uanalytics_fisher_exact_test": {
       "properties": {
         "table": {}
