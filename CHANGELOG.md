@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-28
+
+Depends on u-numflow 0.15. The .NET client is `UAnalytics` 0.24.1 (this engine; no C ABI change).
+
 ### Added
 
 - The domain of each count option of the time-series statistics, for the
