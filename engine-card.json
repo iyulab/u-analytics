@@ -4,7 +4,7 @@
   "engine": {
     "id": "u-analytics",
     "summary": "Statistical process control and quality analytics: variables and attributes control charts with run tests, CUSUM and EWMA, process capability (normal, percentile and Box-Cox), gage R&R, hypothesis tests, correlation and regression, distribution fitting, Weibull reliability, event-time trend tests, changepoint detection, counter increments and time-series period and anomaly scoring.",
-    "version": "0.30.0",
+    "version": "0.31.0",
     "license": "MIT",
     "repository": "https://github.com/iyulab/u-analytics"
   },
@@ -12,15 +12,15 @@
     {
       "kind": "crate",
       "name": "u-analytics",
-      "package_version": "0.30.0",
-      "engine_version": "0.30.0",
+      "package_version": "0.31.0",
+      "engine_version": "0.31.0",
       "error_shape": "Err(...) of the module's error type, or None where a statistic is undefined for the data."
     },
     {
       "kind": "npm",
       "name": "@iyulab/u-analytics",
-      "package_version": "0.30.0",
-      "engine_version": "0.30.0",
+      "package_version": "0.31.0",
+      "engine_version": "0.31.0",
       "wasm": true,
       "note": "Native JS values in and out, typed in the .d.ts; an absent value in a result is null. Bundler and Node targets; no bundler-less browser build.",
       "error_shape": "A thrown Error whose code property is the code, with the fields (parameter, index, min, max, exclusive_min, got, expected, ...) as its other properties."
@@ -28,8 +28,8 @@
     {
       "kind": "nuget",
       "name": "UAnalytics",
-      "package_version": "0.24.1",
-      "engine_version": "0.30.0",
+      "package_version": "0.25.0",
+      "engine_version": "0.31.0",
       "note": "C ABI wrapper over the same wire layer; versioned on its own axis.",
       "error_shape": "An AnalyticsException whose ErrorCode is the code, Parameter and Index the fields of those names, and Details the rest."
     }

@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-29
+
+Depends on u-numflow 0.16. The .NET client is `UAnalytics` 0.25.0.
+
 ### Added
 
 - `regression::predict_simple_intervals` and `regression::predict_multiple_intervals`: at new
