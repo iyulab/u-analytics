@@ -14,6 +14,7 @@
 //! ```
 
 use crate::error::{check_option, check_series, TimeSeriesError};
+use std::ops::RangeInclusive;
 use u_numflow::special;
 use u_numflow::stats;
 
@@ -1866,6 +1867,18 @@ pub struct KpssResult {
 /// Significance levels of [`KpssResult::critical_values`], in order.
 pub const KPSS_LEVELS: [f64; 4] = [0.10, 0.05, 0.025, 0.01];
 
+/// The values [`kpss_test`] takes for a fixed truncation lag on `data`:
+/// `0..=n − 1`.
+///
+/// # Errors
+///
+/// The series' own refusals, as [`kpss_test`] gives them: a non-finite value
+/// or fewer than [`KPSS_MIN_OBSERVATIONS`] values.
+pub fn kpss_lags_domain(data: &[f64]) -> Result<RangeInclusive<usize>, TimeSeriesError> {
+    check_series(data, KPSS_MIN_OBSERVATIONS)?;
+    Ok(0..=data.len() - 1)
+}
+
 /// The fewest values [`kpss_test`] takes.
 pub const KPSS_MIN_OBSERVATIONS: usize = 10;
 
@@ -1918,10 +1931,10 @@ pub fn kpss_test(
     model: KpssModel,
     lags: KpssLags,
 ) -> Result<KpssResult, TimeSeriesError> {
-    check_series(data, KPSS_MIN_OBSERVATIONS)?;
+    let domain = kpss_lags_domain(data)?;
     let n = data.len();
     if let KpssLags::Fixed(l) = lags {
-        check_option("lags", l, 0, n - 1)?;
+        check_option("lags", l, &domain)?;
     }
     let nf = n as f64;
 
@@ -2263,7 +2276,7 @@ pub enum AdfModel {
 /// [`TimeSeriesError`]: a non-finite value, fewer than 10 values, a lag
 /// count (`lags`, or the AIC search's `max_lags`) outside `[0, max]` where
 /// `max` leaves the regression at least 5 rows and a residual degree of
-/// freedom ([`adf_max_lags`]), or a degenerate regression.
+/// freedom ([`adf_lags_domain`]), or a degenerate regression.
 ///
 /// # Examples
 ///
@@ -2285,15 +2298,14 @@ pub fn adf_test(
     model: AdfModel,
     lags: AdfLags,
 ) -> Result<AdfResult, TimeSeriesError> {
-    check_series(data, ADF_MIN_OBSERVATIONS)?;
+    let domain = adf_lags_domain(data, model)?;
     let n = data.len();
-    let max = adf_max_lags(n, model);
     match lags {
         AdfLags::Fixed(p) => {
-            check_option("lags", p, 0, max)?;
+            check_option("lags", p, &domain)?;
         }
         AdfLags::Aic { max: Some(m) } => {
-            check_option("max_lags", m, 0, max)?;
+            check_option("max_lags", m, &domain)?;
         }
         AdfLags::Aic { max: None } => {}
     }
@@ -2321,18 +2333,38 @@ pub const ADF_MIN_OBSERVATIONS: usize = 10;
 /// The fewest rows the ADF test regression is fitted on.
 const ADF_MIN_REGRESSION_ROWS: usize = 5;
 
-/// The largest number of lagged differences [`adf_test`] accepts for `n`
-/// values (at least [`ADF_MIN_OBSERVATIONS`]) under `model`: with p lags the
-/// regression keeps n − 1 − p rows (one value is lost to differencing, p to
-/// the lags) and has the lagged level, the model's deterministic terms and p
-/// lag columns; it needs at least 5 rows and a residual degree of freedom.
-pub fn adf_max_lags(n: usize, model: AdfModel) -> usize {
+/// The numbers of lagged differences [`adf_test`] takes on `data` under
+/// `model` -- for a fixed count (`lags`) and for the bound of the AIC search
+/// (`max_lags`) alike: `0..=p`, where with p lags the regression keeps
+/// n − 1 − p rows (one value is lost to differencing, p to the lags) and has
+/// the lagged level, the model's deterministic terms and p lag columns; it
+/// needs at least 5 rows and a residual degree of freedom.
+///
+/// # Errors
+///
+/// The series' own refusals, as [`adf_test`] gives them: a non-finite value
+/// or fewer than [`ADF_MIN_OBSERVATIONS`] values.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::testing::{adf_lags_domain, AdfModel};
+///
+/// let data: Vec<f64> = (0..20).map(|i| (i as f64).sin()).collect();
+/// assert_eq!(adf_lags_domain(&data, AdfModel::Constant).unwrap(), 0..=8);
+/// ```
+pub fn adf_lags_domain(
+    data: &[f64],
+    model: AdfModel,
+) -> Result<RangeInclusive<usize>, TimeSeriesError> {
+    check_series(data, ADF_MIN_OBSERVATIONS)?;
+    let n = data.len();
     let fixed_columns = match model {
         AdfModel::None => 1,
         AdfModel::Constant => 2,
         AdfModel::ConstantTrend => 3,
     };
-    (n.saturating_sub(1 + ADF_MIN_REGRESSION_ROWS)).min(n.saturating_sub(2 + fixed_columns) / 2)
+    Ok(0..=(n - 1 - ADF_MIN_REGRESSION_ROWS).min((n - 2 - fixed_columns) / 2))
 }
 
 /// The lag count in `0..=p_max` with the smallest AIC. Every candidate is
@@ -3962,8 +3994,16 @@ mod tests {
             TimeSeriesError::ValueNotFinite { index: 5 }
         );
         // 20 values under a constant: room for 0 to min(14, 8) lags.
-        assert_eq!(adf_max_lags(20, AdfModel::Constant), 8);
         let walk: Vec<f64> = (0..20).map(|i| ((i * 37) % 11) as f64).collect();
+        assert_eq!(adf_lags_domain(&walk, AdfModel::Constant).unwrap(), 0..=8);
+        assert_eq!(
+            adf_lags_domain(&walk, AdfModel::ConstantTrend).unwrap(),
+            0..=7
+        );
+        assert_eq!(
+            adf_lags_domain(&walk[..9], AdfModel::Constant).unwrap_err(),
+            TimeSeriesError::TooFewObservations { needed: 10, got: 9 }
+        );
         for lags in [AdfLags::Fixed(9), AdfLags::Aic { max: Some(9) }] {
             let option = if matches!(lags, AdfLags::Fixed(_)) {
                 "lags"

@@ -1795,10 +1795,9 @@ pub(crate) mod hypothesis {
         let model = super::named("model", &input.model, &ADF_MODELS)?;
         let data = input.data;
         let run = |lags| adf_test(&data, model, lags);
-        let max_lags = super::series_count("max_lags", input.max_lags, |m| {
-            run(AdfLags::Aic { max: Some(m) })
-        })?;
-        let lags = super::series_count("lags", input.lags, |p| run(AdfLags::Fixed(p)))?;
+        let domain = || crate::testing::adf_lags_domain(&data, model);
+        let max_lags = super::series_count("max_lags", input.max_lags, domain)?;
+        let lags = super::series_count("lags", input.lags, domain)?;
         let lags = match (max_lags, lags) {
             (Some(_), Some(_)) => {
                 return Err(WireError::new(
@@ -1920,8 +1919,8 @@ pub(crate) mod hypothesis {
             .transpose()?;
         let data = input.data;
         let run = |lags| crate::testing::kpss_test(&data, model, lags);
-        let fixed = super::series_count("lags", input.lags, |l| {
-            run(crate::testing::KpssLags::Fixed(l))
+        let fixed = super::series_count("lags", input.lags, || {
+            crate::testing::kpss_lags_domain(&data)
         })?;
         let lags = match (rule, fixed) {
             (Some(_), Some(_)) => {
@@ -3792,8 +3791,8 @@ pub(crate) struct PacfDto {
 
 pub(crate) fn acf_dto(input: AutocorrelationInputDto) -> Result<AcfDto, WireError> {
     let data = input.data;
-    let lag = series_count("max_lag", input.max_lag, |k| {
-        crate::correlation::acf(&data, Some(k))
+    let lag = series_count("max_lag", input.max_lag, || {
+        crate::correlation::acf_max_lag_domain(&data)
     })?;
     let r = crate::correlation::acf(&data, lag)?;
     Ok(AcfDto {
@@ -3805,8 +3804,8 @@ pub(crate) fn acf_dto(input: AutocorrelationInputDto) -> Result<AcfDto, WireErro
 
 pub(crate) fn pacf_dto(input: AutocorrelationInputDto) -> Result<PacfDto, WireError> {
     let data = input.data;
-    let lag = series_count("max_lag", input.max_lag, |k| {
-        crate::correlation::pacf(&data, Some(k))
+    let lag = series_count("max_lag", input.max_lag, || {
+        crate::correlation::pacf_max_lag_domain(&data)
     })?;
     let r = crate::correlation::pacf(&data, lag)?;
     Ok(PacfDto {
@@ -3815,47 +3814,28 @@ pub(crate) fn pacf_dto(input: AutocorrelationInputDto) -> Result<PacfDto, WireEr
     })
 }
 
-/// A count option of a time-series statistic, whose domain the statistic
-/// states and which depends on the data.
+/// A count option of a time-series statistic, judged against the domain the
+/// statistic states for the data (`domain` -- the data's own refusal, if it
+/// has one, or the option's values).
 ///
 /// The value is read as sent -- negative, or past what a count holds -- so it
-/// is judged here, against the domain the statistic itself reports: asked
-/// with a value it refuses (`usize::MAX`), it answers with the data's
-/// refusal, if the data has one, or the option's domain. Judging the option
-/// before the statistic runs keeps the data's refusals ahead of the
-/// option's, and the option's ahead of a combination of options the
-/// transport refuses (`lags` with `max_lags`).
-pub(crate) fn series_count<T>(
+/// is judged here rather than by the statistic. Judging it before the
+/// statistic runs keeps the data's refusals ahead of the option's, and the
+/// option's ahead of a combination of options the transport refuses (`lags`
+/// with `max_lags`).
+pub(crate) fn series_count(
     option: &'static str,
     value: Option<Whole>,
-    probe: impl FnOnce(usize) -> Result<T, crate::error::TimeSeriesError>,
+    domain: impl FnOnce() -> Result<std::ops::RangeInclusive<usize>, crate::error::TimeSeriesError>,
 ) -> Result<Option<usize>, WireError> {
-    use crate::error::TimeSeriesError as E;
     let Some(Whole(v)) = value else {
         return Ok(None);
     };
-    match probe(usize::MAX) {
-        Err(E::OptionOutOfRange {
-            option: o,
-            min,
-            max,
-            ..
-        }) if o == option => {
-            if (min..=max).contains(&v) {
-                Ok(Some(Whole(v).count()))
-            } else {
-                Err(E::OptionOutOfRange {
-                    option,
-                    got: v,
-                    min,
-                    max,
-                }
-                .into())
-            }
-        }
-        Err(other) => Err(other.into()),
-        // No count is refused by no domain: the value stands.
-        Ok(_) => Ok(Some(Whole(v).count())),
+    let domain = domain()?;
+    if (*domain.start() as f64..=*domain.end() as f64).contains(&v) {
+        Ok(Some(Whole(v).count()))
+    } else {
+        Err(crate::error::TimeSeriesError::out_of(option, v, &domain).into())
     }
 }
 

@@ -1,5 +1,7 @@
 //! Refusals shared by the functions of more than one module.
 
+use std::ops::RangeInclusive;
+
 /// Why a time-series statistic was refused: [`crate::correlation::acf`],
 /// [`crate::correlation::pacf`], [`crate::testing::adf_test`] and
 /// [`crate::testing::kpss_test`].
@@ -89,21 +91,29 @@ pub(crate) fn check_series(data: &[f64], needed: usize) -> Result<(), TimeSeries
     Ok(())
 }
 
-/// Refuses a count option outside `[min, max]`.
+/// Refuses a count option outside `domain`.
 pub(crate) fn check_option(
     option: &'static str,
     value: usize,
-    min: usize,
-    max: usize,
+    domain: &RangeInclusive<usize>,
 ) -> Result<usize, TimeSeriesError> {
-    if (min..=max).contains(&value) {
+    if domain.contains(&value) {
         Ok(value)
     } else {
-        Err(TimeSeriesError::OptionOutOfRange {
+        Err(TimeSeriesError::out_of(option, value as f64, domain))
+    }
+}
+
+impl TimeSeriesError {
+    /// `option` set to `got`, outside `domain` -- the refusal a caller that
+    /// reads the option itself (negative, or past what a count holds) gives
+    /// against a domain such as [`crate::correlation::acf_max_lag_domain`].
+    pub fn out_of(option: &'static str, got: f64, domain: &RangeInclusive<usize>) -> Self {
+        TimeSeriesError::OptionOutOfRange {
             option,
-            got: value as f64,
-            min: min as f64,
-            max: max as f64,
-        })
+            got,
+            min: *domain.start() as f64,
+            max: *domain.end() as f64,
+        }
     }
 }

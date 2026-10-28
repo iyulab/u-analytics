@@ -23,6 +23,7 @@
 //! ```
 
 use crate::error::{check_option, check_series, TimeSeriesError};
+use std::ops::RangeInclusive;
 use u_numflow::matrix::Matrix;
 use u_numflow::special;
 use u_numflow::stats;
@@ -615,13 +616,47 @@ pub const ACF_MIN_OBSERVATIONS: usize = 2;
 pub const PACF_MIN_OBSERVATIONS: usize = 4;
 
 /// The largest lag of an autocorrelation request: `max_lag` within
-/// `[1, highest]`, or, when it is `None`, `min(⌊10·log₁₀ n⌋, highest)`
+/// `domain`, or, when it is `None`, `min(⌊10·log₁₀ n⌋, highest)`
 /// (statsmodels' default), never below 1.
-fn lag_range(max_lag: Option<usize>, n: usize, highest: usize) -> Result<usize, TimeSeriesError> {
+fn lag_choice(
+    max_lag: Option<usize>,
+    n: usize,
+    domain: RangeInclusive<usize>,
+) -> Result<usize, TimeSeriesError> {
     match max_lag {
-        None => Ok((((n as f64).log10() * 10.0).floor() as usize).clamp(1, highest)),
-        Some(k) => check_option("max_lag", k, 1, highest),
+        None => Ok((((n as f64).log10() * 10.0).floor() as usize).clamp(1, *domain.end())),
+        Some(k) => check_option("max_lag", k, &domain),
     }
+}
+
+/// The values [`acf`] takes for `max_lag` on `data`: `1..=n − 1`.
+///
+/// # Errors
+///
+/// The series' own refusals, as [`acf`] gives them: a non-finite value or
+/// fewer than 2 values.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::correlation::acf_max_lag_domain;
+///
+/// assert_eq!(acf_max_lag_domain(&[1.0, 2.0, 4.0, 3.0]).unwrap(), 1..=3);
+/// ```
+pub fn acf_max_lag_domain(data: &[f64]) -> Result<RangeInclusive<usize>, TimeSeriesError> {
+    check_series(data, ACF_MIN_OBSERVATIONS)?;
+    Ok(1..=data.len() - 1)
+}
+
+/// The values [`pacf`] takes for `max_lag` on `data`: `1..=n / 2 − 1`.
+///
+/// # Errors
+///
+/// The series' own refusals, as [`pacf`] gives them: a non-finite value or
+/// fewer than 4 values.
+pub fn pacf_max_lag_domain(data: &[f64]) -> Result<RangeInclusive<usize>, TimeSeriesError> {
+    check_series(data, PACF_MIN_OBSERVATIONS)?;
+    Ok(1..=data.len() / 2 - 1)
 }
 
 /// Compute the sample autocorrelation function (ACF).
@@ -655,9 +690,9 @@ fn lag_range(max_lag: Option<usize>, n: usize, highest: usize) -> Result<usize, 
 /// assert!(r.acf.len() == 6); // lags 0..=5
 /// ```
 pub fn acf(data: &[f64], max_lag: Option<usize>) -> Result<AcfResult, TimeSeriesError> {
-    check_series(data, ACF_MIN_OBSERVATIONS)?;
+    let domain = acf_max_lag_domain(data)?;
     let n = data.len();
-    let max_lag = lag_range(max_lag, n, n - 1)?;
+    let max_lag = lag_choice(max_lag, n, domain)?;
     let nf = n as f64;
 
     let mean = data.iter().sum::<f64>() / nf;
@@ -738,9 +773,9 @@ pub fn acf(data: &[f64], max_lag: Option<usize>) -> Result<AcfResult, TimeSeries
 /// // Lag 1 PACF equals lag 1 ACF
 /// ```
 pub fn pacf(data: &[f64], max_lag: Option<usize>) -> Result<PacfResult, TimeSeriesError> {
-    check_series(data, PACF_MIN_OBSERVATIONS)?;
+    let domain = pacf_max_lag_domain(data)?;
     let n = data.len();
-    let max_lag = lag_range(max_lag, n, n / 2 - 1)?;
+    let max_lag = lag_choice(max_lag, n, domain)?;
 
     // The autocorrelations it recurses on (which refuse a series that does
     // not vary).

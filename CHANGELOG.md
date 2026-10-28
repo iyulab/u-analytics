@@ -8,6 +8,24 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- The domain of each count option of the time-series statistics, for the
+  data at hand: `correlation::acf_max_lag_domain(data)` and
+  `pacf_max_lag_domain(data)`, `testing::adf_lags_domain(data, model)` (for
+  `lags` and `max_lags` alike) and `testing::kpss_lags_domain(data)` --
+  `Result<RangeInclusive<usize>, TimeSeriesError>`, refusing the data as the
+  statistic itself would. A caller that reads an option before the
+  statistic runs can judge it against the same range the statistic applies.
+- `TimeSeriesError::out_of(option, got, domain)` -- the refusal of an option
+  outside such a domain.
+
+### Changed
+
+- **Breaking (Rust API):** `testing::adf_max_lags(n, model)` is replaced by
+  `testing::adf_lags_domain(data, model)`; the largest count is
+  `*adf_lags_domain(data, model)?.end()`.
+
 ## [0.29.0] - 2026-10-28
 
 Depends on u-numflow 0.15. The .NET client is `UAnalytics` 0.24.0.
