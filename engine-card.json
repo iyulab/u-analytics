@@ -2952,7 +2952,7 @@
     },
     {
       "id": "exponential_smoothing",
-      "summary": "Exponential smoothing of a series -- simple (level), Holt (level and trend) or Holt-Winters (level, trend and additive or multiplicative season) with given smoothing constants: the components, one-step fitted values and residuals, and forecasts with the prediction intervals of the additive-error state-space model.",
+      "summary": "Exponential smoothing of a series -- simple (level), Holt (level and trend) or Holt-Winters (level, trend and additive or multiplicative season), each smoothing constant given or estimated by least squares of the one-step errors: the constants, the components, one-step fitted values and residuals, and forecasts with the prediction intervals of the additive-error state-space model.",
       "input": {
         "schema": "schemas/wasm.schema.json#/$defs/exponential_smoothing.input",
         "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
@@ -2996,10 +2996,18 @@
             "method": "the same comparisons for simple and Holt smoothing (ETS(A,N,N), ETS(A,A,N))",
             "tolerance": "1e-9 (relative)",
             "test": "src/smoothing/forecast.rs::statsmodels_reference::holt_matches_ets_aan"
+          },
+          {
+            "claim": "The least-squares constants reach the reference's sum of squared one-step errors, with constants within 1e-3 of its, and at the reference's constants the objective is the reference's.",
+            "reference_kind": "reference_implementation",
+            "reference": "statsmodels 0.15.0: ExponentialSmoothing(..., initialization_method='known').fit() for simple and Holt; ETSModel(..., error='add', initialization_method='known').fit() for additive Holt-Winters (state-space constants converted)",
+            "method": "seeded series of 40 to 60 values rounded to three places: a noisy level, a noisy line, a period-6 seasonal line",
+            "tolerance": "objective 1e-9 (relative) at the reference's constants; ours at most 1e-6 above; constants 1e-3",
+            "test": "src/smoothing/estimate.rs::statsmodels_reference::holt_winters_least_squares_matches_statsmodels"
           }
         ],
         "limits": [
-          "The smoothing constants are given, not estimated.",
+          "Estimation is local (a 5-point grid per constant, then Nelder-Mead); a sum of squares with several minima may end at one that is not the least.",
           "Multiplicative seasonality gives point forecasts only: its forecast variance has no closed form.",
           "The initial states are the classical ones (first value; first two values; the first cycle's mean and two cycles' slope), not optimised."
         ]

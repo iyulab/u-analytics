@@ -42,7 +42,7 @@ impl SesResult {
     }
 
     /// Forecasts 1..=`horizon` steps ahead with the prediction interval of
-    /// ETS(A,N,N) at two-sided `level` ([`super::forecast`]); `data` is the
+    /// ETS(A,N,N) at two-sided `level` ([module documentation](super#prediction-intervals)); `data` is the
     /// series smoothed (for σ). `None` when `level` is not in (0, 1).
     pub fn forecasts(
         &self,
@@ -82,6 +82,31 @@ impl SimpleExponentialSmoothing {
             return None;
         }
         Some(Self { alpha })
+    }
+
+    /// The smoother whose α minimises the sum of squared one-step errors on
+    /// `data` (from [`SesResult::FIRST_ERROR`]; [module documentation](super#estimating-the-constants)).
+    ///
+    /// Returns `None` with fewer than 2 values or a non-finite one.
+    ///
+    /// ```
+    /// use u_analytics::smoothing::SimpleExponentialSmoothing;
+    ///
+    /// let data = [10.0, 12.0, 11.0, 13.0, 12.5, 13.5, 13.0, 14.0];
+    /// let ses = SimpleExponentialSmoothing::fit(&data).unwrap();
+    /// assert!(ses.alpha() > 0.0 && ses.alpha() < 1.0);
+    /// ```
+    pub fn fit(data: &[f64]) -> Option<Self> {
+        if data.len() < 2 || data.iter().any(|v| !v.is_finite()) {
+            return None;
+        }
+        let c = super::estimate::least_squares(&[None], |c| {
+            let r = Self { alpha: c[0] }
+                .smooth(data)
+                .expect("data is not empty");
+            super::estimate::one_step_sse(data, &r.fitted, SesResult::FIRST_ERROR)
+        });
+        Self::new(c[0])
     }
 
     /// Returns the smoothing constant α.

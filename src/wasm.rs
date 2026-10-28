@@ -822,19 +822,23 @@ pub fn multiple_regression(
 ///
 /// # Input JSON
 ///
-/// `{ data, method, alpha, beta?, gamma?, period?, seasonality?, horizon?, level? }`.
-/// `method` is `"simple"` (level; at least 2 values), `"holt"` (level and
-/// trend, needs `beta`; at least 3) or `"holt_winters"` (level, trend and
-/// season, needs `beta`, `gamma` and `period` >= 2; at least two cycles,
+/// `{ data, method, alpha?, beta?, gamma?, period?, seasonality?, horizon?, level? }`.
+/// `method` is `"simple"` (level, `alpha`; at least 2 values), `"holt"` (level
+/// and trend, `alpha` and `beta`; at least 3) or `"holt_winters"` (level, trend
+/// and season, `alpha`, `beta`, `gamma` and `period` >= 2; at least two cycles,
 /// `seasonality` `"additive"` (default) or `"multiplicative"`, which needs
-/// positive data). The constants are in (0, 1); a constant the method does not
-/// read, or one it needs and lacks, is `invalid_option`. `horizon` steps are
-/// forecast (default 0); `level` is the intervals' (default 0.95).
+/// positive data). A constant given is used, in (0, 1); one left out is
+/// estimated by least squares of the one-step errors. A setting the method
+/// does not read, or `holt_winters` without `period`, is `invalid_option`.
+/// `horizon` steps are forecast (default 0); `level` is the intervals'
+/// (default 0.95).
 ///
 /// # Output JSON
 ///
-/// `{ components: { level, trend, seasonal }, fitted, residuals, sigma, level,
-/// forecasts: [{ step, mean, prediction: { lower, upper } | null }] }`.
+/// `{ alpha, beta, gamma, estimated, components: { level, trend, seasonal },
+/// fitted, residuals, sigma, level, forecasts: [{ step, mean, prediction:
+/// { lower, upper } | null }] }`: the constants used (`null` where the method
+/// has none) and the names of those estimated.
 /// `residuals` are `null` where `fitted` is the initialisation; `sigma` is the
 /// root mean squared one-step error. The prediction intervals are those of
 /// the additive-error state-space model (ETS(A,N,N), (A,A,N), (A,A,A) --

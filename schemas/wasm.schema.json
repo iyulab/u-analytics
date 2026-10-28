@@ -2791,8 +2791,27 @@
     "SmoothingDto": {
       "description": "Exponential smoothing of a series and its forecasts.",
       "properties": {
+        "alpha": {
+          "description": "The constants used, given or estimated; `null` where the method has\nnone.",
+          "format": "double",
+          "type": "number"
+        },
+        "beta": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "components": {
           "$ref": "#/$defs/SmoothingComponentsDto"
+        },
+        "estimated": {
+          "description": "The names of the constants that were estimated, in the order alpha,\nbeta, gamma.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "fitted": {
           "description": "One-step-ahead in-sample forecasts.",
@@ -2807,6 +2826,13 @@
             "$ref": "#/$defs/ForecastDto"
           },
           "type": "array"
+        },
+        "gamma": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "level": {
           "description": "Level of the prediction intervals.",
@@ -2831,6 +2857,8 @@
         }
       },
       "required": [
+        "alpha",
+        "estimated",
         "components",
         "fitted",
         "residuals",
@@ -2844,9 +2872,13 @@
       "additionalProperties": false,
       "properties": {
         "alpha": {
-          "description": "Level smoothing constant, in (0, 1).",
+          "default": null,
+          "description": "Level smoothing constant, in (0, 1). Omitted: estimated (least\nsquares of the one-step errors), as is any constant below left out.",
           "format": "double",
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "beta": {
           "default": null,
@@ -2924,8 +2956,7 @@
       },
       "required": [
         "data",
-        "method",
-        "alpha"
+        "method"
       ],
       "type": "object"
     },

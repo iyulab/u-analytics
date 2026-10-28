@@ -55,7 +55,7 @@ impl HoltResult {
     }
 
     /// Forecasts 1..=`horizon` steps ahead with the prediction interval of
-    /// ETS(A,A,N) at two-sided `level` ([`super::forecast`]); `data` is the
+    /// ETS(A,A,N) at two-sided `level` ([module documentation](super#prediction-intervals)); `data` is the
     /// series smoothed (for σ). `None` when `level` is not in (0, 1).
     pub fn forecasts(
         &self,
@@ -100,6 +100,32 @@ impl HoltLinear {
             return None;
         }
         Some(Self { alpha, beta })
+    }
+
+    /// The smoother whose constants minimise the sum of squared one-step
+    /// errors on `data` (from [`HoltResult::FIRST_ERROR`];
+    /// [module documentation](super#estimating-the-constants)); a constant given is held, one left `None` is
+    /// estimated.
+    ///
+    /// Returns `None` with fewer than 3 values, a non-finite one, or a given
+    /// constant outside (0, 1).
+    pub fn fit(data: &[f64], alpha: Option<f64>, beta: Option<f64>) -> Option<Self> {
+        if data.len() < 3 || data.iter().any(|v| !v.is_finite()) {
+            return None;
+        }
+        for c in [alpha, beta].into_iter().flatten() {
+            Self::new(c, c)?;
+        }
+        let c = super::estimate::least_squares(&[alpha, beta], |c| {
+            let r = Self {
+                alpha: c[0],
+                beta: c[1],
+            }
+            .smooth(data)
+            .expect("at least two values");
+            super::estimate::one_step_sse(data, &r.fitted, HoltResult::FIRST_ERROR)
+        });
+        Self::new(c[0], c[1])
     }
 
     /// Returns α.

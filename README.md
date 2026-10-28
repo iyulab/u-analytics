@@ -835,18 +835,20 @@ multiple_regression(input: {
 // A constant predictor (index i) or one the others determine exactly -> degenerate_data.
 // Intervals use Student's t on the residual degrees of freedom: the mean's is
 // fit ± t·se_fit, a new observation's fit ± t·sqrt(residual_se² + se_fit²).
-// Exponential smoothing with given constants (each in (0, 1)) and its forecasts.
+// Exponential smoothing and its forecasts; constants given or estimated.
 exponential_smoothing(input: {
   data: number[],
   method: "simple" | "holt" | "holt_winters",  // level; + trend; + season
-  alpha: number,
-  beta?: number | null,      // holt, holt_winters (required there, refused elsewhere: invalid_option)
+  alpha?: number | null,     // each constant in (0, 1); left out: estimated (least squares of
+  beta?: number | null,      //   the one-step errors) -- holt, holt_winters (refused elsewhere: invalid_option)
   gamma?: number | null,     // holt_winters
   period?: number | null,    // holt_winters, >= 2; data >= 2 * period (simple >= 2, holt >= 3)
   seasonality?: "additive" | "multiplicative" | null,  // holt_winters; multiplicative needs data > 0
   horizon?: number | null,   // steps to forecast, 0..100000, default 0
   level?: number | null,     // of the prediction intervals, default 0.95
-}): { components: { level: number[], trend: number[] | null, seasonal: number[] | null },
+}): { alpha: number, beta: number | null, gamma: number | null,   // used, given or estimated
+      estimated: ("alpha" | "beta" | "gamma")[],                    // which were estimated
+      components: { level: number[], trend: number[] | null, seasonal: number[] | null },
       fitted: number[],                    // one-step-ahead
       residuals: (number | null)[],        // null where fitted is the initialisation
       sigma: number,                       // RMS one-step error

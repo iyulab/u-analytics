@@ -3883,8 +3883,11 @@ pub(crate) struct SmoothingInputDto {
         schemars(schema_with = "crate::wire::card_schema::smoothing_method")
     )]
     pub(crate) method: String,
-    /// Level smoothing constant, in (0, 1).
-    pub(crate) alpha: f64,
+    /// Level smoothing constant, in (0, 1). Omitted: estimated (least
+    /// squares of the one-step errors), as is any constant below left out.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) alpha: Option<f64>,
     /// Trend smoothing constant, in (0, 1): `holt` and `holt_winters` only.
     #[serde(default)]
     #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
@@ -3949,6 +3952,15 @@ pub(crate) struct ForecastDto {
 #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 pub(crate) struct SmoothingDto {
+    /// The constants used, given or estimated; `null` where the method has
+    /// none.
+    pub(crate) alpha: f64,
+    pub(crate) beta: Option<f64>,
+    pub(crate) gamma: Option<f64>,
+    /// The names of the constants that were estimated, in the order alpha,
+    /// beta, gamma.
+    #[cfg_attr(feature = "wasm", tsify(type = "(\"alpha\" | \"beta\" | \"gamma\")[]"))]
+    pub(crate) estimated: Vec<&'static str>,
     pub(crate) components: SmoothingComponentsDto,
     /// One-step-ahead in-sample forecasts.
     pub(crate) fitted: Vec<f64>,
@@ -3987,7 +3999,19 @@ pub(crate) fn exponential_smoothing_dto(
 
     let method = named("method", &input.method, &SMOOTHING_METHODS)?;
     let level = interval_level(input.level)?;
-    let alpha = smoothing_constant("alpha", input.alpha)?;
+    let given = |parameter: &'static str, value: Option<f64>| {
+        value.map(|v| smoothing_constant(parameter, v)).transpose()
+    };
+    let alpha = given("alpha", input.alpha)?;
+    let beta = given("beta", input.beta)?;
+    let gamma = given("gamma", input.gamma)?;
+    let estimated = |names: &[(&'static str, Option<f64>)]| -> Vec<&'static str> {
+        names
+            .iter()
+            .filter(|(_, v)| v.is_none())
+            .map(|(n, _)| *n)
+            .collect()
+    };
     let horizon = match input.horizon {
         None => 0,
         Some(Whole(h)) if (0.0..=MAX_HORIZON).contains(&h) => h as usize,
@@ -4001,35 +4025,33 @@ pub(crate) fn exponential_smoothing_dto(
             ))
         }
     };
-    // Each method reads its own constants: one it needs must be there, one
-    // it does not read must not be.
-    let reads = |parameter: &'static str, given: bool, wanted: bool| -> Result<(), WireError> {
-        match (given, wanted) {
-            (true, false) => Err(WireError::new(
+    // Each method reads its own settings: one it does not read must not be
+    // given, and Holt-Winters needs its period (its constants are estimated
+    // when left out).
+    let unread = |parameter: &'static str, given: bool, read: bool| -> Result<(), WireError> {
+        if given && !read {
+            Err(WireError::new(
                 code::INVALID_OPTION,
                 None,
                 format!("{parameter} is not read by method {:?}", input.method),
             )
-            .about(parameter)),
-            (false, true) => Err(WireError::new(
-                code::INVALID_OPTION,
-                None,
-                format!("method {:?} needs {parameter}", input.method),
-            )
-            .about(parameter)),
-            _ => Ok(()),
+            .about(parameter))
+        } else {
+            Ok(())
         }
     };
-    reads("beta", input.beta.is_some(), method != Simple)?;
-    reads("gamma", input.gamma.is_some(), method == Hw)?;
-    reads("period", input.period.is_some(), method == Hw)?;
-    // `seasonality` is optional where it is read.
-    let seasonality_given = input.seasonality.is_some();
-    reads(
-        "seasonality",
-        seasonality_given,
-        method == Hw && seasonality_given,
-    )?;
+    unread("beta", beta.is_some(), method != Simple)?;
+    unread("gamma", gamma.is_some(), method == Hw)?;
+    unread("period", input.period.is_some(), method == Hw)?;
+    unread("seasonality", input.seasonality.is_some(), method == Hw)?;
+    if method == Hw && input.period.is_none() {
+        return Err(WireError::new(
+            code::INVALID_OPTION,
+            None,
+            "method \"holt_winters\" needs period".to_string(),
+        )
+        .about("period"));
+    }
     let data = input.data;
 
     let interval = |f: crate::smoothing::SmoothingForecast| ForecastDto {
@@ -4047,12 +4069,18 @@ pub(crate) fn exponential_smoothing_dto(
     match method {
         Simple => {
             let data = at_least(data, 2, "data")?;
-            let r = SimpleExponentialSmoothing::new(alpha)
-                .expect("alpha checked above")
-                .smooth(&data)
-                .expect("data is not empty");
+            let smoother = match alpha {
+                Some(a) => SimpleExponentialSmoothing::new(a),
+                None => SimpleExponentialSmoothing::fit(&data),
+            }
+            .expect("alpha checked above; at least two finite values");
+            let r = smoother.smooth(&data).expect("data is not empty");
             let residuals = r.residuals(&data);
             Ok(SmoothingDto {
+                alpha: r.alpha,
+                beta: None,
+                gamma: None,
+                estimated: estimated(&[("alpha", alpha)]),
                 forecasts: r
                     .forecasts(&data, horizon, level)
                     .expect("level checked above")
@@ -4071,14 +4099,17 @@ pub(crate) fn exponential_smoothing_dto(
             })
         }
         Holt => {
-            let beta = smoothing_constant("beta", input.beta.expect("checked present"))?;
             let data = at_least(data, 3, "data")?;
-            let r = HoltLinear::new(alpha, beta)
-                .expect("constants checked above")
+            let r = HoltLinear::fit(&data, alpha, beta)
+                .expect("constants checked above; at least three finite values")
                 .smooth(&data)
                 .expect("at least two values");
             let residuals = r.residuals(&data);
             Ok(SmoothingDto {
+                alpha: r.alpha,
+                beta: Some(r.beta),
+                gamma: None,
+                estimated: estimated(&[("alpha", alpha), ("beta", beta)]),
                 forecasts: r
                     .forecasts(&data, horizon, level)
                     .expect("level checked above")
@@ -4097,8 +4128,6 @@ pub(crate) fn exponential_smoothing_dto(
             })
         }
         Hw => {
-            let beta = smoothing_constant("beta", input.beta.expect("checked present"))?;
-            let gamma = smoothing_constant("gamma", input.gamma.expect("checked present"))?;
             let Whole(period) = input.period.expect("checked present");
             if period < 2.0 {
                 return Err(WireError::out_of_range(
@@ -4118,12 +4147,18 @@ pub(crate) fn exponential_smoothing_dto(
             if seasonality == crate::smoothing::Seasonality::Multiplicative {
                 each_within(&data, "data", Bound::Open(0.0), Bound::Unbounded)?;
             }
-            let r = HoltWinters::new(alpha, beta, gamma, m, seasonality)
-                .expect("constants and period checked above")
+            let r = HoltWinters::fit(&data, alpha, beta, gamma, m, seasonality)
+                .expect(
+                    "constants and period checked above; two cycles, positive when multiplicative",
+                )
                 .smooth(&data)
                 .expect("two cycles of data, positive when multiplicative");
             let residuals = r.residuals(&data);
             Ok(SmoothingDto {
+                alpha: r.alpha,
+                beta: Some(r.beta),
+                gamma: Some(r.gamma),
+                estimated: estimated(&[("alpha", alpha), ("beta", beta), ("gamma", gamma)]),
                 forecasts: r
                     .forecasts(&data, horizon, level)
                     .expect("level checked above")

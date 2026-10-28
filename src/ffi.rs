@@ -2084,10 +2084,21 @@ mod tests {
             (Some("insufficient_data"), Some(26.0), Some(24.0)),
             "{b}"
         );
-        let b = refuse(serde_json::json!({ "data": data, "method": "holt", "alpha": 0.3 }));
+        // A constant left out is estimated and named as such.
+        let (code, b) = call(
+            uanalytics_exponential_smoothing,
+            &serde_json::json!({ "data": data, "method": "holt", "alpha": 0.3 }).to_string(),
+        );
+        assert_eq!(code, 0, "{b}");
+        assert_eq!(
+            (b["alpha"].as_f64(), b["estimated"].clone()),
+            (Some(0.3), serde_json::json!(["beta"])),
+            "{b}"
+        );
+        let b = refuse(serde_json::json!({ "data": data, "method": "holt_winters" }));
         assert_eq!(
             (b["code"].as_str(), b["parameter"].as_str()),
-            (Some("invalid_option"), Some("beta")),
+            (Some("invalid_option"), Some("period")),
             "{b}"
         );
         let b = refuse(

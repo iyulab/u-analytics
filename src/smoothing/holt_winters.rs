@@ -99,7 +99,7 @@ impl HoltWintersResult {
 
     /// Forecasts 1..=`horizon` steps ahead at two-sided `level`, with the
     /// prediction interval of ETS(A,A,A) when the seasonality is additive and
-    /// none when it is multiplicative ([`super::forecast`]); `data` is the
+    /// none when it is multiplicative ([module documentation](super#prediction-intervals)); `data` is the
     /// series smoothed (for σ). `None` when `level` is not in (0, 1).
     pub fn forecasts(
         &self,
@@ -179,6 +179,43 @@ impl HoltWinters {
             period,
             seasonality,
         })
+    }
+
+    /// The smoother whose constants minimise the sum of squared one-step
+    /// errors on `data` (from the second cycle; [module documentation](super#estimating-the-constants)); a
+    /// constant given is held, one left `None` is estimated.
+    ///
+    /// Returns `None` when [`HoltWinters::new`] would refuse the given
+    /// constants or period, or [`HoltWinters::smooth`] the data.
+    pub fn fit(
+        data: &[f64],
+        alpha: Option<f64>,
+        beta: Option<f64>,
+        gamma: Option<f64>,
+        period: usize,
+        seasonality: Seasonality,
+    ) -> Option<Self> {
+        let probe = Self::new(
+            alpha.unwrap_or(0.5),
+            beta.unwrap_or(0.5),
+            gamma.unwrap_or(0.5),
+            period,
+            seasonality,
+        )?;
+        probe.smooth(data)?;
+        let c = super::estimate::least_squares(&[alpha, beta, gamma], |c| {
+            let r = Self {
+                alpha: c[0],
+                beta: c[1],
+                gamma: c[2],
+                period,
+                seasonality,
+            }
+            .smooth(data)
+            .expect("checked by the probe above");
+            super::estimate::one_step_sse(data, &r.fitted, period)
+        });
+        Self::new(c[0], c[1], c[2], period, seasonality)
     }
 
     /// Returns the seasonal period.

@@ -570,11 +570,13 @@ public sealed record SmoothingComponents(
 public sealed record SmoothingForecast(int Step, double Mean, ConfidenceInterval? Prediction);
 
 /// <summary>
-/// Exponential smoothing: the components, one-step fitted values and residuals (<c>null</c>
+/// Exponential smoothing: the constants used (<c>null</c> where the method has none) and the
+/// names of those <see cref="Estimated"/>, the components, one-step fitted values and residuals (<c>null</c>
 /// where the fitted value is the initialisation), <see cref="Sigma"/> the root mean squared
 /// one-step error, and the forecasts with prediction intervals at <see cref="Level"/>.
 /// </summary>
 public sealed record ExponentialSmoothingResult(
+    double Alpha, double? Beta, double? Gamma, IReadOnlyList<string> Estimated,
     SmoothingComponents Components, IReadOnlyList<double> Fitted, IReadOnlyList<double?> Residuals,
     double Sigma, double Level, IReadOnlyList<SmoothingForecast> Forecasts);
 

@@ -140,6 +140,7 @@ public class ContractTests
         ["SimpleRegression(exact)"] = c => Out(c.SimpleRegression([1, 2, 3, 4], [3, 5, 7, 9]), AnalyticsJson.Default.RegressionResult),
         ["SimpleRegression(predict)"] = c => Out(c.SimpleRegression(Positive, Positive.Select((v, i) => 2 * v + i % 3).ToArray(), [0, 5, 50], 0.9), AnalyticsJson.Default.RegressionResult),
         ["MultipleRegression"] = c => Out(c.MultipleRegression([[1, 2, 3, 4, 5, 6, 7, 8], [2, 1, 3, 2, 4, 3, 5, 4]], [5.1, 5.0, 9.2, 8.9, 13.1, 12.0, 17.2, 15.9], [[4.5, 9], [3, 6]], 0.9), AnalyticsJson.Default.MultipleRegressionResult),
+        ["ExponentialSmoothing(estimated)"] = c => Out(c.ExponentialSmoothing(Seasonal(32, 4).Select(v => v + 10).ToArray(), SmoothingMethod.HoltWinters, period: 4, horizon: 3), AnalyticsJson.Default.ExponentialSmoothingResult),
         ["ExponentialSmoothing(simple)"] = c => Out(c.ExponentialSmoothing(Positive, SmoothingMethod.Simple, 0.4, horizon: 3), AnalyticsJson.Default.ExponentialSmoothingResult),
         ["ExponentialSmoothing(holt)"] = c => Out(c.ExponentialSmoothing(Positive, SmoothingMethod.Holt, 0.4, beta: 0.2, horizon: 3, level: 0.8), AnalyticsJson.Default.ExponentialSmoothingResult),
         ["ExponentialSmoothing(holt_winters)"] = c => Out(c.ExponentialSmoothing(Seasonal(32, 4).Select(v => v + 10).ToArray(), SmoothingMethod.HoltWinters, 0.3, beta: 0.1, gamma: 0.2, period: 4, horizon: 6), AnalyticsJson.Default.ExponentialSmoothingResult),

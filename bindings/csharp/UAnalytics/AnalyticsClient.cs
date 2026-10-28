@@ -741,19 +741,22 @@ public sealed class AnalyticsClient : IDisposable
             ("outer_iterations", outerIterations is { } o ? JsonValue.Create(o) : null));
 
     /// <summary>
-    /// Exponential smoothing of <paramref name="data"/> with the given constants (each in
-    /// (0, 1)): <see cref="SmoothingMethod.Simple"/> (at least 2 values),
-    /// <see cref="SmoothingMethod.Holt"/> (needs <paramref name="beta"/>; at least 3) or
-    /// <see cref="SmoothingMethod.HoltWinters"/> (needs <paramref name="beta"/>,
-    /// <paramref name="gamma"/> and <paramref name="period"/> ≥ 2; at least two cycles;
-    /// multiplicative <paramref name="seasonality"/> needs positive data). A constant the
-    /// method does not read, or one it needs and lacks, is refused as <c>invalid_option</c>.
+    /// Exponential smoothing of <paramref name="data"/>: <see cref="SmoothingMethod.Simple"/>
+    /// (<paramref name="alpha"/>; at least 2 values), <see cref="SmoothingMethod.Holt"/>
+    /// (<paramref name="alpha"/>, <paramref name="beta"/>; at least 3) or
+    /// <see cref="SmoothingMethod.HoltWinters"/> (<paramref name="alpha"/>,
+    /// <paramref name="beta"/>, <paramref name="gamma"/>, and <paramref name="period"/> ≥ 2;
+    /// at least two cycles; multiplicative <paramref name="seasonality"/> needs positive data).
+    /// A constant given (in (0, 1)) is used; one left <c>null</c> is estimated by least squares
+    /// of the one-step errors and listed in <see cref="ExponentialSmoothingResult.Estimated"/>.
+    /// A setting the method does not read, or Holt-Winters without a period, is refused as
+    /// <c>invalid_option</c>.
     /// Forecasts <paramref name="horizon"/> steps (0 to 100 000) with the prediction intervals
     /// of the additive-error state-space model at <paramref name="level"/> (in (0, 1);
     /// <c>null</c> takes 0.95) — none for multiplicative seasonality.
     /// </summary>
     public ExponentialSmoothingResult ExponentialSmoothing(double[] data, SmoothingMethod method,
-        double alpha, double? beta = null, double? gamma = null, int? period = null,
+        double? alpha = null, double? beta = null, double? gamma = null, int? period = null,
         Seasonality? seasonality = null, int horizon = 0, double? level = null)
         => Call(NativeInterop.uanalytics_exponential_smoothing, AnalyticsJson.Default.ExponentialSmoothingResult,
             ("data", Request.Nums("data", data)),

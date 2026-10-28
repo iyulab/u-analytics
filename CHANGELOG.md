@@ -51,6 +51,14 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   `residuals(data)`, `None` over the initialisation. `SesResult` gains `fitted` (one-step) and
   `alpha`; `HoltResult` `alpha` and `beta`.
 
+- Estimated smoothing constants: `SimpleExponentialSmoothing::fit(data)`,
+  `HoltLinear::fit(data, alpha, beta)` and `HoltWinters::fit(data, alpha, beta, gamma, period,
+  seasonality)` hold the constants given and set the others by least squares of the one-step
+  errors (as statsmodels' `ExponentialSmoothing.fit`; Holt-Winters as `ETSModel.fit`, whose
+  additive seasonal update is the one here). `exponential_smoothing` (every transport; .NET
+  `alpha` now optional) estimates any constant left out and returns `alpha`, `beta`, `gamma` and
+  `estimated` (the names estimated); Holt-Winters without `period` is `invalid_option`.
+
 ### Changed
 
 - **Breaking**: `HoltWintersResult::forecast(h)` takes only the step -- the result now carries
