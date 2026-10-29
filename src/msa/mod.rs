@@ -575,13 +575,16 @@ pub fn gage_rr_anova(input: &GageRRInput) -> Result<GageRRAnovaResult, &'static 
     // from zero variance — when it collapses to floating-point noise relative to
     // the total variation (e.g. every trial within each cell identical, so the
     // within-cell repeatability SS is 0 up to rounding: ms ≈ ±1e-17). A *relative*
-    // floor, with a small absolute backstop for the all-identical case where the
-    // total MS is itself ~0, keeps the boundary sign-independent: a repeatability
+    // floor, with a backstop in proportion to the measurements' own size (a
+    // variation below 1e-8 of the grand mean is rounding) for the all-identical
+    // case where the total MS is itself ~0 -- a fixed number there would call a
+    // study of micrometres, written in metres, degenerate -- keeps the boundary
+    // sign-independent: a repeatability
     // MS of +2e-17 and one that dips to −4e-18 under rounding are BOTH reported as
     // "not computable" (F/p = None), rather than flipping between a spurious ~1e12
     // finite F ("very significant") and None depending on the noise sign.
     let ms_total = ss_total / df_total;
-    let degenerate_floor = (1e-9 * ms_total.abs()).max(1e-12);
+    let degenerate_floor = (1e-9 * ms_total.abs()).max(1e-16 * grand_mean * grand_mean);
     let is_valid_denom = |ms: f64| ms > degenerate_floor;
 
     // F statistics and p-values

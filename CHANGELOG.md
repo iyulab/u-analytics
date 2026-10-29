@@ -10,6 +10,11 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Fixed
 
+- `gage_rr_anova` called a mean square degenerate below a fixed 1e-12, so a study
+  of small variation -- micrometres written in metres -- returned no F or p for
+  its sources. The backstop is now in proportion to the size of the grand mean
+  (variation below 1e-8 of it is rounding), and the same study in units from 1e-12
+  to 1e9 gives the same verdict.
 - `correlation::kendall_tau_b` reports the exact two-sided p-value when nothing is tied and
   there are at most 33 observations (at any size when at most one pair is on the minority
   side), the cases in which SciPy's `kendalltau` default is exact. It used the normal
