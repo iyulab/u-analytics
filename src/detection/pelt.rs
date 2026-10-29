@@ -36,6 +36,10 @@
 //!
 //! - **BIC** (default): `beta = p * ln(n)` where `p` is the number of parameters
 //!   per segment (1 for L2, 2 for Normal). Balances model complexity and fit.
+//!   For the L2 cost, a sum of squares in the data's units squared, it is
+//!   multiplied by the noise variance estimated from the data (the median of
+//!   the first differences, robust to the shifts being searched for), so the
+//!   same series gives the same changepoints in any unit.
 //! - **Custom**: User-specified penalty value.
 //!
 //! # References
@@ -77,11 +81,14 @@ impl CostFunction {
 /// Penalty selection for the PELT algorithm.
 #[derive(Debug, Clone, Copy)]
 pub enum Penalty {
-    /// BIC penalty: `p * ln(n)` where `p` = parameters per segment.
+    /// BIC penalty: `p * ln(n)` where `p` = parameters per segment, times the
+    /// estimated noise variance of each channel for the L2 cost (whose
+    /// segments are costed in the data's units squared).
     ///
     /// Reference: Schwarz (1978). Automatically scales with data length.
     Bic,
-    /// User-specified penalty value (must be positive and finite).
+    /// User-specified penalty value (must be positive and finite), in the
+    /// units of the cost: data units squared for L2.
     Custom(f64),
 }
 
@@ -223,7 +230,14 @@ impl Pelt {
             };
         }
 
-        let penalty_value = self.resolve_penalty(n);
+        let penalty_value = self.resolve_penalty(n, &[data]);
+        if penalty_value <= 0.0 {
+            // A BIC penalty of nothing: the signal does not vary, so there is
+            // nothing to split.
+            return PeltResult {
+                changepoints: Vec::new(),
+            };
+        }
 
         // Precompute cumulative sums for O(1) segment cost evaluation.
         // cum_sum[i] = sum(data[0..i])
@@ -353,7 +367,12 @@ impl Pelt {
         }
 
         let n_channels = signals.len();
-        let penalty_value = self.resolve_penalty(n) * n_channels as f64;
+        let penalty_value = self.resolve_penalty(n, signals);
+        if penalty_value <= 0.0 {
+            return Some(MultiPeltResult {
+                changepoints: Vec::new(),
+            });
+        }
 
         // Precompute cumulative sums per channel for O(1) segment cost.
         let mut cum_sums: Vec<Vec<f64>> = Vec::with_capacity(n_channels);
@@ -422,14 +441,30 @@ impl Pelt {
         Some(MultiPeltResult { changepoints })
     }
 
-    /// Resolves the penalty value for a dataset of length `n`.
-    fn resolve_penalty(&self, n: usize) -> f64 {
+    /// Resolves the penalty value for `signals`, the channels of length `n`
+    /// that are searched together.
+    ///
+    /// The BIC penalty of the [`CostFunction::L2`] cost is in the cost's own
+    /// units: the cost is a sum of squares, the model a normal one with a
+    /// *known* variance, so the penalty `p * ln(n)` is that of the model with
+    /// the noise variance of each channel put back in ([`noise_variance`]).
+    /// Without it the same series would show a different number of changes in
+    /// volts than in millivolts. The `Normal` cost is a log and needs none.
+    /// A custom penalty is taken as given, once per channel.
+    fn resolve_penalty(&self, n: usize, signals: &[&[f64]]) -> f64 {
+        let channels = signals.len() as f64;
         match self.penalty {
             Penalty::Bic => {
                 let p = self.cost.params_per_segment() as f64;
-                p * (n as f64).ln()
+                let per_channel = p * (n as f64).ln();
+                match self.cost {
+                    CostFunction::L2 => {
+                        per_channel * signals.iter().map(|s| noise_variance(s)).sum::<f64>()
+                    }
+                    CostFunction::Normal => per_channel * channels,
+                }
             }
-            Penalty::Custom(val) => val,
+            Penalty::Custom(val) => val * channels,
         }
     }
 
@@ -462,6 +497,33 @@ impl Pelt {
             }
         }
     }
+}
+
+/// The variance of the noise in `signal`, estimated from the first
+/// differences: for independent noise of variance s² a difference has
+/// variance 2s², and its median magnitude is 0.6745·√2·s, a statistic a few
+/// level shifts hardly move. The estimate is floored at a millionth of the
+/// signal's range, so that a noiseless step stays a step and the penalty
+/// stays above the rounding of the cost.
+fn noise_variance(signal: &[f64]) -> f64 {
+    if signal.len() < 2 {
+        return 0.0;
+    }
+    let mut diffs: Vec<f64> = signal.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
+    diffs.sort_by(f64::total_cmp);
+    let median = if diffs.len() % 2 == 1 {
+        diffs[diffs.len() / 2]
+    } else {
+        0.5 * (diffs[diffs.len() / 2 - 1] + diffs[diffs.len() / 2])
+    };
+    let sigma = median / (0.6745 * std::f64::consts::SQRT_2);
+    let (lo, hi) = signal
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &v| {
+            (lo.min(v), hi.max(v))
+        });
+    let floor = 1e-6 * (hi - lo);
+    sigma.max(floor).powi(2)
 }
 
 /// The cumulative sums of `signal` and of its squares, taken about the
@@ -1135,7 +1197,12 @@ mod exact_dp_reference {
         // The same series minus 1.7e9: the segment costs are shift-invariant,
         // so the changepoints must be the same, [40, 56, 62] by the dynamic program.
         assert_eq!(
-            detect(CostFunction::L2, Penalty::Bic, 2, &LARGE_LEVEL),
+            detect(
+                CostFunction::L2,
+                Penalty::Custom((LARGE_LEVEL.len() as f64).ln()),
+                2,
+                &LARGE_LEVEL
+            ),
             vec![40, 56, 62]
         );
     }
@@ -1144,7 +1211,12 @@ mod exact_dp_reference {
     fn pruned_search_returns_the_exact_optimum() {
         // L2 BIC two mean shifts
         assert_eq!(
-            detect(CostFunction::L2, Penalty::Bic, 2, &CASE_0),
+            detect(
+                CostFunction::L2,
+                Penalty::Custom((CASE_0.len() as f64).ln()),
+                2,
+                &CASE_0
+            ),
             vec![20, 45]
         );
         // Normal BIC variance + mean shift, min seg 5
@@ -1158,7 +1230,15 @@ mod exact_dp_reference {
             vec![25]
         );
         // L2 BIC large offset 1e7
-        assert_eq!(detect(CostFunction::L2, Penalty::Bic, 2, &CASE_3), vec![31]);
+        assert_eq!(
+            detect(
+                CostFunction::L2,
+                Penalty::Custom((CASE_3.len() as f64).ln()),
+                2,
+                &CASE_3
+            ),
+            vec![31]
+        );
     }
 }
 
@@ -1325,7 +1405,12 @@ mod exact_dp_reference_multi {
     #[test]
     fn the_pruned_multi_channel_search_returns_the_exact_optimum() {
         assert_eq!(
-            detect_multi(CostFunction::L2, Penalty::Bic, 2, &[&A_0, &A_1]),
+            detect_multi(
+                CostFunction::L2,
+                Penalty::Custom((A_0.len() as f64).ln()),
+                2,
+                &[&A_0, &A_1]
+            ),
             vec![21, 23, 26]
         );
         assert_eq!(
@@ -1337,7 +1422,12 @@ mod exact_dp_reference_multi {
             vec![20, 40]
         );
         assert_eq!(
-            detect_multi(CostFunction::L2, Penalty::Bic, 2, &[&D_0, &D_1, &D_2]),
+            detect_multi(
+                CostFunction::L2,
+                Penalty::Custom((D_0.len() as f64).ln()),
+                2,
+                &[&D_0, &D_1, &D_2]
+            ),
             vec![6, 11, 21, 30, 38, 41, 53]
         );
     }

@@ -968,7 +968,9 @@ if (!(t.p_value < 0.05) || f.df_between !== 2) throw new Error("unexpected");
 detect_changepoints(input: {
   data: number[],
   cost?: "l2" | "normal",        // default "l2": mean shift; "normal": mean + variance
-  penalty?: "bic" | number,      // default "bic"
+  penalty?: "bic" | number,      // default "bic": p·ln(n), with "l2" times the noise variance
+                                 // estimated from the data (so the unit of the data does not matter);
+                                 // a number is taken as given, in the cost's units (data² for "l2")
   min_segment_len?: number,      // default 2, must be >= 2
 }): { changepoints: number[], n_segments: number }
 detect_changepoints_multi(input: { signals: number[][], cost?, penalty?, min_segment_len? }):

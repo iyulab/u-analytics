@@ -2478,6 +2478,14 @@ fn adf_ols_core(
         }
     }
 
+    // A pivot is nothing when it is rounding against the sizes of the two
+    // regressors it couples: X'X is in the squares of the data's units, so a
+    // fixed floor would call a series in small units singular.
+    let own_size: Vec<f64> = (0..ncols).map(|i| xtx[i * ncols + i]).collect();
+    let negligible = |pivot: f64, col: usize, row: usize| {
+        pivot <= 1e-15 * (own_size[col] * own_size[row]).sqrt()
+    };
+
     // Solve via Gaussian elimination with partial pivoting
     let mut augmented = vec![0.0_f64; ncols * (ncols + 1)];
     for i in 0..ncols {
@@ -2498,7 +2506,7 @@ fn adf_ols_core(
                 max_row = row;
             }
         }
-        if max_val < 1e-15 {
+        if negligible(max_val, col, max_row) {
             return None; // Singular
         }
         if max_row != col {
@@ -2575,7 +2583,7 @@ fn adf_ols_core(
                 max_row = row;
             }
         }
-        if max_val < 1e-15 {
+        if negligible(max_val, col, max_row) {
             return None;
         }
         if max_row != col {

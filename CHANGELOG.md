@@ -32,6 +32,16 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   nanoamperes: its saliency, scores and anomalies changed with the unit. The floor is now 1e-8
   of the spectrum's peak (the same for data of order one; the published method's saliency is
   reproduced to 1e-6 instead of 1e-8), and a test runs one series at scales from 1e-15 to 1e12.
+- `detection::Pelt` with the L2 cost and the BIC penalty (the default of `detect_changepoints`)
+  compared a sum of squares in the data's units squared with a penalty of `ln(n)` in none: the
+  same series in millivolts found its level shifts and in volts found none (or in picovolts
+  every wiggle). The BIC penalty of L2 is now multiplied by the noise variance, estimated from
+  the median of the first differences (which the shifts searched for hardly move) and floored at
+  a millionth of the range; the changepoints of a series are the same in any unit. A custom
+  penalty is taken as given, in the cost's units. A signal that does not vary has no changepoint.
+- `testing::adf_test` called a series in small units "singular" (an absolute pivot floor of
+  1e-15 in the normal equations, in data units squared): the floor is now relative to the sizes
+  of the two regressors the pivot couples.
 
 ## [0.31.0] - 2026-10-29
 
