@@ -1185,6 +1185,14 @@ pub fn wilcoxon_signed_rank_test(x: &[f64], y: &[f64]) -> Option<TestResult> {
     })
 }
 
+/// Whether two sample values are one rank: equal, or equal up to the rounding
+/// of the arithmetic that made them (a relative 1e-12, so the same samples in
+/// another unit tie the same pairs; a fixed gap would call every value of a
+/// sample in picovolts tied).
+fn tied(a: f64, b: f64) -> bool {
+    a == b || (a - b).abs() <= 1e-12 * a.abs().max(b.abs())
+}
+
 // Assign average ranks to sorted (value, group_or_index) pairs.
 // Handles ties by assigning the average of the tied ranks.
 fn average_ranks(sorted: &[(f64, usize)]) -> Vec<f64> {
@@ -1193,7 +1201,7 @@ fn average_ranks(sorted: &[(f64, usize)]) -> Vec<f64> {
     let mut i = 0;
     while i < n {
         let mut j = i + 1;
-        while j < n && (sorted[j].0 - sorted[i].0).abs() < 1e-12 {
+        while j < n && tied(sorted[j].0, sorted[i].0) {
             j += 1;
         }
         // Positions i..j are tied; average rank = (i+1 + j) / 2
@@ -1213,7 +1221,7 @@ fn compute_tie_correction(sorted: &[(f64, usize)]) -> f64 {
     let mut i = 0;
     while i < n {
         let mut j = i + 1;
-        while j < n && (sorted[j].0 - sorted[i].0).abs() < 1e-12 {
+        while j < n && tied(sorted[j].0, sorted[i].0) {
             j += 1;
         }
         let t = (j - i) as f64;
@@ -1732,10 +1740,13 @@ pub fn mann_kendall_test(data: &[f64]) -> Option<MannKendallResult> {
     let mut sorted: Vec<f64> = data.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).expect("finite values"));
 
+    // Tied means equal, as in S above: a tolerance in the unit of the data
+    // would call a whole series tied (or none of it) depending on whether it
+    // is written in volts or picovolts.
     let mut tie_correction: f64 = 0.0;
     let mut current_count: usize = 1;
     for i in 1..sorted.len() {
-        if (sorted[i] - sorted[i - 1]).abs() < 1e-10 {
+        if sorted[i] == sorted[i - 1] {
             current_count += 1;
         } else {
             if current_count > 1 {
@@ -3875,6 +3886,83 @@ mod tests {
         let n = data.len() as f64;
         let base_var = n * (n - 1.0) * (2.0 * n + 5.0) / 18.0;
         assert!(r.variance < base_var, "ties should reduce variance");
+    }
+
+    /// Which values are tied does not depend on the unit the series is
+    /// written in: the same series in volts or in picovolts has the same
+    /// ties, so the same S, variance, Z and p; only Sen's slope scales.
+    #[test]
+    fn mk_does_not_depend_on_the_unit() {
+        let data = [1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0, 5.0, 4.5, 6.0, 7.0, 6.5];
+        let base = mann_kendall_test(&data).expect("computes");
+        for scale in [1e-15, 1e-12, 1e-6, 1e6, 1e12] {
+            let scaled: Vec<f64> = data.iter().map(|v| v * scale).collect();
+            let r = mann_kendall_test(&scaled)
+                .unwrap_or_else(|| panic!("scale {scale:e}: the series has variation"));
+            assert_eq!(r.s_statistic, base.s_statistic, "scale {scale:e}");
+            assert!(
+                (r.variance - base.variance).abs() <= 1e-12 * base.variance,
+                "scale {scale:e}: variance {} vs {}",
+                r.variance,
+                base.variance
+            );
+            assert!(
+                (r.p_value - base.p_value).abs() <= 1e-12,
+                "scale {scale:e}: p {} vs {}",
+                r.p_value,
+                base.p_value
+            );
+            assert!(
+                (r.sen_slope / scale - base.sen_slope).abs() <= 1e-9,
+                "scale {scale:e}: slope"
+            );
+        }
+    }
+
+    /// The rank tests tie values that are equal, whatever the unit: the same
+    /// samples in volts or in picovolts rank, tie and test the same.
+    #[test]
+    fn rank_tests_do_not_depend_on_the_unit() {
+        let a = [1.0, 2.0, 2.0, 3.5, 4.0, 4.0, 5.5, 6.0];
+        let b = [2.0, 3.0, 3.5, 5.0, 5.5, 7.0, 7.5, 8.0, 8.0];
+        let c = [0.5, 1.5, 2.0, 2.5, 3.0];
+        let paired_x = [1.5, 2.5, 3.0, 4.5, 5.0, 6.5, 7.0, 8.5];
+        let paired_y = [1.0, 2.0, 3.5, 4.0, 5.5, 6.0, 7.5, 8.0];
+        let scaled = |v: &[f64], k: f64| -> Vec<f64> { v.iter().map(|x| x * k).collect() };
+        let mw = mann_whitney_u_test(&a, &b).expect("computes");
+        let wx = wilcoxon_signed_rank_test(&paired_x, &paired_y).expect("computes");
+        let kw = kruskal_wallis_test(&[&a, &b, &c]).expect("computes");
+        for k in [1e-15, 1e-12, 1e-6, 1e6, 1e12] {
+            let (sa, sb, sc) = (scaled(&a, k), scaled(&b, k), scaled(&c, k));
+            let got = mann_whitney_u_test(&sa, &sb).expect("computes");
+            assert!(
+                (got.statistic - mw.statistic).abs() < 1e-12,
+                "mann-whitney U at {k:e}"
+            );
+            assert!(
+                (got.p_value - mw.p_value).abs() < 1e-12,
+                "mann-whitney p at {k:e}"
+            );
+            let got = wilcoxon_signed_rank_test(&scaled(&paired_x, k), &scaled(&paired_y, k))
+                .expect("computes");
+            assert!(
+                (got.statistic - wx.statistic).abs() < 1e-12,
+                "wilcoxon T at {k:e}"
+            );
+            assert!(
+                (got.p_value - wx.p_value).abs() < 1e-12,
+                "wilcoxon p at {k:e}"
+            );
+            let got = kruskal_wallis_test(&[&sa, &sb, &sc]).expect("computes");
+            assert!(
+                (got.statistic - kw.statistic).abs() < 1e-12,
+                "kruskal H at {k:e}"
+            );
+            assert!(
+                (got.p_value - kw.p_value).abs() < 1e-12,
+                "kruskal p at {k:e}"
+            );
+        }
     }
 
     #[test]

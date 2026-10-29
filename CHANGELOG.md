@@ -19,6 +19,14 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 - With tied data the normal approximation of the same p-value now uses the full variance of
   Kendall's S (the terms shared by the tied groups of both variables were missing); it equals
   SciPy's `method="asymptotic"` on the tested samples.
+- `testing::mann_kendall_test` called two values tied when they were within an absolute 1e-10,
+  while its S statistic compares them exactly: a series written in small units (volts as
+  picovolts, amperes as 1e-15) was one tie group and came back as `None` or with a wrong
+  variance. Ties are now equal values, so the result does not depend on the unit.
+- `mann_whitney_u_test`, `wilcoxon_signed_rank_test` and `kruskal_wallis_test` grouped tied
+  ranks by an absolute 1e-12 gap, which merged distinct values of a sample in small units into
+  one rank. The gap is now relative (1e-12 of the values), so the same samples in any unit tie
+  the same pairs.
 
 ## [0.31.0] - 2026-10-29
 
