@@ -2880,13 +2880,14 @@
             "reference_kind": "literature",
             "reference": "Ren et al. (2019), 'Time-Series Anomaly Detection Service at Microsoft', KDD, section 4.1, equations 7 to 9, restated in Python 3 with NumPy 2.4.6",
             "method": "compares the saliency and score of each of 64 points, and the flagged indices, of a noisy sine with one spike",
-            "tolerance": "1e-8 (relative)",
+            "tolerance": "1e-6 (relative)",
             "test": "src/detection/spectral_residual.rs::numpy_reference::saliency_and_scores_reproduce_the_published_method"
           }
         ],
         "limits": [
           "One series, default settings (q = 3, z = 40, threshold 3, z-score gate 1.5); batching, the expected value and its band are not compared.",
-          "The reference restates the paper's equations, not Microsoft's code, whose extension leaves out the last point of the series; the two give different saliency near the ends."
+          "The reference restates the paper's equations, not Microsoft's code, whose extension leaves out the last point of the series; the two give different saliency near the ends.",
+          "The log of the amplitude spectrum is floored at 1e-8 of the spectrum's peak, not at the published absolute 1e-8, so that the same series in another unit gives the same saliency (a test runs it at scales from 1e-15 to 1e12); on this series the two floors differ by less than 1e-7."
         ]
       },
       "performance": {

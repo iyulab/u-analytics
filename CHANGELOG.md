@@ -27,6 +27,11 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   ranks by an absolute 1e-12 gap, which merged distinct values of a sample in small units into
   one rank. The gap is now relative (1e-12 of the values), so the same samples in any unit tie
   the same pairs.
+- `detection::SpectralResidual` floored the log of the amplitude spectrum at an absolute 1e-8,
+  which is nothing for a series of order one and most of the spectrum for the same series in
+  nanoamperes: its saliency, scores and anomalies changed with the unit. The floor is now 1e-8
+  of the spectrum's peak (the same for data of order one; the published method's saliency is
+  reproduced to 1e-6 instead of 1e-8), and a test runs one series at scales from 1e-15 to 1e12.
 
 ## [0.31.0] - 2026-10-29
 

@@ -533,7 +533,13 @@ fn saliency_map(data: &[f64], q: usize) -> Vec<f64> {
         .map(|&x| Complex::real(x))
         .collect::<Vec<_>>());
     let len = spectrum.len();
-    let log_amp: Vec<f64> = spectrum.iter().map(|z| (z.norm() + 1e-8).ln()).collect();
+    // The floor that keeps the log finite at a zero bin is relative to the
+    // spectrum's own size: a fixed one is nothing for a series in units of 1
+    // and everything for the same series in nanoamperes (Ren et al.'s 1e-8 is
+    // for data of order 1).
+    let peak = spectrum.iter().map(|z| z.norm()).fold(0.0_f64, f64::max);
+    let floor = if peak > 0.0 { 1e-8 * peak } else { 1e-8 };
+    let log_amp: Vec<f64> = spectrum.iter().map(|z| (z.norm() + floor).ln()).collect();
     // Moving average of width q over the preceding bins (cumulative form).
     let mut avg = vec![0.0; len];
     let mut cum = 0.0;
@@ -622,6 +628,39 @@ mod tests {
                 p.expected.is_finite() && p.lower <= p.expected && p.expected <= p.upper,
                 "{p:?}"
             );
+        }
+    }
+
+    /// The same series in another unit is the same series: saliency, score and
+    /// the anomalies are dimensionless, the expected value and band scale with
+    /// the data.
+    #[test]
+    fn the_unit_of_the_series_does_not_change_the_answer() {
+        let mut series: Vec<f64> = noise(3, 120)
+            .iter()
+            .enumerate()
+            .map(|(t, e)| (t as f64 * 0.25).sin() + 0.1 * e)
+            .collect();
+        series[80] += 5.0;
+        let base = SpectralResidual::new().analyze(&series).unwrap();
+        for k in [1e-15, 1e-12, 1e-9, 1e-6, 1e6, 1e12] {
+            let scaled: Vec<f64> = series.iter().map(|v| v * k).collect();
+            let got = SpectralResidual::new().analyze(&scaled).unwrap();
+            for (g, b) in got.iter().zip(&base) {
+                assert_eq!(g.is_anomaly, b.is_anomaly, "scale {k:e}, point {}", b.index);
+                assert!(
+                    (g.saliency - b.saliency).abs() <= 1e-6 * b.saliency.max(1e-3),
+                    "scale {k:e}, point {}: saliency {} vs {}",
+                    b.index,
+                    g.saliency,
+                    b.saliency
+                );
+                assert!(
+                    (g.expected / k - b.expected).abs() <= 1e-6 * b.expected.abs().max(1.0),
+                    "scale {k:e}, point {}: expected",
+                    b.index
+                );
+            }
         }
     }
 
@@ -1038,8 +1077,12 @@ mod numpy_reference {
         0.0,
     ];
 
+    /// The published method floors the amplitude at an absolute 1e-8; this
+    /// crate at 1e-8 of the spectrum's peak (the same for data of order one,
+    /// independent of the unit otherwise), which moves this series' values by
+    /// less than 1e-7.
     fn close(got: f64, want: f64) -> bool {
-        (got - want).abs() <= 1e-8 * want.abs().max(1.0)
+        (got - want).abs() <= 1e-6 * want.abs().max(1.0)
     }
 
     #[test]
