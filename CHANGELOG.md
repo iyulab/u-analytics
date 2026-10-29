@@ -8,6 +8,18 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Fixed
+
+- `correlation::kendall_tau_b` reports the exact two-sided p-value when nothing is tied and
+  there are at most 33 observations (at any size when at most one pair is on the minority
+  side), the cases in which SciPy's `kendalltau` default is exact. It used the normal
+  approximation everywhere, which is 34 % too high at 30 observations and tau 0.43
+  (6.6e-4 against the exact 4.9e-4) and can move a small sample across a significance level.
+  The Kendall correlation matrices of `correlation_matrix` follow.
+- With tied data the normal approximation of the same p-value now uses the full variance of
+  Kendall's S (the terms shared by the tied groups of both variables were missing); it equals
+  SciPy's `method="asymptotic"` on the tested samples.
+
 ## [0.31.0] - 2026-10-29
 
 Depends on u-numflow 0.16. The .NET client is `UAnalytics` 0.25.0.
