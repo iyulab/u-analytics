@@ -4628,6 +4628,129 @@ pub(crate) fn run_rules_dto(
     Ok(point_dtos(&points))
 }
 
+// ── Kernel density ───────────────────────────────────────────────────────────
+
+/// Input for `kde`.
+#[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct KdeInputDto {
+    /// At least 2 values.
+    pub(crate) data: Vec<f64>,
+    /// The rule that picks the bandwidth: `"silverman"` (default) or
+    /// `"scott"`. Not with `bandwidth`.
+    #[serde(default)]
+    #[cfg_attr(
+        feature = "wasm",
+        tsify(optional, type = "\"silverman\" | \"scott\" | null")
+    )]
+    pub(crate) rule: Option<String>,
+    /// A bandwidth of your own (`> 0`) instead of a rule's.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) bandwidth: Option<f64>,
+    /// How many evenly spaced points the density is evaluated at (`>= 2`,
+    /// default 512), from 3 bandwidths below the smallest value to 3 above
+    /// the largest.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) n_points: Option<Whole>,
+}
+
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct KdeDto {
+    /// The evaluation points.
+    pub(crate) x: Vec<f64>,
+    /// The density at each point of `x`.
+    pub(crate) density: Vec<f64>,
+    /// The bandwidth used.
+    pub(crate) bandwidth: f64,
+}
+
+/// The rules `kde` picks a bandwidth by, as the wire names them.
+const KDE_RULES: [(&str, crate::distribution::BandwidthMethod); 2] = [
+    ("silverman", crate::distribution::BandwidthMethod::Silverman),
+    ("scott", crate::distribution::BandwidthMethod::Scott),
+];
+
+pub(crate) fn kde_dto(input: KdeInputDto) -> Result<KdeDto, WireError> {
+    let data = input.data;
+    if data.len() < 2 {
+        return Err(WireError::too_few(
+            "data",
+            2,
+            data.len(),
+            format!(
+                "data: a density needs at least 2 values, got {}",
+                data.len()
+            ),
+        ));
+    }
+    if let Some(index) = data.iter().position(|v| !v.is_finite()) {
+        return Err(WireError::new(
+            code::VALUE_NOT_FINITE,
+            Some(index),
+            format!("data[{index}] is not a finite number"),
+        )
+        .about("data"));
+    }
+    let method = match (input.rule.as_deref(), input.bandwidth) {
+        (Some(_), Some(_)) => {
+            return Err(WireError::new(
+                code::INVALID_OPTION,
+                None,
+                "rule and bandwidth are given together -- a rule picks the bandwidth, so give \
+                 one or the other",
+            )
+            .about("bandwidth"))
+        }
+        (_, Some(h)) => {
+            if !within(h, Bound::Open(0.0), Bound::Unbounded) {
+                return Err(WireError::out_of_range(
+                    "bandwidth",
+                    Bound::Open(0.0),
+                    Bound::Unbounded,
+                    h,
+                    format!("bandwidth must be > 0, got {h}"),
+                ));
+            }
+            crate::distribution::BandwidthMethod::Manual(h)
+        }
+        (Some(rule), None) => named("rule", rule, &KDE_RULES)?,
+        (None, None) => crate::distribution::BandwidthMethod::Silverman,
+    };
+    let n_points = match input.n_points {
+        None => 512,
+        Some(Whole(v)) if v >= 2.0 => Whole(v).count(),
+        Some(Whole(v)) => {
+            return Err(WireError::out_of_range(
+                "n_points",
+                Bound::Closed(2.0),
+                Bound::Unbounded,
+                v,
+                format!("n_points must be at least 2, got {v}"),
+            ))
+        }
+    };
+    let r = crate::distribution::kde(&data, method, n_points).ok_or_else(|| {
+        WireError::degenerate_data(
+            "data: every value is the same, so a rule has no spread to pick a bandwidth from \
+             -- give a bandwidth",
+        )
+        .about("data")
+    })?;
+    Ok(KdeDto {
+        x: r.x,
+        density: r.density,
+        bandwidth: r.bandwidth,
+    })
+}
+
 // ── Autocorrelation ──────────────────────────────────────────────────────────
 
 /// Input for `acf` and `pacf`.
@@ -7268,5 +7391,63 @@ pub(crate) mod card_schema {
         schemars::json_schema!({
             "anyOf": [{ "type": "string", "enum": ["bic"] }, { "type": "number" }]
         })
+    }
+}
+
+#[cfg(test)]
+mod kde_refusals {
+    use super::*;
+
+    fn kde(json: serde_json::Value) -> Result<KdeDto, WireError> {
+        kde_dto(serde_json::from_value(json).expect("a request"))
+    }
+
+    #[test]
+    fn each_refusal_names_its_reason_and_option() {
+        let data = serde_json::json!([1.0, 2.0, 4.0, 7.0]);
+        let refused = |json| kde(json).expect_err("refused");
+        let e = refused(serde_json::json!({ "data": [1.0] }));
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("insufficient_data", Some("data"))
+        );
+        let e = refused(serde_json::json!({ "data": data, "bandwidth": 0.0 }));
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("parameter_out_of_range", Some("bandwidth"))
+        );
+        let e = refused(serde_json::json!({ "data": data, "n_points": 1 }));
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("parameter_out_of_range", Some("n_points"))
+        );
+        let e = refused(serde_json::json!({ "data": data, "rule": "terrell" }));
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("unknown_option", Some("rule"))
+        );
+        let e = refused(serde_json::json!({ "data": data, "rule": "scott", "bandwidth": 1.0 }));
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("invalid_option", Some("bandwidth"))
+        );
+        let e = refused(serde_json::json!({ "data": [3.0, 3.0, 3.0] }));
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("degenerate_data", Some("data"))
+        );
+        // A bandwidth of your own still works on equal values.
+        let ok =
+            kde(serde_json::json!({ "data": [3.0, 3.0, 3.0], "bandwidth": 0.5, "n_points": 5 }))
+                .expect("a density");
+        assert_eq!((ok.x.len(), ok.bandwidth), (5, 0.5));
+        // 512 points by default.
+        assert_eq!(
+            kde(serde_json::json!({ "data": data }))
+                .expect("a density")
+                .x
+                .len(),
+            512
+        );
     }
 }

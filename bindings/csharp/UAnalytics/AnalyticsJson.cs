@@ -48,6 +48,8 @@ namespace UAnalytics;
 [JsonSerializable(typeof(EwmaResult))]
 [JsonSerializable(typeof(PeriodResult))]
 [JsonSerializable(typeof(AcfResult))]
+[JsonSerializable(typeof(KdeResult))]
+[JsonSerializable(typeof(BandwidthRule))]
 [JsonSerializable(typeof(PacfResult))]
 [JsonSerializable(typeof(SpectralResidualResult))]
 [JsonSerializable(typeof(StlResult))]

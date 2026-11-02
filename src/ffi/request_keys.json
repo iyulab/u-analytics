@@ -277,6 +277,19 @@
         "data": {}
       }
     },
+    "uanalytics_kde": {
+      "properties": {
+        "bandwidth": {},
+        "data": {},
+        "n_points": {},
+        "rule": {
+          "enum": [
+            "silverman",
+            "scott"
+          ]
+        }
+      }
+    },
     "uanalytics_kpss_test": {
       "properties": {
         "data": {},

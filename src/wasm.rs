@@ -26,8 +26,8 @@ use crate::wire::{
         mann_whitney_dto, one_sample_t_dto, one_way_anova_dto, p_adjust_dto, paired_t_dto,
         shapiro_wilk_dto, two_sample_t_dto, wilcoxon_dto, AdfInputDto, KpssInputDto,
     },
-    imr_dto, laney_p_dto, laney_u_dto, multi_pelt_dto, np_chart_dto, p_chart_dto, pacf_dto,
-    pelt_dto, percentile_capability_dto,
+    imr_dto, kde_dto, laney_p_dto, laney_u_dto, multi_pelt_dto, np_chart_dto, p_chart_dto,
+    pacf_dto, pelt_dto, percentile_capability_dto,
     point_process::{
         check_truncation, laplace_dto, mil_hdbk_189_dto, power_law_dto, ObservationDto,
     },
@@ -40,9 +40,10 @@ use crate::wire::{
     rules_from_json, run_rules_dto, sample_size_value, simple_regression_dto, t_chart_dto,
     u_chart_dto, xbar_r_dto, xbar_s_dto, AttributeStandardDto, AutocorrelationInputDto,
     CapabilityInputDto, CorrelationInputDto, CusumInputDto, EwmaInputDto, GageRRInputDto,
-    GoodnessOfFitInputDto, LimitsInputDto, MultiPeltInputDto, MultipleRegressionInputDto,
-    PeltInputDto, PercentileCapabilityInputDto, PredictionErrorsInputDto, RegressionInputDto,
-    SeasonalityInputDto, SmoothingInputDto, SpectralResidualInputDto, StlInputDto, WireError,
+    GoodnessOfFitInputDto, KdeInputDto, LimitsInputDto, MultiPeltInputDto,
+    MultipleRegressionInputDto, PeltInputDto, PercentileCapabilityInputDto,
+    PredictionErrorsInputDto, RegressionInputDto, SeasonalityInputDto, SmoothingInputDto,
+    SpectralResidualInputDto, StlInputDto, WireError,
 };
 
 // ---------------------------------------------------------------------------
@@ -1673,6 +1674,19 @@ pub fn boxcox_capability(
 /// `n / 2` are admissible. Each candidate carries the ACF at its lag (its
 /// strength), the periodogram bin that produced it (1-based, of the padded
 /// transform), that bin's power and share of the total.
+/// Gaussian kernel density estimate of a sample (at least 2 values):
+/// `{ x, density, bandwidth }` on `n_points` (default 512) evenly spaced
+/// points from 3 bandwidths below the smallest value to 3 above the largest.
+/// The bandwidth is Silverman's rule (0.9 · min(σ, IQR / 1.34) · n^−1/5), Scott's
+/// (`rule: "scott"`, 1.06 · σ · n^−1/5) or your own (`bandwidth`).
+#[wasm_bindgen(unchecked_return_type = "KdeDto")]
+pub fn kde(
+    #[wasm_bindgen(unchecked_param_type = "KdeInputDto")] input: JsValue,
+) -> Result<JsValue, JsValue> {
+    let input: KdeInputDto = from_js(input, "input")?;
+    to_js(&kde_dto(input).map_err(js_err)?)
+}
+
 /// Sample autocorrelation of a series (at least 2 values) for lags 0 to
 /// `max_lag` (absent = `min(⌊10·log₁₀ n⌋, n − 1)`): `{ acf, confidence_threshold,
 /// bartlett_limits }`. `confidence_threshold` is the 95 % white-noise band
@@ -3324,10 +3338,10 @@ mod engine_card_tests {
     use crate::wire::{
         counter, hypothesis, point_process, reliability, AcfDto, CapabilityDto, ChartPointDto,
         CorrelationMatrixDto, CusumDto, DistributionFitDto, EwmaDto, FixedLimitChartDto, GChartDto,
-        GageRRAnovaResultDto, GageRRResultDto, GoodnessOfFitResultDto, ImrChartDto, LaneyPChartDto,
-        LaneyUChartDto, PChartDto, PacfDto, PeltResultDto, PercentileCapabilityDto, RegressionDto,
-        SeasonalityDto, SpectralResidualDto, StlDto, TChartDto, UChartDto, XbarRChartDto,
-        XbarSChartDto,
+        GageRRAnovaResultDto, GageRRResultDto, GoodnessOfFitResultDto, ImrChartDto, KdeDto,
+        LaneyPChartDto, LaneyUChartDto, PChartDto, PacfDto, PeltResultDto, PercentileCapabilityDto,
+        RegressionDto, SeasonalityDto, SpectralResidualDto, StlDto, TChartDto, UChartDto,
+        XbarRChartDto, XbarSChartDto,
     };
 
     fn schemas() -> Schemas {
@@ -3461,6 +3475,11 @@ mod engine_card_tests {
             "fit_best",
             vec![arg("data", numbers())],
             s.of::<Vec<DistributionFitDto>>(),
+        );
+        s.op(
+            "kde",
+            vec![arg("input", s.of::<KdeInputDto>())],
+            s.of::<KdeDto>(),
         );
         s.op(
             "acf",

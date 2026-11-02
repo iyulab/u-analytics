@@ -8,6 +8,16 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- `kde`: a Gaussian kernel density estimate on every transport (WASM, C ABI `uanalytics_kde`, .NET
+  `AnalyticsClient.Kde`). It returns `{ x, density, bandwidth }` on `n_points` (default 512) evenly spaced
+  points. The bandwidth comes from Silverman's rule (default), Scott's (`rule: "scott"`), or is your own
+  (`bandwidth`). Refusals: `insufficient_data` (fewer than 2 values), `value_not_finite`,
+  `parameter_out_of_range` (`bandwidth` ≤ 0, `n_points` < 2), `unknown_option` (`rule`), `invalid_option`
+  (`rule` with `bandwidth`) and `degenerate_data` (all values equal under a rule). Checked against SciPy's
+  `gaussian_kde` to 1e-12.
+
 ### Changed
 
 - `Pelt` with the L2 cost on one or two channels is near-linear in the length whether the series

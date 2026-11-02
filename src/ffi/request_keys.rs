@@ -685,6 +685,11 @@ fn entry_points() -> Vec<(&'static str, Entry, Value)> {
             json!({ "data": positive() }),
         ),
         ep(
+            "uanalytics_kde",
+            uanalytics_kde,
+            json!({ "data": positive(), "rule": "scott", "n_points": 16 }),
+        ),
+        ep(
             "uanalytics_acf",
             uanalytics_acf,
             json!({ "data": seasonal(84, 7), "max_lag": 10 }),

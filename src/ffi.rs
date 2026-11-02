@@ -1472,6 +1472,15 @@ wire_export!(
 );
 
 wire_export!(
+    /// Gaussian kernel density `{data, rule?, bandwidth?, n_points?}` → `{x,
+    /// density, bandwidth}` (Silverman's rule by default, Scott's, or a
+    /// bandwidth of your own; 512 points by default).
+    uanalytics_kde,
+    crate::wire::KdeInputDto,
+    |r| crate::wire::kde_dto(r)
+);
+
+wire_export!(
     /// Sample autocorrelation `{data, max_lag?}` → `{acf, confidence_threshold,
     /// bartlett_limits}` (lags 0 to max_lag; Bartlett's 95 % limits per lag).
     uanalytics_acf,

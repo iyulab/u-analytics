@@ -664,6 +664,23 @@ public sealed class AnalyticsClient : IDisposable
             ("sigma", Request.Num("sigma", sigma)), ("lambda", Request.Num("lambda", lambda)),
             ("l_factor", Request.Num("l_factor", lFactor)));
 
+    // ── Kernel density ──
+
+    /// <summary>
+    /// Gaussian kernel density estimate of <paramref name="data"/> (at least 2 values) on
+    /// <paramref name="points"/> evenly spaced points (at least 2) from 3 bandwidths below the
+    /// smallest value to 3 above the largest. The bandwidth is <paramref name="bandwidth"/> when
+    /// given (&gt; 0), else <paramref name="rule"/>'s: Silverman's 0.9 · min(σ, IQR / 1.34) · n^−1/5
+    /// or Scott's 1.06 · σ · n^−1/5. Data whose values are all the same gives a rule nothing to
+    /// pick from (<c>degenerate_data</c>); a bandwidth of your own still works.
+    /// </summary>
+    public KdeResult Kde(double[] data, BandwidthRule? rule = null, double? bandwidth = null, int? points = null)
+        => Call(NativeInterop.uanalytics_kde, AnalyticsJson.Default.KdeResult,
+            ("data", Request.Nums("data", data)),
+            ("rule", rule is { } r ? Request.Option(r, AnalyticsJson.Default.BandwidthRule) : null),
+            ("bandwidth", bandwidth is { } h ? Request.Num("bandwidth", h) : null),
+            ("n_points", points is { } k ? JsonValue.Create(k) : null));
+
     // ── Autocorrelation ──
 
     /// <summary>

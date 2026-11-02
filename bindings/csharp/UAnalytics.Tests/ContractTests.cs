@@ -130,6 +130,7 @@ public class ContractTests
         ["Cusum"] = c => Out(c.Cusum(Series, 10, 0.25), AnalyticsJson.Default.CusumResult),
         ["Ewma"] = c => Out(c.Ewma(Series, 10, 0.25, 0.3, 2.8), AnalyticsJson.Default.EwmaResult),
         ["EstimatePeriod"] = c => Out(c.EstimatePeriod(Seasonal(84, 7)), AnalyticsJson.Default.PeriodResult),
+        ["Kde"] = c => Out(c.Kde(Seasonal(84, 7), BandwidthRule.Scott, points: 16), AnalyticsJson.Default.KdeResult),
         ["Acf"] = c => Out(c.Acf(Seasonal(84, 7), 10), AnalyticsJson.Default.AcfResult),
         ["Pacf"] = c => Out(c.Pacf(Seasonal(84, 7)), AnalyticsJson.Default.PacfResult),
         ["EstimatePeriod(none)"] = c => Out(c.EstimatePeriod(Series), AnalyticsJson.Default.PeriodResult),

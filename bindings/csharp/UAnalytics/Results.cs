@@ -402,6 +402,19 @@ public sealed record AdfLevel(double Level, double CriticalValue, bool Rejected)
 /// <summary>Augmented Dickey-Fuller test.</summary>
 public sealed record AdfResult(double Statistic, int NLags, int NObs, IReadOnlyList<AdfLevel> Levels);
 
+/// <summary>A kernel density estimate: the density at each evaluation point, and the bandwidth used.</summary>
+public sealed record KdeResult(IReadOnlyList<double> X, IReadOnlyList<double> Density, double Bandwidth);
+
+/// <summary>The rule a kernel density estimate picks its bandwidth by.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<BandwidthRule>))]
+public enum BandwidthRule
+{
+    /// <summary>Silverman's rule of thumb, 0.9 · min(σ, IQR / 1.34) · n^−1/5 — robust to outliers.</summary>
+    [JsonStringEnumMemberName("silverman")] Silverman,
+    /// <summary>Scott's rule, 1.06 · σ · n^−1/5 — for roughly normal data.</summary>
+    [JsonStringEnumMemberName("scott")] Scott,
+}
+
 /// <summary>Deterministic terms of an ADF regression.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<AdfModel>))]
 public enum AdfModel

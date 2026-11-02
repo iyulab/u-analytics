@@ -1710,6 +1710,79 @@
       ],
       "type": "object"
     },
+    "KdeDto": {
+      "properties": {
+        "bandwidth": {
+          "description": "The bandwidth used.",
+          "format": "double",
+          "type": "number"
+        },
+        "density": {
+          "description": "The density at each point of `x`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "x": {
+          "description": "The evaluation points.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "x",
+        "density",
+        "bandwidth"
+      ],
+      "type": "object"
+    },
+    "KdeInputDto": {
+      "additionalProperties": false,
+      "description": "Input for `kde`.",
+      "properties": {
+        "bandwidth": {
+          "default": null,
+          "description": "A bandwidth of your own (`> 0`) instead of a rule's.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "data": {
+          "description": "At least 2 values.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "n_points": {
+          "description": "How many evenly spaced points the density is evaluated at (`>= 2`,\ndefault 512), from 3 bandwidths below the smallest value to 3 above\nthe largest.",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "rule": {
+          "default": null,
+          "description": "The rule that picks the bandwidth: `\"silverman\"` (default) or\n`\"scott\"`. Not with `bandwidth`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
     "KpssDto": {
       "properties": {
         "levels": {
@@ -4641,6 +4714,22 @@
     },
     "jarque_bera_test.output": {
       "$ref": "#/$defs/TestResultDto"
+    },
+    "kde.input": {
+      "additionalProperties": false,
+      "description": "The arguments of kde(input), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/KdeInputDto"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "kde.output": {
+      "$ref": "#/$defs/KdeDto"
     },
     "kpss_test.input": {
       "additionalProperties": false,

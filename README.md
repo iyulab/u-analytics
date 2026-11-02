@@ -993,6 +993,16 @@ detect_changepoints(input: {
 detect_changepoints_multi(input: { signals: number[][], cost?, penalty?, min_segment_len? }):
   { changepoints: number[], n_segments: number }   // channels of equal length
 
+// Gaussian kernel density. The bandwidth is a rule's -- "silverman" (default,
+// 0.9 * min(sd, IQR / 1.34) * n^-1/5) or "scott" (1.06 * sd * n^-1/5) -- or your own
+// `bandwidth` (> 0; not with `rule` -> invalid_option). All values equal: a rule has no
+// spread to read -> degenerate_data; a bandwidth of your own still works.
+kde(input: { data: number[], rule?: "silverman" | "scott", bandwidth?: number,
+             n_points?: number }):  // >= 2 values; n_points >= 2, default 512
+  { x: number[],          // evenly spaced, 3 bandwidths below the smallest value to 3 above the largest
+    density: number[],    // the estimate at each x
+    bandwidth: number }
+
 // Autocorrelation. max_lag absent = min(floor(10 log10 n), n - 1) (and below n / 2
 // for pacf, statsmodels' limit); outside 1..that -> parameter_out_of_range.
 acf(input: { data: number[], max_lag?: number }):  // >= 2 values, not constant
@@ -1168,6 +1178,7 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_fit_best` | `fit_best(data)` | `{ data: [...] }` |
 | `uanalytics_goodness_of_fit` | `goodness_of_fit(input)` | `input` as is |
 | `uanalytics_estimate_period` | `estimate_period(input)` | `input` as is |
+| `uanalytics_kde` | `kde(input)` | `input` as is |
 | `uanalytics_acf` | `acf(input)` | `input` as is |
 | `uanalytics_pacf` | `pacf(input)` | `input` as is |
 | `uanalytics_spectral_residual` | `spectral_residual(input)` | `input` as is |

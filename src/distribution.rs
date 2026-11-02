@@ -2431,3 +2431,71 @@ mod goodness_of_fit_reference {
         }
     }
 }
+
+/// The density against SciPy's `gaussian_kde` with the same bandwidth, and the
+/// two rules against their formulas.
+#[cfg(test)]
+mod scipy_kde_reference {
+    use super::*;
+
+    // SciPy 1.17.1, NumPy 2.4.6: scipy.stats.gaussian_kde(data, bw_method=h / std(data, ddof=1))
+    // evaluated on the grid kde builds; Silverman / Scott by their formulas (np.percentile, linear).
+    const DATA: [f64; 12] = [2.1, 3.4, 1.9, 5.6, 4.4, 3.3, 7.8, 2.6, 3.9, 4.1, 6.2, 2.8];
+    const SILVERMAN: f64 = 0.7967756865840121;
+    const SCOTT: f64 = 1.1385490329223509;
+    const SILVERMAN_DENSITY: [f64; 9] = [
+        0.0007066889808412874,
+        0.03580684164023267,
+        0.18353112427620594,
+        0.23798379981197426,
+        0.13633500262791384,
+        0.08452484667619467,
+        0.052115888610237714,
+        0.017530164985399863,
+        0.00046367095048729804,
+    ];
+    const SCOTT_DENSITY: [f64; 9] = [
+        0.0005845362991529891,
+        0.019392325594481553,
+        0.12301502047560456,
+        0.2108829109504221,
+        0.14715473950228602,
+        0.07867154443668554,
+        0.0398740041713175,
+        0.008464240871237205,
+        0.00032631483638323043,
+    ];
+    const MANUAL_DENSITY: [f64; 9] = [
+        0.0007323711273510353,
+        0.04017958036368482,
+        0.193937781081597,
+        0.2410153369290394,
+        0.13316172496294076,
+        0.08659812892373103,
+        0.05293645833627802,
+        0.02001662229267105,
+        0.0004925126676146541,
+    ];
+
+    fn close(a: &[f64], b: &[f64]) {
+        assert_eq!(a.len(), b.len());
+        for (i, (x, y)) in a.iter().zip(b).enumerate() {
+            assert!(
+                (x - y).abs() <= 1e-12 * y.abs().max(1e-3),
+                "point {i}: {x} vs {y}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_density_and_both_rules_match_scipy() {
+        let s = kde(&DATA, BandwidthMethod::Silverman, 9).expect("a density");
+        assert!((s.bandwidth - SILVERMAN).abs() <= 1e-12 * SILVERMAN);
+        close(&s.density, &SILVERMAN_DENSITY);
+        let s = kde(&DATA, BandwidthMethod::Scott, 9).expect("a density");
+        assert!((s.bandwidth - SCOTT).abs() <= 1e-12 * SCOTT);
+        close(&s.density, &SCOTT_DENSITY);
+        let m = kde(&DATA, BandwidthMethod::Manual(0.75), 9).expect("a density");
+        close(&m.density, &MANUAL_DENSITY);
+    }
+}
