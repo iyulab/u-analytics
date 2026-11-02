@@ -33,6 +33,8 @@ fn write_json<T: Serialize>(result_ptr: *mut *mut libc::c_char, value: &T) -> i3
     if result_ptr.is_null() {
         return -1;
     }
+    #[cfg(test)]
+    crate::finite_out::assert_finite(value);
     match serde_json::to_string(value) {
         Ok(json) => match CString::new(json) {
             Ok(cstr) => {

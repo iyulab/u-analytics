@@ -59,6 +59,9 @@ pub mod weibull;
 #[cfg(any(feature = "ffi", feature = "wasm"))]
 mod wire;
 
+#[cfg(all(test, any(feature = "wasm", feature = "ffi")))]
+mod finite_out;
+
 #[cfg(feature = "wasm")]
 pub mod wasm;
 

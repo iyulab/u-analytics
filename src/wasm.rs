@@ -123,6 +123,8 @@ impl From<serde_wasm_bindgen::Error> for WireError {
 /// default of omitting the key made the two transports disagree on every
 /// optional field.
 fn to_js<T: Serialize>(val: &T) -> Result<JsValue, JsValue> {
+    #[cfg(test)]
+    crate::finite_out::assert_finite(val);
     val.serialize(&serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true))
         .map_err(js_err)
 }
