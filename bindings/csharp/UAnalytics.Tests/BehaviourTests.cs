@@ -210,4 +210,59 @@ public class BehaviourTests
             JsonSerializer.Deserialize("""{"statistic": 1, "p_value": 0.2, "direction": "sideways", "events_used": 3, "df": null}""",
                 AnalyticsJson.Default.TrendTestResult));
     }
+
+    [Fact]
+    public void A_forecast_total_and_when_it_reaches_a_level()
+    {
+        // About 760 a day, 4 820 in stock: the total crosses it in the 7th day.
+        double[] use = [.. Enumerable.Range(0, 30).Select(i => 760.0 + 15 * Math.Sin(i))];
+        var r = _client.ExponentialSmoothing(use, SmoothingMethod.Simple, horizon: 20,
+            crossing: new Crossing(4820, [0.1, 0.5, 0.9], Paths: 2000, Seed: 7));
+
+        var day7 = r.Forecasts[6];
+        Assert.Equal(r.Forecasts.Take(7).Sum(f => f.Mean), day7.Cumulative.Mean, 9);
+        var p = day7.Cumulative.Prediction!;
+        Assert.True(p.Lower < day7.Cumulative.Mean && day7.Cumulative.Mean < p.Upper);
+
+        var fp = r.FirstPassage!;
+        Assert.Equal(4820, fp.Threshold);
+        Assert.Equal(2000, fp.Paths);
+        Assert.Equal(1.0, fp.Probability);
+        var times = fp.Quantiles.Select(q => q.Time!.Value).ToArray();
+        Assert.True(times[0] < times[1] && times[1] < times[2]);
+        Assert.InRange(times[1], 6.0, 7.0);
+
+        // The same seed, the same times; without crossing, no first passage.
+        var again = _client.ExponentialSmoothing(use, SmoothingMethod.Simple, horizon: 20,
+            crossing: new Crossing(4820, [0.1, 0.5, 0.9], Paths: 2000, Seed: 7));
+        Assert.Equal(times, again.FirstPassage!.Quantiles.Select(q => q.Time!.Value).ToArray());
+        Assert.Null(_client.ExponentialSmoothing(use, SmoothingMethod.Simple, horizon: 3).FirstPassage);
+    }
+
+    [Fact]
+    public void A_crossing_the_model_cannot_follow_is_refused()
+    {
+        double[] use = [.. Enumerable.Range(0, 30).Select(i => 760.0 + 15 * Math.Sin(i))];
+        var zero = Assert.Throws<AnalyticsException>(() => _client.ExponentialSmoothing(use, SmoothingMethod.Simple, horizon: 5, crossing: new Crossing(0)));
+        Assert.Equal("invalid_option", zero.ErrorCode);
+        Assert.Equal("crossing.threshold", zero.Parameter);
+
+        var noHorizon = Assert.Throws<AnalyticsException>(() => _client.ExponentialSmoothing(use, SmoothingMethod.Simple, crossing: new Crossing(100)));
+        Assert.Equal("parameter_out_of_range", noHorizon.ErrorCode);
+        Assert.Equal("horizon", noHorizon.Parameter);
+
+        var q = Assert.Throws<AnalyticsException>(() => _client.ExponentialSmoothing(use, SmoothingMethod.Simple, horizon: 5, crossing: new Crossing(100, [0.5, 1.5])));
+        Assert.Equal("parameter_out_of_range", q.ErrorCode);
+        Assert.Equal("crossing.quantiles", q.Parameter);
+        Assert.Equal(1, q.Index);
+
+        var mult = Assert.Throws<AnalyticsException>(() => _client.ExponentialSmoothing(use, SmoothingMethod.HoltWinters, period: 4,
+            seasonality: Seasonality.Multiplicative, horizon: 5, crossing: new Crossing(100)));
+        Assert.Equal("crossing", mult.Parameter);
+
+        // At most 1e9 simulated steps: 100 000 steps take at most 10 000 futures.
+        var many = Assert.Throws<AnalyticsException>(() => _client.ExponentialSmoothing(use, SmoothingMethod.Simple, horizon: 100_000, crossing: new Crossing(100, Paths: 20_000)));
+        Assert.Equal("crossing.paths", many.Parameter);
+        Assert.Equal(10_000, many.Details!.Value.GetProperty("max").GetDouble());
+    }
 }

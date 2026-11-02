@@ -753,11 +753,14 @@ public sealed class AnalyticsClient : IDisposable
     /// <c>invalid_option</c>.
     /// Forecasts <paramref name="horizon"/> steps (0 to 100 000) with the prediction intervals
     /// of the additive-error state-space model at <paramref name="level"/> (in (0, 1);
-    /// <c>null</c> takes 0.95) — none for multiplicative seasonality.
+    /// <c>null</c> takes 0.95) — none for multiplicative seasonality. Each forecast also carries the
+    /// forecast of the total up to it (<see cref="SmoothingForecast.Cumulative"/>). With
+    /// <paramref name="crossing"/>, <see cref="ExponentialSmoothingResult.FirstPassage"/> is when that
+    /// total reaches its level (needs <paramref name="horizon"/> ≥ 1 and additive errors).
     /// </summary>
     public ExponentialSmoothingResult ExponentialSmoothing(double[] data, SmoothingMethod method,
         double? alpha = null, double? beta = null, double? gamma = null, int? period = null,
-        Seasonality? seasonality = null, int horizon = 0, double? level = null)
+        Seasonality? seasonality = null, int horizon = 0, double? level = null, Crossing? crossing = null)
         => Call(NativeInterop.uanalytics_exponential_smoothing, AnalyticsJson.Default.ExponentialSmoothingResult,
             ("data", Request.Nums("data", data)),
             ("method", Request.Option(method, AnalyticsJson.Default.SmoothingMethod)),
@@ -767,7 +770,14 @@ public sealed class AnalyticsClient : IDisposable
             ("period", period is { } p ? JsonValue.Create(p) : null),
             ("seasonality", seasonality is { } s ? Request.Option(s, AnalyticsJson.Default.Seasonality) : null),
             ("horizon", JsonValue.Create(horizon)),
-            ("level", Request.Num("level", level)));
+            ("level", Request.Num("level", level)),
+            ("crossing", crossing is { } c ? new JsonObject
+            {
+                ["threshold"] = Request.Num("crossing.threshold", c.Threshold),
+                ["quantiles"] = c.Quantiles is { } q ? Request.Nums("crossing.quantiles", q) : null,
+                ["paths"] = c.Paths is { } n ? JsonValue.Create(n) : null,
+                ["seed"] = c.Seed is { } sd ? JsonValue.Create(sd) : null,
+            } : null));
 
     // ── Correlation ──
 

@@ -815,6 +815,71 @@
       ],
       "type": "object"
     },
+    "CrossingInputDto": {
+      "additionalProperties": false,
+      "description": "The level a forecast total is followed to, and how.",
+      "properties": {
+        "paths": {
+          "description": "Futures simulated, 1 to 1 000 000 and at most 10^9 / `horizon`.\nOmitted: 10 000 (or that most, when fewer).",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "quantiles": {
+          "default": null,
+          "description": "Quantiles of the time it is reached, each in (0, 1]. Omitted:\n`[0.1, 0.5, 0.9]`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "seed": {
+          "description": "Seed of the simulated innovations, 0 to 2^53. Omitted: 0.",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "threshold": {
+          "description": "The level the total over steps 1, 2, … reaches, non-zero: from below\nwhen positive (a quantity consumed), from above when negative.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "threshold"
+      ],
+      "type": "object"
+    },
+    "CumulativeForecastDto": {
+      "description": "The forecast of a total over the first steps: its point value and its\ninterval at the same level -- from the covariances of the step errors, not\nthe sum of the steps' intervals.",
+      "properties": {
+        "mean": {
+          "format": "double",
+          "type": "number"
+        },
+        "prediction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IntervalDto"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`null` when the step's `prediction` is."
+        }
+      },
+      "required": [
+        "mean"
+      ],
+      "type": "object"
+    },
     "CusumDto": {
       "properties": {
         "h": {
@@ -1083,6 +1148,38 @@
       ],
       "type": "object"
     },
+    "FirstPassageDto": {
+      "description": "When the forecast total first reaches the requested level, over simulated\nfutures of the fitted model.",
+      "properties": {
+        "paths": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "probability": {
+          "description": "Share of the futures that reach it within the horizon.",
+          "format": "double",
+          "type": "number"
+        },
+        "quantiles": {
+          "items": {
+            "$ref": "#/$defs/PassageQuantileDto"
+          },
+          "type": "array"
+        },
+        "threshold": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "threshold",
+        "probability",
+        "paths",
+        "quantiles"
+      ],
+      "type": "object"
+    },
     "FixedLimitChartDto": {
       "description": "NP and C charts: one set of limits for every point.",
       "properties": {
@@ -1120,6 +1217,10 @@
     "ForecastDto": {
       "description": "A forecast `step` periods after the last observation.",
       "properties": {
+        "cumulative": {
+          "$ref": "#/$defs/CumulativeForecastDto",
+          "description": "The total over steps 1..=`step`."
+        },
         "mean": {
           "format": "double",
           "type": "number"
@@ -1143,7 +1244,8 @@
       },
       "required": [
         "step",
-        "mean"
+        "mean",
+        "cumulative"
       ],
       "type": "object"
     },
@@ -2144,6 +2246,27 @@
       ],
       "type": "object"
     },
+    "PassageQuantileDto": {
+      "description": "One quantile of the time a forecast total reaches its level.",
+      "properties": {
+        "q": {
+          "format": "double",
+          "type": "number"
+        },
+        "time": {
+          "description": "Steps after the last observation, interpolated within the step it is\nreached in; `null` when fewer than a share `q` of the futures reach the\nlevel within the horizon.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "q"
+      ],
+      "type": "object"
+    },
     "PeltInputDto": {
       "additionalProperties": false,
       "properties": {
@@ -2813,6 +2936,17 @@
           },
           "type": "array"
         },
+        "first_passage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FirstPassageDto"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`null` unless `crossing` was asked for."
+        },
         "fitted": {
           "description": "One-step-ahead in-sample forecasts.",
           "items": {
@@ -2888,6 +3022,17 @@
             "number",
             "null"
           ]
+        },
+        "crossing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CrossingInputDto"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When the forecast total reaches a level (the result's `first_passage`);\nneeds a `horizon` of at least 1 and additive errors (not multiplicative\nseasonality). Omitted: not computed."
         },
         "data": {
           "items": {

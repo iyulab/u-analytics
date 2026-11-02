@@ -175,6 +175,14 @@
       "properties": {
         "alpha": {},
         "beta": {},
+        "crossing": {
+          "properties": {
+            "paths": {},
+            "quantiles": {},
+            "seed": {},
+            "threshold": {}
+          }
+        },
         "data": {},
         "gamma": {},
         "horizon": {},

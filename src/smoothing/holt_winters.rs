@@ -33,7 +33,10 @@
 //! Winters, P.R. (1960). "Forecasting Sales by Exponentially Weighted
 //! Moving Averages", *Management Science* 6(3), pp. 324-342.
 
-use super::forecast::{one_step_mse, residuals, valid_level, with_intervals, SmoothingForecast};
+use super::forecast::{
+    first_passage, one_step_mse, passage_arguments, residuals, valid_level, with_intervals,
+    FirstPassage, InnovationWeights, SmoothingForecast,
+};
 
 /// Seasonality type.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -110,15 +113,8 @@ impl HoltWintersResult {
         if !valid_level(level) {
             return None;
         }
-        let (alpha, beta, gamma, m) = (self.alpha, self.beta, self.gamma, self.period);
-        let c = move |j: usize| {
-            alpha * (1.0 + j as f64 * beta)
-                + if j % m == 0 {
-                    gamma * (1.0 - alpha)
-                } else {
-                    0.0
-                }
-        };
+        let weights = self.weights();
+        let c = move |j: usize| weights.c(j);
         let c: Option<&dyn Fn(usize) -> f64> = match self.seasonality {
             Seasonality::Additive => Some(&c),
             Seasonality::Multiplicative => None,
@@ -129,6 +125,46 @@ impl HoltWintersResult {
             one_step_mse(data, &self.fitted, self.first_error()),
             c,
             |h| self.forecast(h),
+        ))
+    }
+    /// The innovation weights of the model: the additive Holt-Winters weights `c_j = α (1 + j β) + γ (1 − α) [j mod m = 0]`.
+    fn weights(&self) -> InnovationWeights {
+        InnovationWeights {
+            level: self.alpha,
+            slope: self.alpha * self.beta,
+            season: self.gamma * (1.0 - self.alpha),
+            period: self.period,
+        }
+    }
+
+    /// When the forecast total over steps 1, 2, … first reaches `threshold`
+    /// (non-zero; from below when positive, from above when negative), over
+    /// `paths` simulated futures of the fitted model seeded with `seed`, within
+    /// `horizon` steps -- with the `quantiles` (each in (0, 1]) of that time
+    /// ([`FirstPassage`]). `data` is the series smoothed (for σ). `None` when
+    /// an argument is outside those ranges or there is no one-step error to
+    /// estimate σ from, or the seasonality is multiplicative (no additive innovations to simulate).
+    #[allow(clippy::too_many_arguments)]
+    pub fn first_passage(
+        &self,
+        data: &[f64],
+        horizon: usize,
+        threshold: f64,
+        quantiles: &[f64],
+        paths: usize,
+        seed: u64,
+    ) -> Option<FirstPassage> {
+        if !passage_arguments(horizon, threshold, quantiles, paths) {
+            return None;
+        }
+        if self.seasonality == Seasonality::Multiplicative {
+            return None;
+        }
+        let mse = one_step_mse(data, &self.fitted, self.first_error())?;
+        let means: Vec<f64> = (1..=horizon).map(|h| self.forecast(h)).collect();
+        let weights = self.weights();
+        Some(first_passage(
+            &means, mse, weights, threshold, quantiles, paths, seed,
         ))
     }
 }

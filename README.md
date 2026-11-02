@@ -846,6 +846,12 @@ exponential_smoothing(input: {
   seasonality?: "additive" | "multiplicative" | null,  // holt_winters; multiplicative needs data > 0
   horizon?: number | null,   // steps to forecast, 0..100000, default 0
   level?: number | null,     // of the prediction intervals, default 0.95
+  crossing?: {               // when the forecast total reaches a level; needs horizon >= 1
+    threshold: number,       //   non-zero: reached from below when > 0, from above when < 0
+    quantiles?: number[] | null,  // each in (0, 1], default [0.1, 0.5, 0.9]
+    paths?: number | null,   //   futures simulated, 1..1000000 and paths · horizon <= 1e9, default 10000
+    seed?: number | null,    //   0..2^53, default 0
+  } | null,
 }): { alpha: number, beta: number | null, gamma: number | null,   // used, given or estimated
       estimated: ("alpha" | "beta" | "gamma")[],                    // which were estimated
       components: { level: number[], trend: number[] | null, seasonal: number[] | null },
@@ -853,10 +859,21 @@ exponential_smoothing(input: {
       residuals: (number | null)[],        // null where fitted is the initialisation
       sigma: number,                       // RMS one-step error
       level: number,
-      forecasts: { step, mean, prediction: { lower, upper } | null }[] }
+      forecasts: { step, mean, prediction: { lower, upper } | null,
+                   cumulative: { mean, prediction: { lower, upper } | null } }[],  // total of steps 1..step
+      first_passage: { threshold, probability,   // share of futures reaching it within the horizon
+                       paths, quantiles: { q, time: number | null }[] } | null }  // null without crossing
 // The intervals are the additive-error state-space model's (ETS(A,N,N), (A,A,N),
 // (A,A,A); Hyndman et al. 2008) -- statsmodels' ETSModel with the same initial
 // states. Multiplicative seasonality has no closed form: prediction is null.
+// cumulative is the forecast of the total so far (stock consumed, wear, a budget
+// spent): its interval comes from the covariances of the step errors,
+// σ² Σ_{k<H} (1 + C_k)² with C_k the sum of the first k error weights -- wider than
+// the sum of the steps' variances, narrower than adding up the steps' intervals.
+// first_passage simulates the same model's innovations: time is in steps after the
+// last observation, interpolated within the step the total reaches the level in,
+// null when fewer than a share q of the futures reach it within the horizon.
+// Cost O(paths · horizon). crossing with multiplicative seasonality: invalid_option.
 prediction_errors(input: { observed: number[], predicted: number[],  // one length
                            parameters?: number | null }):           // p, 0..n-1, default 0
   { n, mean_error, mean_absolute_error,    // over n; errors are observed - predicted

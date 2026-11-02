@@ -565,9 +565,37 @@ public sealed record SmoothingComponents(
 
 /// <summary>
 /// A forecast <see cref="Step"/> periods after the last observation, with its prediction
-/// interval — <c>null</c> for multiplicative seasonality, which has no closed form.
+/// interval — <c>null</c> for multiplicative seasonality, which has no closed form — and the
+/// forecast of the total over steps 1 to <see cref="Step"/>.
 /// </summary>
-public sealed record SmoothingForecast(int Step, double Mean, ConfidenceInterval? Prediction);
+public sealed record SmoothingForecast(int Step, double Mean, ConfidenceInterval? Prediction, CumulativeForecast Cumulative);
+
+/// <summary>
+/// The forecast of a total over the first steps, with its interval at the same level — from the
+/// covariances of the step errors, not the sum of the steps' intervals (<c>null</c> when the step's
+/// <see cref="SmoothingForecast.Prediction"/> is).
+/// </summary>
+public sealed record CumulativeForecast(double Mean, ConfidenceInterval? Prediction);
+
+/// <summary>
+/// When the forecast total first reaches <see cref="Threshold"/>, over <see cref="Paths"/> simulated
+/// futures of the fitted model: the share that reach it within the horizon and the quantiles of the time.
+/// </summary>
+public sealed record FirstPassage(double Threshold, double Probability, int Paths, IReadOnlyList<PassageQuantile> Quantiles);
+
+/// <summary>
+/// The time (steps after the last observation, interpolated within the step) by which a share
+/// <see cref="Q"/> of the futures reach the level; <c>null</c> when fewer than that share do within the horizon.
+/// </summary>
+public sealed record PassageQuantile(double Q, double? Time);
+
+/// <summary>
+/// A level for <see cref="AnalyticsClient.ExponentialSmoothing"/> to follow the forecast total to:
+/// non-zero (reached from below when positive, from above when negative), the quantiles of the time
+/// (each in (0, 1]; <c>null</c> takes 0.1, 0.5, 0.9), the futures simulated (1 to 1 000 000;
+/// <c>null</c> takes 10 000) and their seed (<c>null</c> takes 0).
+/// </summary>
+public sealed record Crossing(double Threshold, IReadOnlyList<double>? Quantiles = null, int? Paths = null, long? Seed = null);
 
 /// <summary>
 /// Exponential smoothing: the constants used (<c>null</c> where the method has none) and the
@@ -578,7 +606,7 @@ public sealed record SmoothingForecast(int Step, double Mean, ConfidenceInterval
 public sealed record ExponentialSmoothingResult(
     double Alpha, double? Beta, double? Gamma, IReadOnlyList<string> Estimated,
     SmoothingComponents Components, IReadOnlyList<double> Fitted, IReadOnlyList<double?> Residuals,
-    double Sigma, double Level, IReadOnlyList<SmoothingForecast> Forecasts);
+    double Sigma, double Level, IReadOnlyList<SmoothingForecast> Forecasts, FirstPassage? FirstPassage);
 
 /// <summary>Correlation coefficient.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<CorrelationMethod>))]

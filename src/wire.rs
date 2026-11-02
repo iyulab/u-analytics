@@ -3919,6 +3919,38 @@ pub(crate) struct SmoothingInputDto {
     #[serde(default)]
     #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
     pub(crate) level: Option<f64>,
+    /// When the forecast total reaches a level (the result's `first_passage`);
+    /// needs a `horizon` of at least 1 and additive errors (not multiplicative
+    /// seasonality). Omitted: not computed.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    pub(crate) crossing: Option<CrossingInputDto>,
+}
+
+/// The level a forecast total is followed to, and how.
+#[derive(Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CrossingInputDto {
+    /// The level the total over steps 1, 2, … reaches, non-zero: from below
+    /// when positive (a quantity consumed), from above when negative.
+    pub(crate) threshold: f64,
+    /// Quantiles of the time it is reached, each in (0, 1]. Omitted:
+    /// `[0.1, 0.5, 0.9]`.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number[] | null"))]
+    pub(crate) quantiles: Option<Vec<f64>>,
+    /// Futures simulated, 1 to 1 000 000 and at most 10^9 / `horizon`.
+    /// Omitted: 10 000 (or that most, when fewer).
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) paths: Option<Whole>,
+    /// Seed of the simulated innovations, 0 to 2^53. Omitted: 0.
+    #[serde(default)]
+    #[cfg_attr(feature = "wasm", tsify(optional, type = "number | null"))]
+    pub(crate) seed: Option<Whole>,
 }
 
 /// The smoothed components, one value per observation.
@@ -3944,6 +3976,48 @@ pub(crate) struct ForecastDto {
     pub(crate) mean: f64,
     /// `null` for multiplicative seasonality, which has no closed form.
     pub(crate) prediction: Option<IntervalDto>,
+    /// The total over steps 1..=`step`.
+    pub(crate) cumulative: CumulativeForecastDto,
+}
+
+/// The forecast of a total over the first steps: its point value and its
+/// interval at the same level -- from the covariances of the step errors, not
+/// the sum of the steps' intervals.
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct CumulativeForecastDto {
+    pub(crate) mean: f64,
+    /// `null` when the step's `prediction` is.
+    pub(crate) prediction: Option<IntervalDto>,
+}
+
+/// One quantile of the time a forecast total reaches its level.
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct PassageQuantileDto {
+    pub(crate) q: f64,
+    /// Steps after the last observation, interpolated within the step it is
+    /// reached in; `null` when fewer than a share `q` of the futures reach the
+    /// level within the horizon.
+    pub(crate) time: Option<f64>,
+}
+
+/// When the forecast total first reaches the requested level, over simulated
+/// futures of the fitted model.
+#[derive(Serialize, Debug)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+pub(crate) struct FirstPassageDto {
+    pub(crate) threshold: f64,
+    /// Share of the futures that reach it within the horizon.
+    pub(crate) probability: f64,
+    pub(crate) paths: usize,
+    pub(crate) quantiles: Vec<PassageQuantileDto>,
 }
 
 /// Exponential smoothing of a series and its forecasts.
@@ -3974,6 +4048,8 @@ pub(crate) struct SmoothingDto {
     /// Level of the prediction intervals.
     pub(crate) level: f64,
     pub(crate) forecasts: Vec<ForecastDto>,
+    /// `null` unless `crossing` was asked for.
+    pub(crate) first_passage: Option<FirstPassageDto>,
 }
 
 /// A smoothing constant: given, in (0, 1).
@@ -3988,6 +4064,113 @@ fn smoothing_constant(parameter: &'static str, value: f64) -> Result<f64, WireEr
             value,
             format!("{parameter} must be strictly between 0 and 1, got {value}"),
         ))
+    }
+}
+
+/// Most futures a `crossing` may simulate.
+const MAX_PASSAGE_PATHS: f64 = 1_000_000.0;
+
+/// Most simulated steps (futures × horizon) a `crossing` may ask for: about a
+/// second of work.
+const MAX_PASSAGE_STEPS: f64 = 1e9;
+
+/// A `crossing` request, checked: `(threshold, quantiles, paths, seed)`.
+struct Crossing {
+    threshold: f64,
+    quantiles: Vec<f64>,
+    paths: usize,
+    seed: u64,
+}
+
+fn crossing_of(input: &CrossingInputDto, horizon: usize) -> Result<Crossing, WireError> {
+    if input.threshold == 0.0 {
+        return Err(WireError::new(
+            code::INVALID_OPTION,
+            None,
+            "crossing.threshold must not be 0: the total starts there".to_string(),
+        )
+        .about("crossing.threshold"));
+    }
+    if horizon == 0 {
+        return Err(WireError::out_of_range(
+            "horizon",
+            Bound::Closed(1.0),
+            Bound::Closed(MAX_HORIZON),
+            0.0,
+            "crossing needs a horizon of at least 1".to_string(),
+        ));
+    }
+    let quantiles = input
+        .quantiles
+        .clone()
+        .unwrap_or_else(|| vec![0.1, 0.5, 0.9]);
+    if let Some((i, &q)) = quantiles
+        .iter()
+        .enumerate()
+        .find(|(_, &q)| !(q > 0.0 && q <= 1.0))
+    {
+        let mut e = WireError::out_of_range(
+            "crossing.quantiles",
+            Bound::Open(0.0),
+            Bound::Closed(1.0),
+            q,
+            format!("crossing.quantiles[{i}] must be in (0, 1], got {q}"),
+        );
+        e.index = Some(i);
+        return Err(e);
+    }
+    // At most MAX_PASSAGE_PATHS futures, and at most MAX_PASSAGE_STEPS steps
+    // simulated in all.
+    let most = MAX_PASSAGE_PATHS
+        .min((MAX_PASSAGE_STEPS / horizon as f64).floor())
+        .max(1.0);
+    let paths = match input.paths {
+        None if most >= 10_000.0 => 10_000,
+        None => most as usize,
+        Some(Whole(n)) if (1.0..=most).contains(&n) => Whole(n).count(),
+        Some(Whole(n)) => {
+            return Err(WireError::out_of_range(
+                "crossing.paths",
+                Bound::Closed(1.0),
+                Bound::Closed(most),
+                n,
+                format!(
+                    "crossing.paths: 1 to {most} for a horizon of {horizon} (at most {MAX_PASSAGE_STEPS} simulated steps), got {n}"
+                ),
+            ))
+        }
+    };
+    let seed = match input.seed {
+        None => 0,
+        Some(Whole(v)) if (0.0..=MAX_EXACT_COUNT).contains(&v) => v as u64,
+        Some(Whole(v)) => {
+            return Err(WireError::out_of_range(
+                "crossing.seed",
+                Bound::Closed(0.0),
+                Bound::Closed(MAX_EXACT_COUNT),
+                v,
+                format!("crossing.seed: 0 to {MAX_EXACT_COUNT}, got {v}"),
+            ))
+        }
+    };
+    Ok(Crossing {
+        threshold: input.threshold,
+        quantiles,
+        paths,
+        seed,
+    })
+}
+
+fn first_passage_dto(fp: crate::smoothing::FirstPassage) -> FirstPassageDto {
+    FirstPassageDto {
+        threshold: fp.threshold,
+        probability: fp.probability,
+        paths: fp.paths,
+        quantiles: fp
+            .quantiles
+            .into_iter()
+            .map(|(q, time)| PassageQuantileDto { q, time })
+            .collect(),
     }
 }
 
@@ -4052,6 +4235,11 @@ pub(crate) fn exponential_smoothing_dto(
         )
         .about("period"));
     }
+    let crossing = input
+        .crossing
+        .as_ref()
+        .map(|c| crossing_of(c, horizon))
+        .transpose()?;
     let data = input.data;
 
     let interval = |f: crate::smoothing::SmoothingForecast| ForecastDto {
@@ -4061,7 +4249,15 @@ pub(crate) fn exponential_smoothing_dto(
             .lower
             .zip(f.upper)
             .map(|(lower, upper)| IntervalDto { lower, upper }),
+        cumulative: CumulativeForecastDto {
+            mean: f.cumulative_mean,
+            prediction: f
+                .cumulative_lower
+                .zip(f.cumulative_upper)
+                .map(|(lower, upper)| IntervalDto { lower, upper }),
+        },
     };
+    let passage = |fp: Option<crate::smoothing::FirstPassage>| fp.map(first_passage_dto);
     let sigma = |residuals: &[Option<f64>]| {
         let e: Vec<f64> = residuals.iter().flatten().copied().collect();
         (e.iter().map(|v| v * v).sum::<f64>() / e.len() as f64).sqrt()
@@ -4076,6 +4272,10 @@ pub(crate) fn exponential_smoothing_dto(
             .expect("alpha checked above; at least two finite values");
             let r = smoother.smooth(&data).expect("data is not empty");
             let residuals = r.residuals(&data);
+            let first_passage = passage(crossing.as_ref().map(|c| {
+                r.first_passage(&data, horizon, c.threshold, &c.quantiles, c.paths, c.seed)
+                    .expect("crossing checked above; additive errors")
+            }));
             Ok(SmoothingDto {
                 alpha: r.alpha,
                 beta: None,
@@ -4096,6 +4296,7 @@ pub(crate) fn exponential_smoothing_dto(
                     seasonal: None,
                 },
                 level,
+                first_passage,
             })
         }
         Holt => {
@@ -4105,6 +4306,10 @@ pub(crate) fn exponential_smoothing_dto(
                 .smooth(&data)
                 .expect("at least two values");
             let residuals = r.residuals(&data);
+            let first_passage = passage(crossing.as_ref().map(|c| {
+                r.first_passage(&data, horizon, c.threshold, &c.quantiles, c.paths, c.seed)
+                    .expect("crossing checked above; additive errors")
+            }));
             Ok(SmoothingDto {
                 alpha: r.alpha,
                 beta: Some(r.beta),
@@ -4125,6 +4330,7 @@ pub(crate) fn exponential_smoothing_dto(
                     seasonal: None,
                 },
                 level,
+                first_passage,
             })
         }
         Hw => {
@@ -4146,6 +4352,15 @@ pub(crate) fn exponential_smoothing_dto(
             let data = at_least(data, 2 * m, "data")?;
             if seasonality == crate::smoothing::Seasonality::Multiplicative {
                 each_within(&data, "data", Bound::Open(0.0), Bound::Unbounded)?;
+                if crossing.is_some() {
+                    return Err(WireError::new(
+                        code::INVALID_OPTION,
+                        None,
+                        "crossing needs additive errors; multiplicative seasonality has none to simulate"
+                            .to_string(),
+                    )
+                    .about("crossing"));
+                }
             }
             let r = HoltWinters::fit(&data, alpha, beta, gamma, m, seasonality)
                 .expect(
@@ -4154,6 +4369,10 @@ pub(crate) fn exponential_smoothing_dto(
                 .smooth(&data)
                 .expect("two cycles of data, positive when multiplicative");
             let residuals = r.residuals(&data);
+            let first_passage = passage(crossing.as_ref().map(|c| {
+                r.first_passage(&data, horizon, c.threshold, &c.quantiles, c.paths, c.seed)
+                    .expect("crossing checked above; additive errors")
+            }));
             Ok(SmoothingDto {
                 alpha: r.alpha,
                 beta: Some(r.beta),
@@ -4174,6 +4393,7 @@ pub(crate) fn exponential_smoothing_dto(
                     seasonal: Some(r.seasonal),
                 },
                 level,
+                first_passage,
             })
         }
     }

@@ -8,6 +8,26 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- The forecast of a total: every forecast of `exponential_smoothing` (and `SmoothingForecast` in
+  Rust) carries `cumulative` -- the forecast of the sum of steps 1 to that step and its interval.
+  The interval comes from the covariances of the step errors, σ² Σ (1 + C_k)², so it is neither
+  the sum of the steps' intervals (each innovation affects every later step, which that
+  overstates) nor that of their variances. A total consumed, worn or spent is forecast directly.
+- When a forecast total reaches a level: `crossing: { threshold, quantiles?, paths?, seed? }`
+  adds `first_passage` -- over simulated futures of the fitted additive model, the share that
+  reach the level within the horizon and the quantiles of the time, interpolated within the step,
+  in O(paths · horizon) with at most 10^9 simulated steps
+  (Rust: `SesResult` / `HoltResult` / `HoltWintersResult::first_passage`). Multiplicative
+  seasonality is refused (`invalid_option`). .NET: `Crossing`, `FirstPassage`, `CumulativeForecast`.
+
+### Changed
+
+- **Breaking** `SmoothingForecast` has three more fields (`cumulative_mean`, `cumulative_lower`,
+  `cumulative_upper`); .NET `SmoothingForecast` and `ExponentialSmoothingResult` have one more
+  parameter each (`Cumulative`, `FirstPassage`).
+
 ### Fixed
 
 - `gage_rr_anova` called a mean square degenerate below a fixed 1e-12, so a study

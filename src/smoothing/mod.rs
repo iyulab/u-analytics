@@ -57,7 +57,7 @@ mod holt;
 mod holt_winters;
 mod ses;
 
-pub use forecast::SmoothingForecast;
+pub use forecast::{FirstPassage, SmoothingForecast};
 
 pub use holt::{HoltLinear, HoltResult};
 pub use holt_winters::{HoltWinters, HoltWintersResult, Seasonality};

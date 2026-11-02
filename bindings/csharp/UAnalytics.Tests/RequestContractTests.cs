@@ -169,6 +169,8 @@ public class RequestContractTests
             [5.1, 5.0, 9.2, 8.9, 13.1, 12.0], [[7], [5]], 0.9),
         ["ExponentialSmoothing(simple)"] = c => c.ExponentialSmoothing([3, 5, 4, 6], SmoothingMethod.Simple, 0.5, horizon: 2),
         ["ExponentialSmoothing(holt)"] = c => c.ExponentialSmoothing([3, 5, 4, 6], SmoothingMethod.Holt, 0.5, beta: 0.3),
+        ["ExponentialSmoothing(crossing)"] = c => c.ExponentialSmoothing([3, 5, 4, 6], SmoothingMethod.Simple, 0.5, horizon: 4,
+            crossing: new Crossing(10, [0.5], Paths: 10, Seed: 1)),
         ["ExponentialSmoothing(additive)"] = c => c.ExponentialSmoothing(Seasonal(32, 4), SmoothingMethod.HoltWinters,
             0.3, beta: 0.1, gamma: 0.2, period: 4, seasonality: Seasonality.Additive),
         ["ExponentialSmoothing"] = c => c.ExponentialSmoothing(Seasonal(32, 4).Select(v => v + 10).ToArray(),

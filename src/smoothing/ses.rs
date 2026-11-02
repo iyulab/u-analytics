@@ -15,7 +15,10 @@
 //!
 //! Brown, R.G. (1956). *Exponential Smoothing for Predicting Demand*.
 
-use super::forecast::{one_step_mse, residuals, valid_level, with_intervals, SmoothingForecast};
+use super::forecast::{
+    first_passage, one_step_mse, passage_arguments, residuals, valid_level, with_intervals,
+    FirstPassage, InnovationWeights, SmoothingForecast,
+};
 
 /// Result of simple exponential smoothing at each time step.
 #[derive(Debug, Clone)]
@@ -53,14 +56,56 @@ impl SesResult {
         if !valid_level(level) {
             return None;
         }
-        let alpha = self.alpha;
-        let c = move |_: usize| alpha;
+        let weights = self.weights();
+        let c = move |j: usize| weights.c(j);
         Some(with_intervals(
             horizon,
             level,
             one_step_mse(data, &self.fitted, Self::FIRST_ERROR),
             Some(&c),
             |_| self.forecast,
+        ))
+    }
+    /// The innovation weights of the model: the SES weights `c_j = α`.
+    fn weights(&self) -> InnovationWeights {
+        InnovationWeights {
+            level: self.alpha,
+            slope: 0.0,
+            season: 0.0,
+            period: 0,
+        }
+    }
+
+    /// When the forecast total over steps 1, 2, … first reaches `threshold`
+    /// (non-zero; from below when positive, from above when negative), over
+    /// `paths` simulated futures of the fitted model seeded with `seed`, within
+    /// `horizon` steps -- with the `quantiles` (each in (0, 1]) of that time
+    /// ([`FirstPassage`]). `data` is the series smoothed (for σ). `None` when
+    /// an argument is outside those ranges or there is no one-step error to
+    /// estimate σ from.
+    #[allow(clippy::too_many_arguments)]
+    pub fn first_passage(
+        &self,
+        data: &[f64],
+        horizon: usize,
+        threshold: f64,
+        quantiles: &[f64],
+        paths: usize,
+        seed: u64,
+    ) -> Option<FirstPassage> {
+        if !passage_arguments(horizon, threshold, quantiles, paths) {
+            return None;
+        }
+        let mse = one_step_mse(data, &self.fitted, Self::FIRST_ERROR)?;
+        let means = vec![self.forecast; horizon];
+        Some(first_passage(
+            &means,
+            mse,
+            self.weights(),
+            threshold,
+            quantiles,
+            paths,
+            seed,
         ))
     }
 }
