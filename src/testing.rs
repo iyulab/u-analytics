@@ -214,7 +214,9 @@ pub struct AnovaResult {
 /// # Returns
 ///
 /// `None` if fewer than 2 groups, any group has fewer than 2 observations,
-/// or non-finite values.
+/// non-finite values, or no variation within any group (every group's values
+/// all equal): MS_within is then 0 and F is not a number -- infinite when the
+/// means differ, 0/0 when they do not.
 ///
 /// # References
 ///
@@ -242,6 +244,12 @@ pub fn one_way_anova(groups: &[&[f64]]) -> Option<AnovaResult> {
             return None;
         }
     }
+    // No spread within any group, judged on the values: the mean of equal
+    // values can round, which would leave a sum of squares of noise to divide
+    // by.
+    if groups.iter().all(|g| g.iter().all(|&x| x == g[0])) {
+        return None;
+    }
 
     let total_n: usize = groups.iter().map(|g| g.len()).sum();
 
@@ -255,17 +263,27 @@ pub fn one_way_anova(groups: &[&[f64]]) -> Option<AnovaResult> {
         .map(|g| g.iter().sum::<f64>() / g.len() as f64)
         .collect();
 
-    // Sum of squares
-    let ss_between: f64 = groups
+    // Sums of squares of the deviations divided by the power of two nearest
+    // below the largest one: F is a ratio, so the unit cancels, and squaring
+    // deviations of 1e-200 directly would underflow to 0 (and of 1e200,
+    // overflow). A power of two changes only the exponent, so on data that
+    // needs no scaling every digit is what the unscaled sums give. The sums
+    // are reported in the data's unit squared.
+    let largest = groups
+        .iter()
+        .flat_map(|g| g.iter())
+        .map(|&x| (x - grand_mean).abs())
+        .fold(0.0_f64, f64::max);
+    let scale = 2f64.powi(largest.log2().floor() as i32);
+    let ss_between_scaled: f64 = groups
         .iter()
         .zip(group_means.iter())
-        .map(|(g, &gm)| g.len() as f64 * (gm - grand_mean).powi(2))
+        .map(|(g, &gm)| g.len() as f64 * ((gm - grand_mean) / scale).powi(2))
         .sum();
-
-    let ss_within: f64 = groups
+    let ss_within_scaled: f64 = groups
         .iter()
         .zip(group_means.iter())
-        .map(|(g, &gm)| g.iter().map(|&x| (x - gm).powi(2)).sum::<f64>())
+        .map(|(g, &gm)| g.iter().map(|&x| ((x - gm) / scale).powi(2)).sum::<f64>())
         .sum();
 
     let df_between = k - 1;
@@ -275,20 +293,19 @@ pub fn one_way_anova(groups: &[&[f64]]) -> Option<AnovaResult> {
         return None;
     }
 
+    let ss_between = ss_between_scaled * scale * scale;
+    let ss_within = ss_within_scaled * scale * scale;
     let ms_between = ss_between / df_between as f64;
     let ms_within = ss_within / df_within as f64;
 
-    let f_statistic = if ms_within > 1e-300 {
-        ms_between / ms_within
-    } else {
-        f64::INFINITY
-    };
-
-    let p_value = if f_statistic.is_infinite() {
-        0.0
-    } else {
-        special::f_distribution_sf(f_statistic, df_between as f64, df_within as f64)
-    };
+    // Positive here: some group varies, and its deviations are on the scale
+    // of the largest one.
+    if ss_within_scaled <= 0.0 {
+        return None;
+    }
+    let f_statistic =
+        (ss_between_scaled / df_between as f64) / (ss_within_scaled / df_within as f64);
+    let p_value = special::f_distribution_sf(f_statistic, df_between as f64, df_within as f64);
 
     Some(AnovaResult {
         f_statistic,
@@ -1338,7 +1355,9 @@ pub fn kruskal_wallis_test(groups: &[&[f64]]) -> Option<TestResult> {
 ///
 /// # Returns
 ///
-/// `None` if fewer than 2 groups, any group < 2 observations, or non-finite values.
+/// `None` if fewer than 2 groups, any group < 2 observations, non-finite
+/// values, or no variation in the deviations from the median within any
+/// group (see [`one_way_anova`]).
 ///
 /// # References
 ///
@@ -2889,6 +2908,23 @@ mod tests {
     fn anova_edge_cases() {
         let g1 = [1.0, 2.0, 3.0];
         assert!(one_way_anova(&[&g1]).is_none()); // < 2 groups
+    }
+
+    /// No spread within any group: MS_within is 0 and F is infinite (means
+    /// differ) or 0/0 (they do not) -- no test, not an F of infinity.
+    /// Groups of 0.1s: their mean rounds, so the within sum of squares is
+    /// rounding noise rather than 0.
+    #[test]
+    fn anova_without_spread_within_the_groups_is_none() {
+        assert!(one_way_anova(&[&[1.0, 1.0], &[2.0, 2.0, 2.0]]).is_none());
+        assert!(one_way_anova(&[&[0.1; 3], &[0.1; 3]]).is_none());
+        assert!(levene_test(&[&[1.0, 3.0], &[5.0, 5.0]]).is_none());
+        // One group varying is enough.
+        let r = one_way_anova(&[&[1.0, 1.0], &[2.0, 2.5]]).expect("a test");
+        assert!(r.f_statistic.is_finite() && r.p_value > 0.0);
+        // The same at a tiny unit: no absolute floor decides it.
+        let r = one_way_anova(&[&[1e-200, 1e-200], &[2e-200, 2.5e-200]]).expect("a test");
+        assert!(r.f_statistic.is_finite());
     }
 
     // -----------------------------------------------------------------------

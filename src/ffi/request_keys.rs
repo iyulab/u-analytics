@@ -35,7 +35,7 @@ use std::collections::BTreeMap;
 use std::ffi::CString;
 use std::path::PathBuf;
 
-type Entry = unsafe extern "C" fn(*const libc::c_char, *mut *mut libc::c_char) -> i32;
+pub(super) type Entry = unsafe extern "C" fn(*const libc::c_char, *mut *mut libc::c_char) -> i32;
 
 /// A key and a name no request has.
 const PROBE: &str = "__probe__";
@@ -46,7 +46,7 @@ enum Step {
     Index(usize),
 }
 
-fn call(entry: Entry, request: &Value) -> (i32, Value) {
+pub(super) fn call(entry: Entry, request: &Value) -> (i32, Value) {
     let request = CString::new(request.to_string()).expect("no interior NUL");
     let mut out: *mut libc::c_char = std::ptr::null_mut();
     let code = unsafe { entry(request.as_ptr(), &mut out) };
@@ -361,7 +361,7 @@ fn ep(name: &'static str, entry: Entry, base: Value) -> (&'static str, Entry, Va
     (name, entry, base)
 }
 
-fn entry_points() -> Vec<(&'static str, Entry, Value)> {
+pub(super) fn entry_points() -> Vec<(&'static str, Entry, Value)> {
     let events = json!([5, 12, 20, 26, 31, 35, 38, 40]);
     let observed = json!({ "truncation": "time", "end": 42 });
     vec![

@@ -334,6 +334,10 @@ impl ProcessCapability {
     /// - `sigma_within` is not positive or not finite
     /// - `data` contains NaN or infinity values
     ///
+    /// When every value of `data` is the same there is no overall spread: the
+    /// short-term indices are still computed from `sigma_within`, and the
+    /// long-term ones (`pp`, `ppk`, `ppu`, `ppl`) are `None`.
+    ///
     /// # Examples
     ///
     /// ```
@@ -355,7 +359,6 @@ impl ProcessCapability {
         }
         let x_bar = stats::mean(data)?;
         let sigma_overall = stats::std_dev(data)?;
-
         Some(self.compute_indices(data, x_bar, Some(sigma_within), sigma_overall))
     }
 
@@ -376,6 +379,7 @@ impl ProcessCapability {
     /// `None` if:
     /// - `data` has fewer than 2 elements
     /// - `data` contains NaN or infinity values
+    /// - every value of `data` is the same (no spread)
     ///
     /// # Examples
     ///
@@ -385,6 +389,8 @@ impl ProcessCapability {
     /// let spec = ProcessCapability::new(Some(11.0), Some(9.0)).unwrap();
     /// let data = [9.5, 10.0, 10.2, 9.8, 10.1, 10.3, 9.9, 10.0];
     ///
+    /// // No spread, no capability: the indices would be infinite.
+    /// assert!(spec.compute_overall(&[10.0; 8]).is_none());
     /// let indices = spec.compute_overall(&data).unwrap();
     /// assert!(indices.pp.unwrap() > 0.0);
     /// // No within sigma, so no short-term index is claimed.
@@ -392,9 +398,7 @@ impl ProcessCapability {
     /// assert!(indices.std_dev_within.is_none());
     /// ```
     pub fn compute_overall(&self, data: &[f64]) -> Option<CapabilityIndices> {
-        let x_bar = stats::mean(data)?;
-        let sigma_overall = stats::std_dev(data)?;
-
+        let (x_bar, sigma_overall) = overall(data)?;
         Some(self.compute_indices(data, x_bar, None, sigma_overall))
     }
 
@@ -421,11 +425,12 @@ impl ProcessCapability {
             (None, None) => None,
         };
 
-        // Long-term indices (overall sigma)
-        let ppu = self.usl.map(|u| (u - x_bar) / (3.0 * sigma_overall));
-        let ppl = self.lsl.map(|l| (x_bar - l) / (3.0 * sigma_overall));
-        let pp = match (self.usl, self.lsl) {
-            (Some(u), Some(l)) => Some((u - l) / (6.0 * sigma_overall)),
+        // Long-term indices (overall sigma) -- only when the data vary.
+        let overall = spread(data, sigma_overall);
+        let ppu = overall.and_then(|s| self.usl.map(|u| (u - x_bar) / (3.0 * s)));
+        let ppl = overall.and_then(|s| self.lsl.map(|l| (x_bar - l) / (3.0 * s)));
+        let pp = match (overall, self.usl, self.lsl) {
+            (Some(s), Some(u), Some(l)) => Some((u - l) / (6.0 * s)),
             _ => None,
         };
         let ppk = match (ppu, ppl) {
@@ -473,6 +478,22 @@ impl ProcessCapability {
         }
         Some((target - lsl).min(usl - target) / (3.0 * sigma_t))
     }
+}
+
+/// `sigma_overall` when the data vary, `None` when they do not. "Do not
+/// vary" is every value equal, judged on the values themselves: the standard
+/// deviation of a constant sample can come out as rounding noise instead of
+/// 0, which would turn into enormous indices instead of none.
+fn spread(data: &[f64], sigma_overall: f64) -> Option<f64> {
+    (sigma_overall > 0.0 && !data.iter().all(|&x| x == data[0])).then_some(sigma_overall)
+}
+
+/// The mean and the overall sample standard deviation of `data`, or `None`
+/// when they do not exist or the data do not vary (see [`spread`]).
+fn overall(data: &[f64]) -> Option<(f64, f64)> {
+    let x_bar = stats::mean(data)?;
+    let sigma_overall = spread(data, stats::std_dev(data)?)?;
+    Some((x_bar, sigma_overall))
 }
 
 #[cfg(test)]
@@ -848,6 +869,26 @@ mod tests {
         let spec = ProcessCapability::new(Some(10.0), Some(0.0)).unwrap();
         assert!(spec.compute(&[5.0], 1.0).is_none());
         assert!(spec.compute(&[], 1.0).is_none());
+    }
+
+    /// Constant data have no overall spread: the long-term indices would be
+    /// infinite, so they are absent; the short-term ones still come from the
+    /// given within sigma. Without one there is nothing to report.
+    #[test]
+    fn constant_data_have_no_long_term_indices() {
+        let spec = ProcessCapability::new(Some(10.3), Some(9.7)).unwrap();
+        // 0.1 three times: the mean rounds, so the sample standard deviation
+        // is rounding noise rather than 0.
+        for data in [vec![10.0; 6], vec![0.1; 3]] {
+            let i = spec.compute(&data, 0.1).unwrap();
+            assert!(i.cp.is_some() && i.cpk.is_some());
+            assert_eq!(
+                (i.pp, i.ppk, i.ppu, i.ppl),
+                (None, None, None, None),
+                "{data:?}"
+            );
+            assert!(spec.compute_overall(&data).is_none(), "{data:?}");
+        }
     }
 
     #[test]

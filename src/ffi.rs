@@ -3424,3 +3424,6 @@ mod tests {
 
 #[cfg(all(test, feature = "ffi"))]
 mod request_keys;
+
+#[cfg(all(test, feature = "ffi"))]
+mod degenerate_inputs;

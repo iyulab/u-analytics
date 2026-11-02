@@ -8,6 +8,20 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Fixed
+
+- `process_capability` and `boxcox_capability` of data whose values are all the same answered with an
+  infinite `pp`, which JSON carries as `null` in a field declared a number. Without a within sigma they are
+  now refused (`degenerate_data`, `parameter: "data"`, as documented); with one, the short-term indices are
+  reported and the long-term ones (`pp`, `ppk`, `ppu`, `ppl`) are `null`. Rust:
+  `ProcessCapability::compute_overall` returns `None` for such data, and `compute` leaves the long-term
+  indices `None`.
+- `one_way_anova` and `levene_test` with no spread within any group answered with an infinite F statistic;
+  they are now refused (`degenerate_data`, `parameter: "groups"`), and the Rust functions return `None`.
+  Whether a group varies is judged on its values (a sample of equal values whose mean rounds no longer
+  passes for spread), and the F statistic no longer depends on the unit: data of 1e-200 used to underflow to
+  no spread at all.
+
 ## [0.33.0] - 2026-11-02
 
 Depends on u-numflow 0.16. The .NET client is `UAnalytics` 0.27.0.
