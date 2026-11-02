@@ -2900,15 +2900,18 @@
           ]
         },
         "power_threshold": {
+          "description": "`null` when nothing is left of the series after linear detrending (a\nstraight line): no periodogram bin has power, so there is no threshold\nto pass -- the engine's infinite threshold, which JSON cannot carry.",
           "format": "double",
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ]
         }
       },
       "required": [
         "candidates",
         "n",
-        "acf_threshold",
-        "power_threshold"
+        "acf_threshold"
       ],
       "type": "object"
     },

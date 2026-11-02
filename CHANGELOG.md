@@ -18,6 +18,13 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   (`rule` with `bandwidth`) and `degenerate_data` (all values equal under a rule). Checked against SciPy's
   `gaussian_kde` to 1e-12.
 
+### Fixed
+
+- `estimate_period` on a series with nothing left after linear detrending (a straight line) sent
+  `power_threshold: null`, where the result declared a number: the threshold is infinite there, and JSON has no
+  infinity. It is now declared `number | null` (.NET `PeriodResult.PowerThreshold` is `double?`). Before, the
+  .NET client failed to read the result.
+
 ### Changed
 
 - `Pelt` with the L2 cost on one or two channels is near-linear in the length whether the series

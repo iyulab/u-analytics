@@ -521,9 +521,10 @@ public sealed record AcfResult(
 /// threshold z / √n.</summary>
 public sealed record PacfResult(IReadOnlyList<double> Pacf, double ConfidenceThreshold);
 
-/// <summary>Dominant period of a series; <see cref="Period"/> is <c>null</c> when none is found.</summary>
+/// <summary>Dominant period of a series; <see cref="Period"/> is <c>null</c> when none is found, and
+/// <see cref="PowerThreshold"/> is <c>null</c> when nothing is left after linear detrending (a straight line).</summary>
 public sealed record PeriodResult(
-    int? Period, IReadOnlyList<PeriodCandidate> Candidates, int N, double AcfThreshold, double PowerThreshold);
+    int? Period, IReadOnlyList<PeriodCandidate> Candidates, int N, double AcfThreshold, double? PowerThreshold);
 
 /// <summary>A point scored by spectral residual, with its expected value and band.</summary>
 public sealed record SpectralResidualPoint(

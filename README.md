@@ -1015,7 +1015,7 @@ pacf(input: { data: number[], max_lag?: number }): // >= 4 values; Durbin-Levins
 estimate_period(input: { data: number[] }): {
   period: number | null,          // null = no periodicity passed both stages (explicit, not an error)
   candidates: { period: number, acf: number, bin: number, power: number, power_share: number }[],
-  n: number, acf_threshold: number, power_threshold: number,
+  n: number, acf_threshold: number, power_threshold: number | null,  // null: a straight line, no power left after detrending
 }
 // `acf` has the (n - lag)/n bias of the estimator undone -- the value the
 // candidate was selected and accepted on, so comparing it against

@@ -4905,7 +4905,10 @@ pub(crate) struct SeasonalityDto {
     pub(crate) candidates: Vec<PeriodCandidateDto>,
     pub(crate) n: usize,
     pub(crate) acf_threshold: f64,
-    pub(crate) power_threshold: f64,
+    /// `null` when nothing is left of the series after linear detrending (a
+    /// straight line): no periodogram bin has power, so there is no threshold
+    /// to pass -- the engine's infinite threshold, which JSON cannot carry.
+    pub(crate) power_threshold: Option<f64>,
 }
 
 pub(crate) fn seasonality_dto(input: SeasonalityInputDto) -> Result<SeasonalityDto, WireError> {
@@ -4942,7 +4945,7 @@ pub(crate) fn seasonality_dto(input: SeasonalityInputDto) -> Result<SeasonalityD
             .collect(),
         n: r.n,
         acf_threshold: r.acf_threshold,
-        power_threshold: r.power_threshold,
+        power_threshold: r.power_threshold.is_finite().then_some(r.power_threshold),
     })
 }
 
