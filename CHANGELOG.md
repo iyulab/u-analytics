@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-11-02
+
+Depends on u-numflow 0.16. The .NET client is `UAnalytics` 0.27.0.
+
 ### Added
 
 - `kde`: a Gaussian kernel density estimate on every transport (WASM, C ABI `uanalytics_kde`, .NET
