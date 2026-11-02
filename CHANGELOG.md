@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-02
+
+Depends on u-numflow 0.16. The .NET client is `UAnalytics` 0.26.0.
+
 ### Added
 
 - The forecast of a total: every forecast of `exponential_smoothing` (and `SmoothingForecast` in
