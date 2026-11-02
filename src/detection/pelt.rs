@@ -17,13 +17,20 @@
 //! F(t) = min_{tau in R_t} [ F(tau) + C(y_{tau+1:t}) + beta ]
 //! ```
 //!
-//! with pruning rule: remove `tau` from candidates if `F(tau) + C(y_{tau+1:t}) >= F(t)`,
-//! since such `tau` can never be optimal for any future `s > t`.
+//! Candidates `tau` that can never be optimal again are pruned, which keeps
+//! the answer exact. For the Normal cost the rule is the inequality of
+//! Killick et al. (2012): drop `tau` once `F(tau) + C(y_{tau+1:t}) + K >= F(t)`.
+//! For the L2 cost on up to two channels it is functional (Maidstone et al.
+//! 2017): a candidate is dropped once no value of its last segment's mean is
+//! left where it wins.
 //!
 //! # Complexity
 //!
-//! Expected O(n) under mild conditions on the cost function.
-//! Worst case O(n^2) (no pruning effective).
+//! L2 on one or two channels: near-linear in `n`, with or without changes.
+//! Otherwise (Normal, or L2 on three channels or more, where functional
+//! pruning costs more than it saves): expected O(n) when the number of
+//! changes grows with `n`; O(n^2) for a series without changes, where the
+//! inequality prunes nothing.
 //!
 //! # Cost Functions
 //!
@@ -47,6 +54,12 @@
 //! - Killick, R., Fearnhead, P., & Eckley, I.A. (2012). "Optimal Detection of
 //!   Changepoints with a Linear Computational Cost", *Journal of the American
 //!   Statistical Association* 107(500), pp. 1590-1598.
+//! - Maidstone, R., Hocking, T., Rigaill, G., & Fearnhead, P. (2017). "On
+//!   optimal multiple changepoint algorithms for large data", *Statistics and
+//!   Computing* 27(2), pp. 519-533.
+//! - Pishchagina, L., Rigaill, G., & Runge, V. (2023). "Geometric-based
+//!   pruning rules for change point detection in multiple independent time
+//!   series", arXiv preprint.
 //! - Schwarz, G. (1978). "Estimating the Dimension of a Model",
 //!   *Annals of Statistics* 6(2), pp. 461-464.
 
@@ -220,93 +233,14 @@ impl Pelt {
     ///
     /// # Complexity
     ///
-    /// Expected O(n), worst case O(n^2).
+    /// For the L2 cost, near-linear in `n` whether the series changes or not
+    /// (functional pruning — Maidstone et al. 2017). For the Normal cost,
+    /// expected O(n) when the number of changes grows with `n`, O(n^2) for a
+    /// series without changes (Killick et al. 2012).
     pub fn detect(&self, data: &[f64]) -> PeltResult {
-        let n = data.len();
-
-        if n < 2 * self.min_segment_len {
-            return PeltResult {
-                changepoints: Vec::new(),
-            };
+        PeltResult {
+            changepoints: self.segment(&[data]),
         }
-
-        let penalty_value = self.resolve_penalty(n, &[data]);
-        if penalty_value <= 0.0 {
-            // A BIC penalty of nothing: the signal does not vary, so there is
-            // nothing to split.
-            return PeltResult {
-                changepoints: Vec::new(),
-            };
-        }
-
-        // Precompute cumulative sums for O(1) segment cost evaluation.
-        // cum_sum[i] = sum(data[0..i])
-        // cum_sum_sq[i] = sum(data[0..i]^2)
-        let (cum_sum, cum_sum_sq) = cumulative_sums(data);
-
-        // F[t] = optimal cost for data[0..t]
-        // F[0] = -penalty (so that the first segment cost + penalty = cost alone)
-        let mut f = vec![0.0_f64; n + 1];
-        f[0] = -penalty_value;
-
-        // last_change[t] = last changepoint index for optimal segmentation of data[0..t]
-        let mut last_change = vec![0_usize; n + 1];
-
-        // Candidate set R: indices tau such that tau could be the last changepoint before t
-        let mut candidates: Vec<usize> = vec![0];
-
-        for t in self.min_segment_len..=n {
-            // Find the optimal last changepoint for position t
-            let mut best_cost = f64::INFINITY;
-            let mut best_tau = 0;
-
-            for &tau in &candidates {
-                let seg_len = t - tau;
-                if seg_len < self.min_segment_len {
-                    continue;
-                }
-
-                let cost = self.segment_cost(&cum_sum, &cum_sum_sq, tau, t);
-                let total = f[tau] + cost + penalty_value;
-
-                if total < best_cost {
-                    best_cost = total;
-                    best_tau = tau;
-                }
-            }
-
-            f[t] = best_cost;
-            last_change[t] = best_tau;
-
-            // PELT pruning: remove candidates that can never be optimal
-            // Killick et al. (2012), Theorem 3.1:
-            // If F(tau) + C(y_{tau+1:t}) >= F(t), then tau can be pruned.
-            candidates.retain(|&tau| {
-                let seg_len = t - tau;
-                if seg_len < self.min_segment_len {
-                    return true; // Keep — not yet evaluable
-                }
-                let cost = self.segment_cost(&cum_sum, &cum_sum_sq, tau, t);
-                f[tau] + cost < f[t] + penalty_value
-            });
-
-            candidates.push(t);
-        }
-
-        // Backtrack to extract changepoints
-        let mut changepoints = Vec::new();
-        let mut t = n;
-        while t > 0 {
-            let tau = last_change[t];
-            if tau > 0 {
-                changepoints.push(tau);
-            }
-            t = tau;
-        }
-
-        changepoints.sort_unstable();
-
-        PeltResult { changepoints }
     }
 
     /// Detects changepoints in multivariate (multi-signal) data.
@@ -347,86 +281,49 @@ impl Pelt {
     ///
     /// # Complexity
     ///
-    /// Expected O(n * k), worst case O(n^2 * k) where k = number of channels.
+    /// For the L2 cost on one or two channels, near-linear in `n` whether the
+    /// series changes or not (functional pruning). Otherwise expected
+    /// O(n * k) when the number of changes grows with `n`, and O(n^2 * k) for
+    /// a series without changes, where k = number of channels.
     pub fn detect_multi(&self, signals: &[&[f64]]) -> Option<MultiPeltResult> {
-        if signals.is_empty() {
-            return Some(MultiPeltResult {
-                changepoints: Vec::new(),
-            });
-        }
-
-        let n = signals[0].len();
+        let n = signals.first().map_or(0, |s| s.len());
         if signals.iter().any(|s| s.len() != n) {
             return None;
         }
+        Some(MultiPeltResult {
+            changepoints: self.segment(signals),
+        })
+    }
 
+    /// The optimal segmentation of `signals` (channels of one length, at
+    /// least one of them): the sorted first indices of every segment but the
+    /// first.
+    fn segment(&self, signals: &[&[f64]]) -> Vec<usize> {
+        let n = signals.first().map_or(0, |s| s.len());
         if n < 2 * self.min_segment_len {
-            return Some(MultiPeltResult {
-                changepoints: Vec::new(),
-            });
+            return Vec::new();
         }
 
-        let n_channels = signals.len();
         let penalty_value = self.resolve_penalty(n, signals);
         if penalty_value <= 0.0 {
-            return Some(MultiPeltResult {
-                changepoints: Vec::new(),
-            });
+            // A BIC penalty of nothing: the signal does not vary, so there is
+            // nothing to split.
+            return Vec::new();
         }
 
-        // Precompute cumulative sums per channel for O(1) segment cost.
-        let mut cum_sums: Vec<Vec<f64>> = Vec::with_capacity(n_channels);
-        let mut cum_sum_sqs: Vec<Vec<f64>> = Vec::with_capacity(n_channels);
+        // Cumulative sums per channel, for O(1) segment costs.
+        let channels: Vec<Channel> = signals.iter().map(|s| Channel::new(s)).collect();
 
-        for signal in signals {
-            let (cs, css) = cumulative_sums(signal);
-            cum_sums.push(cs);
-            cum_sum_sqs.push(css);
-        }
-
-        let mut f = vec![0.0_f64; n + 1];
-        f[0] = -penalty_value;
-        let mut last_change = vec![0_usize; n + 1];
-        let mut candidates: Vec<usize> = vec![0];
-
-        for t in self.min_segment_len..=n {
-            let mut best_cost = f64::INFINITY;
-            let mut best_tau = 0;
-
-            for &tau in &candidates {
-                let seg_len = t - tau;
-                if seg_len < self.min_segment_len {
-                    continue;
-                }
-
-                let cost: f64 = (0..n_channels)
-                    .map(|ch| self.segment_cost(&cum_sums[ch], &cum_sum_sqs[ch], tau, t))
-                    .sum();
-                let total = f[tau] + cost + penalty_value;
-
-                if total < best_cost {
-                    best_cost = total;
-                    best_tau = tau;
-                }
+        let last_change = match self.cost {
+            CostFunction::L2 if channels.len() <= FUNCTIONAL_MAX_CHANNELS => {
+                self.partition_functional(&channels, n, penalty_value)
             }
+            CostFunction::L2 | CostFunction::Normal => {
+                self.partition_pruned(&channels, n, penalty_value)
+            }
+        };
 
-            f[t] = best_cost;
-            last_change[t] = best_tau;
-
-            candidates.retain(|&tau| {
-                let seg_len = t - tau;
-                if seg_len < self.min_segment_len {
-                    return true;
-                }
-                let cost: f64 = (0..n_channels)
-                    .map(|ch| self.segment_cost(&cum_sums[ch], &cum_sum_sqs[ch], tau, t))
-                    .sum();
-                f[tau] + cost < f[t] + penalty_value
-            });
-
-            candidates.push(t);
-        }
-
+        // Backtrack to extract changepoints.
         let mut changepoints = Vec::new();
         let mut t = n;
         while t > 0 {
@@ -437,8 +334,158 @@ impl Pelt {
             t = tau;
         }
         changepoints.sort_unstable();
+        changepoints
+    }
 
-        Some(MultiPeltResult { changepoints })
+    /// The cost of the segment `[start, end)`, summed over the channels.
+    fn cost_of(&self, channels: &[Channel], start: usize, end: usize) -> f64 {
+        channels
+            .iter()
+            .map(|c| self.segment_cost(&c.cum_sum, &c.cum_sum_sq, start, end))
+            .sum()
+    }
+
+    /// The recurrence `F(t) = min_tau F(tau) + C(tau, t) + beta` over the
+    /// candidates `tau` that `prune` leaves, with `F(0) = -beta`. Returns the
+    /// minimising `tau` for each `t`; candidates are scanned in increasing
+    /// order and the first strict minimum wins.
+    ///
+    /// Candidates are pruned by inequality (Killick et al. 2012, Theorem
+    /// 3.1, with the conservative constant `K = beta`). Exact, but every
+    /// candidate survives on a series without changes, so the time is
+    /// quadratic there.
+    fn partition_pruned(&self, channels: &[Channel], n: usize, penalty_value: f64) -> Vec<usize> {
+        let mut f = vec![0.0_f64; n + 1];
+        f[0] = -penalty_value;
+        let mut last_change = vec![0_usize; n + 1];
+        let mut candidates: Vec<usize> = vec![0];
+        // `F(tau) + C(tau, t)` of each candidate at this `t`, computed once
+        // for both the minimum and the pruning.
+        let mut partial: Vec<f64> = Vec::new();
+
+        for t in self.min_segment_len..=n {
+            let mut best_cost = f64::INFINITY;
+            let mut best_tau = 0;
+            partial.clear();
+            for &tau in &candidates {
+                if t - tau < self.min_segment_len {
+                    partial.push(f64::NEG_INFINITY); // not yet evaluable — kept
+                    continue;
+                }
+                let part = f[tau] + self.cost_of(channels, tau, t);
+                partial.push(part);
+                let total = part + penalty_value;
+                if total < best_cost {
+                    best_cost = total;
+                    best_tau = tau;
+                }
+            }
+            f[t] = best_cost;
+            last_change[t] = best_tau;
+
+            let bound = f[t] + penalty_value;
+            let mut kept = 0;
+            for i in 0..candidates.len() {
+                if partial[i] < bound {
+                    candidates[kept] = candidates[i];
+                    kept += 1;
+                }
+            }
+            candidates.truncate(kept);
+            candidates.push(t);
+        }
+        last_change
+    }
+
+    /// The same recurrence as [`Self::partition_pruned`], for the L2 cost,
+    /// with candidates pruned on the segment mean instead of on the cost
+    /// (functional pruning: Maidstone et al. 2017 for one channel, and the
+    /// sphere-based rule of Pishchagina et al. 2023 for several).
+    ///
+    /// Candidate `a`'s cost to a later `t`, as a function of the mean `mu`
+    /// of its last segment, is `q_a(mu) = F(a) + beta + sum_{a<i<=t}
+    /// |y_i - mu|^2`. For two candidates `a < b`, `q_a - q_b` does not depend
+    /// on `t`, and `q_a <= q_b` exactly on the ball centred on the mean of
+    /// `y[a..b)` with squared radius `(F(b) - F(a) - C(a, b)) / (b - a)`. So
+    /// once `b` is a candidate, `a` can be optimal only inside that ball, and
+    /// `b` only outside it. A candidate keeps a box that holds the
+    /// intersection of the balls of the candidates after it (the region where
+    /// it can still win), cuts from it the balls of the candidates before it
+    /// (regions where it already loses), and is dropped when the box is
+    /// empty. The box starts as the range of the data: every segment mean lies
+    /// in it, so a candidate that loses there loses its minimum too.
+    ///
+    /// Exact — the same `F` as the unpruned recurrence — and, unlike
+    /// inequality pruning, it removes nearly every candidate on a series
+    /// without changes, so the time is near-linear there as well.
+    ///
+    /// A candidate `b` takes part from `t = b + min_segment_len` on, so the
+    /// balls it draws are applied at the end of step `t = b +
+    /// min_segment_len - 1`: before that, an older candidate may still be the
+    /// only one allowed to end at `t`.
+    fn partition_functional(
+        &self,
+        channels: &[Channel],
+        n: usize,
+        penalty_value: f64,
+    ) -> Vec<usize> {
+        let m = self.min_segment_len;
+        let dim = channels.len();
+        let mut f = vec![0.0_f64; n + 1];
+        f[0] = -penalty_value;
+        let mut last_change = vec![0_usize; n + 1];
+
+        let range_lo: Vec<f64> = channels.iter().map(|c| c.lo).collect();
+        let range_hi: Vec<f64> = channels.iter().map(|c| c.hi).collect();
+        let mut alive: Vec<Candidate> = vec![Candidate::new(0, &range_lo, &range_hi)];
+        let mut centre = vec![0.0_f64; dim];
+
+        for t in m..=n {
+            // Every alive candidate is eligible here: candidate `b` joins at
+            // the end of step `b + m - 1`.
+            let mut best_cost = f64::INFINITY;
+            let mut best_tau = 0;
+            for cand in &alive {
+                let tau = cand.tau;
+                let total = f[tau] + self.cost_of(channels, tau, t) + penalty_value;
+                if total < best_cost {
+                    best_cost = total;
+                    best_tau = tau;
+                }
+            }
+            f[t] = best_cost;
+            last_change[t] = best_tau;
+
+            // The candidate that becomes eligible at `t + 1`.
+            let Some(b) = (t + 1).checked_sub(m).filter(|&b| b >= m) else {
+                continue;
+            };
+            let mut born = Candidate::new(b, &range_lo, &range_hi);
+            for cand in &mut alive {
+                let a = cand.tau;
+                let len = (b - a) as f64;
+                let cost = self.cost_of(channels, a, b);
+                let gap = f[b] - f[a] - cost;
+                // Room for the rounding of the four terms of `gap`.
+                let slack = 1e-9 * (f[b].abs() + f[a].abs() + cost.abs() + penalty_value) / len;
+                for (k, c) in channels.iter().enumerate() {
+                    centre[k] = (c.cum_sum[b] - c.cum_sum[a]) / len;
+                }
+                // `a` can still win only inside the (slightly widened) ball.
+                cand.restrict(&centre, gap / len + slack);
+                // `b` already loses inside the (slightly narrowed) ball.
+                born.lose_inside(&centre, gap / len - slack);
+            }
+            for cand in &mut alive {
+                cand.cut_losing();
+            }
+            alive.retain(|cand| !cand.is_dominated());
+            born.cut_losing();
+            if !born.is_dominated() {
+                alive.push(born);
+            }
+        }
+        last_change
     }
 
     /// Resolves the penalty value for `signals`, the channels of length `n`
@@ -534,7 +581,7 @@ fn noise_variance(signal: &[f64]) -> f64 {
 /// sits far from it (a Unix timestamp in seconds, an instrument with a large
 /// offset) loses the variance in that subtraction and is split at nearly every
 /// point; about its own mean the two terms are the size of the variation.
-fn cumulative_sums(signal: &[f64]) -> (Vec<f64>, Vec<f64>) {
+fn cumulative_sums(signal: &[f64]) -> (Vec<f64>, Vec<f64>, f64) {
     let n = signal.len();
     let center = signal.iter().sum::<f64>() / n as f64;
     let mut cum_sum = vec![0.0_f64; n + 1];
@@ -544,12 +591,279 @@ fn cumulative_sums(signal: &[f64]) -> (Vec<f64>, Vec<f64>) {
         cum_sum[i + 1] = cum_sum[i] + y;
         cum_sum_sq[i + 1] = cum_sum_sq[i] + y * y;
     }
-    (cum_sum, cum_sum_sq)
+    (cum_sum, cum_sum_sq, center)
+}
+/// One channel's cumulative sums (about its mean, see [`cumulative_sums`])
+/// and its range on the same scale.
+struct Channel {
+    cum_sum: Vec<f64>,
+    cum_sum_sq: Vec<f64>,
+    lo: f64,
+    hi: f64,
+}
+
+impl Channel {
+    fn new(signal: &[f64]) -> Self {
+        let (cum_sum, cum_sum_sq, center) = cumulative_sums(signal);
+        let (lo, hi) = signal
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &v| {
+                (lo.min(v), hi.max(v))
+            });
+        Self {
+            cum_sum,
+            cum_sum_sq,
+            lo: lo - center,
+            hi: hi - center,
+        }
+    }
+}
+
+/// How many of the balls in which a candidate already loses it keeps (the
+/// widest). Any subset keeps the pruning exact; more prunes sooner, at a cost
+/// per candidate and step.
+const LOSING_BALLS: usize = 64;
+
+/// Up to how many channels the L2 cost is pruned functionally. The region a
+/// candidate can still win in shrinks quickly on one or two channels; on more
+/// it lingers (the boxes stay wide, and the candidates whose balls would close
+/// them wander slowly with the running segment mean), so the per-candidate
+/// work outgrows the pruning. Measured on 10 000 points without changes:
+/// 1 channel 24 ms vs 552 ms by inequality, 2: 268 vs 766 ms, 3: 6.3 vs
+/// 0.94 s, 4: 44 vs 1.1 s.
+const FUNCTIONAL_MAX_CHANNELS: usize = 2;
+
+/// A candidate last changepoint in [`Pelt::partition_functional`]: a box
+/// that holds every segment mean where it can still be optimal (Pishchagina
+/// et al. 2023, the rectangle rule), and balls where an older candidate beats
+/// it.
+struct Candidate {
+    tau: usize,
+    lo: Vec<f64>,
+    hi: Vec<f64>,
+    losing: Vec<(Vec<f64>, f64)>,
+}
+
+impl Candidate {
+    /// A candidate that can still win anywhere in the box `[lo, hi]`.
+    fn new(tau: usize, lo: &[f64], hi: &[f64]) -> Self {
+        Self {
+            tau,
+            lo: lo.to_vec(),
+            hi: hi.to_vec(),
+            losing: Vec::new(),
+        }
+    }
+
+    fn empty(&mut self) {
+        self.lo[0] = f64::INFINITY;
+        self.hi[0] = f64::NEG_INFINITY;
+    }
+
+    /// Narrows the box to the smallest box around its intersection with the
+    /// ball (`centre`, squared radius `r2`): along each axis, the values
+    /// whose slice of the box still meets the ball.
+    fn restrict(&mut self, centre: &[f64], r2: f64) {
+        if r2 < 0.0 {
+            self.empty();
+            return;
+        }
+        let gap2 = |k: usize, lo: &[f64], hi: &[f64]| {
+            let c = centre[k];
+            (lo[k] - c).max(c - hi[k]).max(0.0).powi(2)
+        };
+        let total: f64 = (0..centre.len()).map(|k| gap2(k, &self.lo, &self.hi)).sum();
+        if total > r2 {
+            self.empty();
+            return;
+        }
+        for (k, &c) in centre.iter().enumerate() {
+            let w = (r2 - (total - gap2(k, &self.lo, &self.hi))).max(0.0).sqrt();
+            self.lo[k] = self.lo[k].max(c - w);
+            self.hi[k] = self.hi[k].min(c + w);
+        }
+    }
+
+    /// Records that the candidate loses inside the ball (`centre`, squared
+    /// radius `r2`).
+    fn lose_inside(&mut self, centre: &[f64], r2: f64) {
+        if r2 <= 0.0 {
+            return;
+        }
+        if self.losing.len() == LOSING_BALLS {
+            let (narrowest, &(_, r2_min)) = self
+                .losing
+                .iter()
+                .enumerate()
+                .min_by(|x, y| x.1 .1.total_cmp(&y.1 .1))
+                .expect("the list is full, so not empty");
+            if r2 <= r2_min {
+                return;
+            }
+            self.losing.swap_remove(narrowest);
+        }
+        self.losing.push((centre.to_vec(), r2));
+    }
+
+    /// Cuts from the box every slab that lies inside a ball where the
+    /// candidate loses: a face of the box whose farthest point is in the ball
+    /// is in it entirely, and so is the box up to where that stops holding.
+    fn cut_losing(&mut self) {
+        for (centre, r2) in &self.losing {
+            if self.lo[0] > self.hi[0] {
+                return;
+            }
+            let far2 = |k: usize, lo: &[f64], hi: &[f64]| {
+                (lo[k] - centre[k]).powi(2).max((hi[k] - centre[k]).powi(2))
+            };
+            let total: f64 = (0..centre.len()).map(|k| far2(k, &self.lo, &self.hi)).sum();
+            for (k, &c) in centre.iter().enumerate() {
+                let rest = total - far2(k, &self.lo, &self.hi);
+                if rest > *r2 {
+                    continue;
+                }
+                let w = (r2 - rest).sqrt();
+                if (c - w..=c + w).contains(&self.lo[k]) {
+                    self.lo[k] = c + w;
+                }
+                if (c - w..=c + w).contains(&self.hi[k]) {
+                    self.hi[k] = c - w;
+                }
+            }
+        }
+    }
+
+    /// Whether no segment mean is left where the candidate can be optimal.
+    fn is_dominated(&self) -> bool {
+        self.lo.iter().zip(&self.hi).any(|(lo, hi)| lo > hi)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- Exactness against the unpruned recurrence ---
+
+    /// The optimal segmentation by the plain O(n^2) recurrence, no pruning.
+    fn brute_force(pelt: &Pelt, signals: &[&[f64]]) -> Vec<usize> {
+        let n = signals[0].len();
+        if n < 2 * pelt.min_segment_len {
+            return Vec::new();
+        }
+        let beta = pelt.resolve_penalty(n, signals);
+        if beta <= 0.0 {
+            return Vec::new();
+        }
+        let channels: Vec<Channel> = signals.iter().map(|s| Channel::new(s)).collect();
+        let m = pelt.min_segment_len;
+        let mut f = vec![f64::INFINITY; n + 1];
+        f[0] = -beta;
+        let mut last = vec![0_usize; n + 1];
+        for t in m..=n {
+            for tau in (0..=t - m).filter(|&tau| tau == 0 || tau >= m) {
+                let total = f[tau] + pelt.cost_of(&channels, tau, t) + beta;
+                if total < f[t] {
+                    f[t] = total;
+                    last[t] = tau;
+                }
+            }
+        }
+        let mut cps = Vec::new();
+        let mut t = n;
+        while t > 0 {
+            if last[t] > 0 {
+                cps.push(last[t]);
+            }
+            t = last[t];
+        }
+        cps.sort_unstable();
+        cps
+    }
+
+    /// A seeded series of `n` points: normal noise of sd 1 plus `jumps`
+    /// level shifts of size `step`.
+    fn noisy_series(seed: u64, n: usize, jumps: usize, step: f64) -> Vec<f64> {
+        // SplitMix64, so the test needs no generator crate.
+        let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xD1B5_4A32_D192_ED03;
+        let mut uniform = move || {
+            state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            ((z ^ (z >> 31)) >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut level = 0.0;
+        let cut = n / (jumps + 1);
+        (0..n)
+            .map(|i| {
+                if jumps > 0 && i > 0 && i % cut == 0 && i / cut <= jumps {
+                    level += step;
+                }
+                // Box-Muller
+                let u1: f64 = uniform().max(1e-300);
+                let u2: f64 = uniform();
+                level + (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+            })
+            .collect()
+    }
+
+    fn noise_series_third(seed: u64, n: usize, jumps: usize, step: f64) -> Vec<f64> {
+        noisy_series(seed + 2000, n, jumps, 0.5 * step)
+    }
+
+    #[test]
+    fn functional_pruning_matches_the_unpruned_recurrence() {
+        for seed in 0..40_u64 {
+            for &(n, jumps, step) in &[(200, 0, 0.0), (300, 3, 1.5), (250, 8, 0.8), (150, 2, 4.0)] {
+                for &m in &[2_usize, 5] {
+                    for penalty in [Penalty::Bic, Penalty::Custom(3.0)] {
+                        let pelt = Pelt::with_min_segment_len(CostFunction::L2, penalty, m)
+                            .expect("valid");
+                        let a = noisy_series(seed, n, jumps, step);
+                        let b = noisy_series(seed + 1000, n, jumps, -step);
+                        assert_eq!(
+                            pelt.detect(&a).changepoints,
+                            brute_force(&pelt, &[&a]),
+                            "seed {seed} n {n} jumps {jumps} m {m} {penalty:?}"
+                        );
+                        assert_eq!(
+                            pelt.detect_multi(&[&a, &b])
+                                .expect("same length")
+                                .changepoints,
+                            brute_force(&pelt, &[&a, &b]),
+                            "multi seed {seed} n {n} jumps {jumps} m {m} {penalty:?}"
+                        );
+                        // Three channels: past the functional limit.
+                        let c = noise_series_third(seed, n, jumps, step);
+                        assert_eq!(
+                            pelt.detect_multi(&[&a, &b, &c])
+                                .expect("same length")
+                                .changepoints,
+                            brute_force(&pelt, &[&a, &b, &c]),
+                            "three seed {seed} n {n} jumps {jumps} m {m} {penalty:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn inequality_pruning_matches_the_unpruned_recurrence_for_the_normal_cost() {
+        for seed in 0..10_u64 {
+            for &m in &[2_usize, 5] {
+                let pelt = Pelt::with_min_segment_len(CostFunction::Normal, Penalty::Bic, m)
+                    .expect("valid");
+                let a = noisy_series(seed, 200, 3, 2.0);
+                assert_eq!(
+                    pelt.detect(&a).changepoints,
+                    brute_force(&pelt, &[&a]),
+                    "seed {seed} m {m}"
+                );
+            }
+        }
+    }
 
     // --- Constructor validation ---
 
