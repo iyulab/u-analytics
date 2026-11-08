@@ -430,36 +430,135 @@ pub fn multiple_linear_regression(
     })
 }
 
-/// Computes VIF for each predictor by regressing each on all others.
+/// Computes VIF for each predictor: `1 / (1 − R_j²)` of `x_j` on all others,
+/// read off the correlation matrix (see [`vif_from_correlation`]).
 fn compute_vif(predictors: &[&[f64]]) -> Vec<f64> {
     let p = predictors.len();
     if p < 2 {
         return vec![1.0; p];
     }
+    let n = predictors[0].len();
+    let nf = n as f64;
 
-    let mut vif = Vec::with_capacity(p);
-    for j in 0..p {
-        // Regress x_j on all other predictors
-        let y_j = predictors[j];
-        let others: Vec<&[f64]> = predictors
-            .iter()
-            .enumerate()
-            .filter(|&(i, _)| i != j)
-            .map(|(_, v)| *v)
-            .collect();
+    // Centre every column. A column with no variation beyond the rounding of
+    // its mean has no VIF (`NaN`) and takes no part in the others'.
+    let mut centred: Vec<Vec<f64>> = Vec::with_capacity(p);
+    let mut sum_sq: Vec<f64> = Vec::with_capacity(p);
+    let mut varying: Vec<usize> = Vec::with_capacity(p);
+    for (j, col) in predictors.iter().enumerate() {
+        let mean = col.iter().sum::<f64>() / nf;
+        let c: Vec<f64> = col.iter().map(|x| x - mean).collect();
+        let ss: f64 = c.iter().map(|x| x * x).sum();
+        let total: f64 = col.iter().map(|x| x * x).sum();
+        if total > 0.0 && ss > 1e-20 * total {
+            varying.push(j);
+        }
+        centred.push(c);
+        sum_sq.push(ss);
+    }
 
-        if let Some(result) = multiple_linear_regression(&others, y_j) {
-            let r2 = result.r_squared;
-            if r2 < 1.0 - 1e-15 {
-                vif.push(1.0 / (1.0 - r2));
-            } else {
-                vif.push(f64::INFINITY); // perfect multicollinearity
-            }
-        } else {
-            vif.push(f64::NAN);
+    let k = varying.len();
+    let mut vif = vec![f64::NAN; p];
+    if k == 0 {
+        return vif;
+    }
+    let mut corr = vec![vec![0.0; k]; k];
+    for a in 0..k {
+        corr[a][a] = 1.0;
+        for b in (a + 1)..k {
+            let (ia, ib) = (varying[a], varying[b]);
+            let cov: f64 = centred[ia]
+                .iter()
+                .zip(centred[ib].iter())
+                .map(|(x, y)| x * y)
+                .sum();
+            let r = (cov / (sum_sq[ia] * sum_sq[ib]).sqrt()).clamp(-1.0, 1.0);
+            corr[a][b] = r;
+            corr[b][a] = r;
+        }
+    }
+    if let Some(values) = vif_from_correlation(&corr) {
+        for (a, &j) in varying.iter().enumerate() {
+            vif[j] = values[a];
         }
     }
     vif
+}
+
+/// An eigenvalue at or below this share of the largest one is zero: the
+/// variables are linearly dependent to working precision.
+const NULL_EIGENVALUE: f64 = 1e-12;
+
+/// A variable takes part in a linear dependency when at least this much of a
+/// null eigenvector's squared weight sits on it.
+const NULL_WEIGHT: f64 = 1e-10;
+
+/// Variance inflation factors from a correlation matrix.
+///
+/// `VIF_j = 1 / (1 − R_j²)`, where `R_j²` is the share of variable `j` that the
+/// others explain. For a correlation matrix `R` that is the `j`-th diagonal
+/// entry of its inverse, so one eigendecomposition gives every VIF —
+/// `O(p³)` in all, where a regression per variable costs `O(n·p³)` and a
+/// regression that reports its own VIFs recurses.
+///
+/// When the variables are linearly dependent (`R` is singular) the entry is the
+/// pseudo-inverse's for a variable outside every dependency, and infinite for
+/// one that is a combination of the others. A unit-diagonal matrix with zero
+/// off-diagonals gives all 1.
+///
+/// Returns `None` for an empty or non-square matrix, a non-finite entry, a
+/// matrix that is not symmetric, or when the eigendecomposition fails.
+///
+/// # References
+///
+/// Belsley, Kuh & Welsch (1980). *Regression Diagnostics*; Marquardt (1970).
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::regression::vif_from_correlation;
+///
+/// // Two variables with correlation 0.8: VIF = 1 / (1 − 0.64).
+/// let v = vif_from_correlation(&[vec![1.0, 0.8], vec![0.8, 1.0]]).unwrap();
+/// assert!((v[0] - 1.0 / 0.36).abs() < 1e-9);
+/// ```
+pub fn vif_from_correlation(correlation: &[Vec<f64>]) -> Option<Vec<f64>> {
+    use u_numflow::matrix::Matrix;
+    let p = correlation.len();
+    if p == 0 || correlation.iter().any(|row| row.len() != p) {
+        return None;
+    }
+    if correlation.iter().flatten().any(|v| !v.is_finite()) {
+        return None;
+    }
+    if p == 1 {
+        return Some(vec![1.0]);
+    }
+    let data: Vec<f64> = correlation.iter().flatten().copied().collect();
+    let (values, vectors) = Matrix::new(p, p, data).ok()?.eigen_symmetric().ok()?;
+    let largest = values.iter().copied().fold(0.0_f64, f64::max);
+    let cutoff = NULL_EIGENVALUE * largest;
+    Some(
+        (0..p)
+            .map(|j| {
+                let mut inverse = 0.0;
+                let mut null_weight = 0.0;
+                for (k, &lambda) in values.iter().enumerate() {
+                    let q = vectors.get(j, k);
+                    if lambda <= cutoff {
+                        null_weight += q * q;
+                    } else {
+                        inverse += q * q / lambda;
+                    }
+                }
+                if null_weight > NULL_WEIGHT {
+                    f64::INFINITY
+                } else {
+                    inverse.max(1.0)
+                }
+            })
+            .collect(),
+    )
 }
 
 /// Predicts y values given new x data and a simple regression result.
@@ -1483,5 +1582,113 @@ mod statsmodels_prediction_reference {
             close(r.prediction_lower, M_OBS_CI_LOWER[i], "obs lower");
             close(r.prediction_upper, M_OBS_CI_UPPER[i], "obs upper");
         }
+    }
+
+    // ── VIF from the correlation matrix (was a regression per predictor,
+    //    each of which computed its own VIFs: factorial in the predictor count)
+
+    fn lcg(n: usize, seed: u64) -> Vec<f64> {
+        let mut state = seed;
+        (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                ((state >> 11) as f64 / (1u64 << 53) as f64) - 0.5
+            })
+            .collect()
+    }
+
+    #[test]
+    fn vif_equals_the_r_squared_of_each_predictor_on_the_others() {
+        let n = 90;
+        let base = lcg(n, 1);
+        let cols: Vec<Vec<f64>> = vec![
+            base.clone(),
+            base.iter()
+                .zip(lcg(n, 2))
+                .map(|(b, e)| 0.7 * b + 0.5 * e)
+                .collect(),
+            lcg(n, 3),
+            base.iter()
+                .zip(lcg(n, 4))
+                .map(|(b, e)| b - 0.6 * e)
+                .collect(),
+        ];
+        let refs: Vec<&[f64]> = cols.iter().map(|c| c.as_slice()).collect();
+        let v = vif(&refs).unwrap();
+        for j in 0..cols.len() {
+            let others: Vec<&[f64]> = (0..cols.len())
+                .filter(|&i| i != j)
+                .map(|i| refs[i])
+                .collect();
+            let r2 = multiple_linear_regression(&others, refs[j])
+                .unwrap()
+                .r_squared;
+            let expected = 1.0 / (1.0 - r2);
+            assert!(
+                (v[j] - expected).abs() <= 1e-8 * expected,
+                "predictor {j}: {} vs {}",
+                v[j],
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn vif_of_many_predictors_returns_at_once() {
+        // 40 predictors: a regression per predictor that reported its own VIFs
+        // recursed factorially and never returned past about a dozen.
+        let n = 300;
+        let cols: Vec<Vec<f64>> = (0..40).map(|i| lcg(n, 100 + i as u64)).collect();
+        let refs: Vec<&[f64]> = cols.iter().map(|c| c.as_slice()).collect();
+        let v = vif(&refs).unwrap();
+        assert_eq!(v.len(), 40);
+        assert!(v.iter().all(|x| x.is_finite() && *x >= 1.0 && *x < 1.5));
+        let fit = multiple_linear_regression(&refs[1..], refs[0]).unwrap();
+        assert_eq!(fit.vif.len(), 39);
+    }
+
+    #[test]
+    fn vif_with_a_duplicated_predictor_keeps_the_others_finite() {
+        let n = 80;
+        let a = lcg(n, 11);
+        let c: Vec<f64> = a
+            .iter()
+            .zip(lcg(n, 12))
+            .map(|(x, e)| 0.8 * x + 0.5 * e)
+            .collect();
+        let d = lcg(n, 13);
+        let refs: Vec<&[f64]> = vec![&a, &a, &c, &d];
+        let v = vif(&refs).unwrap();
+        assert!(v[0].is_infinite() && v[1].is_infinite());
+        let others: Vec<&[f64]> = vec![&a, &d];
+        let r2 = multiple_linear_regression(&others, &c).unwrap().r_squared;
+        let expected = 1.0 / (1.0 - r2);
+        assert!((v[2] - expected).abs() <= 1e-8 * expected);
+        assert!(v[3] < 2.0);
+    }
+
+    #[test]
+    fn vif_of_a_constant_predictor_is_nan_and_leaves_the_others_alone() {
+        let n = 60;
+        let x = lcg(n, 21);
+        let y: Vec<f64> = x.iter().zip(lcg(n, 22)).map(|(a, e)| a + 0.5 * e).collect();
+        let k = vec![3.0; n];
+        let without = vif(&[&x, &y]).unwrap();
+        let with = vif(&[&x, &y, &k]).unwrap();
+        assert!((with[0] - without[0]).abs() < 1e-9 && (with[1] - without[1]).abs() < 1e-9);
+        assert!(with[2].is_nan());
+    }
+
+    #[test]
+    fn vif_from_correlation_checks_its_matrix() {
+        assert!(vif_from_correlation(&[]).is_none());
+        assert!(vif_from_correlation(&[vec![1.0, 0.5]]).is_none());
+        assert!(vif_from_correlation(&[vec![1.0, f64::NAN], vec![f64::NAN, 1.0]]).is_none());
+        assert_eq!(vif_from_correlation(&[vec![1.0]]).unwrap(), vec![1.0]);
+        let identity = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let v = vif_from_correlation(&identity).unwrap();
+        assert!((v[0] - 1.0).abs() < 1e-12 && (v[1] - 1.0).abs() < 1e-12);
     }
 }

@@ -8,8 +8,19 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- `regression::vif_from_correlation`: the variance inflation factors of a correlation matrix (the diagonal of its
+  inverse), by one eigendecomposition. A variable that is a linear combination of the others is infinite.
+
 ### Fixed
 
+- `regression::vif` and the `vif` of every multiple regression took time factorial in the number of predictors
+  (each predictor was regressed on the others by a regression that computed its own VIFs, which recursed): 8
+  predictors 0.8 s, 9 predictors 6.5 s, 10 predictors 65 s. They now read the VIFs off the correlation matrix and
+  return at once for any practical count. The values are the same for predictors that are not linearly dependent.
+  A constant predictor's VIF is `NaN` and no longer spoils the others'; a predictor that is a combination of the
+  others is infinite, and the rest keep their own finite values.
 - `process_capability` and `boxcox_capability` of data whose values are all the same answered with an
   infinite `pp`, which JSON carries as `null` in a field declared a number. Without a within sigma they are
   now refused (`degenerate_data`, `parameter: "data"`, as documented); with one, the short-term indices are
