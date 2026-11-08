@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-11-08
+
+Depends on u-numflow 0.16. The .NET client is `UAnalytics` 0.28.0.
+
 ### Added
 
 - `XBarRChart`, `XBarSChart` and `IndividualMRChart` take a within sigma fixed by an earlier (Phase I) study:
