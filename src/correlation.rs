@@ -730,6 +730,28 @@ pub fn pacf_max_lag_domain(data: &[f64]) -> Result<RangeInclusive<usize>, TimeSe
     Ok(1..=data.len() / 2 - 1)
 }
 
+/// From this many multiply-adds (`n × max_lag`) the ACF sums are taken by FFT.
+/// Below it the direct sums are exact to the last digit and not slow.
+const ACF_FFT_WORK: usize = 1 << 22;
+
+/// `Σ (x_t − mean)(x_{t+lag} − mean)` for `lag` in `1..=max_lag`, by FFT: the
+/// inverse transform of the squared magnitude of the transform of the centred
+/// series zero-padded to at least `2n` (no wrap-around reaches a lag below `n`).
+fn autocovariance_sums_fft(data: &[f64], mean: f64, max_lag: usize) -> Vec<f64> {
+    use u_numflow::fourier::{fft, ifft, Complex};
+    let n = data.len();
+    let m = (2 * n).next_power_of_two();
+    let mut padded = vec![Complex::real(0.0); m];
+    for (slot, &x) in padded.iter_mut().zip(data) {
+        *slot = Complex::real(x - mean);
+    }
+    let power: Vec<Complex> = fft(&padded)
+        .into_iter()
+        .map(|z| Complex::real(z.norm_sqr()))
+        .collect();
+    ifft(&power)[1..=max_lag].iter().map(|z| z.re).collect()
+}
+
 /// Compute the sample autocorrelation function (ACF).
 ///
 /// Uses the biased estimator (denominator N, not N-k) which guarantees a
@@ -781,14 +803,22 @@ pub fn acf(data: &[f64], max_lag: Option<usize>) -> Result<AcfResult, TimeSeries
     let mut acf_vals = Vec::with_capacity(max_lag + 1);
     acf_vals.push(1.0); // r(0) = 1
 
-    for lag in 1..=max_lag {
-        let ck: f64 = data[..n - lag]
-            .iter()
-            .zip(&data[lag..])
-            .map(|(&xt, &xt_h)| (xt - mean) * (xt_h - mean))
-            .sum::<f64>()
-            / nf;
-        acf_vals.push(ck / c0);
+    if n.saturating_mul(max_lag) >= ACF_FFT_WORK {
+        // Many lags of a long series: the sums are the circular autocorrelation
+        // of the zero-padded centred series, O(n log n) instead of O(n·lags).
+        for sum in autocovariance_sums_fft(data, mean, max_lag) {
+            acf_vals.push(sum / nf / c0);
+        }
+    } else {
+        for lag in 1..=max_lag {
+            let ck: f64 = data[..n - lag]
+                .iter()
+                .zip(&data[lag..])
+                .map(|(&xt, &xt_h)| (xt - mean) * (xt_h - mean))
+                .sum::<f64>()
+                / nf;
+            acf_vals.push(ck / c0);
+        }
     }
 
     let threshold = Z_975 / nf.sqrt();
@@ -2535,5 +2565,39 @@ mod kendall_exact_tests {
         y.swap(20, 21);
         let r2 = kendall_tau_b(&x, &y).expect("computes");
         assert!(r2.p_value > r.p_value && r2.p_value < 1e-9);
+    }
+
+    #[test]
+    fn acf_by_fft_equals_the_direct_sums() {
+        // 3000 × 1500 lags is past ACF_FFT_WORK: the FFT path.
+        let n = 3000;
+        let mut state = 7u64;
+        let data: Vec<f64> = (0..n)
+            .map(|t| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                (t as f64 / 40.0).sin() + ((state >> 11) as f64 / (1u64 << 53) as f64 - 0.5)
+            })
+            .collect();
+        assert!(n * (n / 2) >= ACF_FFT_WORK);
+        let fast = acf(&data, Some(n / 2)).unwrap();
+
+        let mean = data.iter().sum::<f64>() / n as f64;
+        let c0: f64 = data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n as f64;
+        for lag in 1..=n / 2 {
+            let direct: f64 = data[..n - lag]
+                .iter()
+                .zip(&data[lag..])
+                .map(|(a, b)| (a - mean) * (b - mean))
+                .sum::<f64>()
+                / n as f64
+                / c0;
+            assert!(
+                (fast.acf[lag] - direct).abs() < 1e-12,
+                "lag {lag}: {} vs {direct}",
+                fast.acf[lag]
+            );
+        }
     }
 }

@@ -15,6 +15,13 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Fixed
 
+- `adf_test` with the lag count chosen by AIC took time between linear and cubic in the number of lags (a design
+  matrix and its `X'X` per candidate): 100,000 points 18.7 s, now 1.0 s; the lag search accumulates `X'X` once
+  and holds no design matrix. The statistic and the chosen count are unchanged.
+- `acf` with many lags of a long series summed `n × lags` products (100,000 points at `n / 2` lags 4.4 s); from
+  about four million products it takes the sums by FFT (0.03 s). `estimate_period` was quadratic through it:
+  100,000 points 10.1 s, now 3.8 s. The values agree with the direct sums to 1e-12; shorter calls are unchanged.
+
 - `regression::vif` and the `vif` of every multiple regression took time factorial in the number of predictors
   (each predictor was regressed on the others by a regression that computed its own VIFs, which recursed): 8
   predictors 0.8 s, 9 predictors 6.5 s, 10 predictors 65 s. They now read the VIFs off the correlation matrix and

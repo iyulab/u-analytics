@@ -2401,84 +2401,106 @@ pub fn adf_lags_domain(
 /// fitted on the observations `p_max` lags leave, so the AICs compare the same
 /// data — fitted on their own (longer) samples they would not be comparable.
 /// `None` when no candidate can be fitted.
+///
+/// The lag columns come last, so a candidate's normal equations are the leading
+/// block of the largest model's: `X'X` is accumulated once (`O(n·p_max²)`)
+/// instead of once per candidate (`O(n·p_max³)`), and no design matrix is held.
 fn select_adf_lag(data: &[f64], dy: &[f64], model: AdfModel, p_max: usize) -> Option<usize> {
     let start = p_max;
+    let full = adf_design(dy.len(), model, p_max, start)?;
+    let y = &dy[start..];
+    let (gram, gram_y) = adf_gram(&full, data, dy, y);
+    let fixed = full.ncols - p_max;
+
     let mut best: Option<(f64, usize)> = None;
     for p in 0..=p_max {
-        if let Some(aic) = adf_ols_aic(data, dy, model, p, start) {
-            if best.is_none_or(|(b, _)| aic < b) {
-                best = Some((aic, p));
-            }
+        let nc = fixed + p;
+        let mut xtx = vec![0.0_f64; nc * nc];
+        for j in 0..nc {
+            xtx[j * nc..(j + 1) * nc].copy_from_slice(&gram[j * full.ncols..j * full.ncols + nc]);
+        }
+        let Some((_t_stat, rss, k)) = adf_solve(&full, nc, &xtx, &gram_y[..nc], data, dy, y) else {
+            continue;
+        };
+        let m = full.m;
+        let aic = 2.0 * k as f64 + m as f64 * (rss / m as f64).ln();
+        if best.is_none_or(|(b, _)| aic < b) {
+            best = Some((aic, p));
         }
     }
     best.map(|(_, p)| p)
 }
 
-/// Builds the ADF design matrix and dependent variable.
-///
-/// Returns (design_matrix_row_major, y_dep, n_rows, n_cols, gamma_col_index).
-#[allow(clippy::type_complexity)]
-fn adf_build_matrix(
-    data: &[f64],
-    dy: &[f64],
-    model: AdfModel,
-    p: usize,
+/// The shape of an ADF regression: row `i` regresses `dy[start + i]` on the
+/// intercept (unless the model has none), the level `y_{t-1}`, a trend (for
+/// `ConstantTrend`) and `p` lagged differences. Rows are made one at a time,
+/// so the design matrix is never held.
+struct AdfDesign {
+    intercept: bool,
+    trend: bool,
     start: usize,
-) -> Option<(Vec<f64>, Vec<f64>, usize, usize, usize)> {
-    // Row t regresses dy[t] on the level data[t] and dy[t-1] ... dy[t-p].
-    debug_assert!(start >= p, "the first row needs its p lagged differences");
-    if start >= dy.len() || dy.len() - start < 5 {
-        return None;
-    }
-    let m = dy.len() - start;
-
-    let y_dep: Vec<f64> = dy[start..].to_vec();
-
-    // Count columns: intercept + y_{t-1} + [trend] + p lags
-    let has_intercept = !matches!(model, AdfModel::None);
-    let has_trend = matches!(model, AdfModel::ConstantTrend);
-    let ncols = has_intercept as usize + 1 + has_trend as usize + p;
-
-    // Build row-major design matrix
-    let mut x_data = Vec::with_capacity(m * ncols);
-    let mut gamma_col = 0;
-
-    for i in 0..m {
-        let t = start + i;
-        if has_intercept {
-            x_data.push(1.0); // intercept
-            gamma_col = 1;
-        }
-        x_data.push(data[t]); // y_{t-1}
-        if has_trend {
-            x_data.push((t + 1) as f64); // trend
-        }
-        for lag in 1..=p {
-            x_data.push(dy[t - lag]);
-        }
-    }
-
-    Some((x_data, y_dep, m, ncols, gamma_col))
+    /// Rows.
+    m: usize,
+    /// Columns.
+    ncols: usize,
+    /// The column of the lagged level, whose t-ratio is the statistic.
+    gamma_col: usize,
 }
 
-/// Lightweight OLS for ADF: returns (gamma_t_stat, rss, k).
-///
-/// Solves X'Xβ = X'y using Cholesky-like decomposition (Gaussian elimination).
-fn adf_ols_core(
-    x_data: &[f64],
-    y: &[f64],
-    m: usize,
-    ncols: usize,
-    gamma_col: usize,
-) -> Option<(f64, f64, usize)> {
-    // Compute X'X (ncols × ncols, symmetric)
+/// `None` when the rows from `start` on are too few.
+fn adf_design(dy_len: usize, model: AdfModel, p: usize, start: usize) -> Option<AdfDesign> {
+    // Row t regresses dy[t] on the level data[t] and dy[t-1] ... dy[t-p].
+    debug_assert!(start >= p, "the first row needs its p lagged differences");
+    if start >= dy_len || dy_len - start < 5 {
+        return None;
+    }
+    let intercept = !matches!(model, AdfModel::None);
+    let trend = matches!(model, AdfModel::ConstantTrend);
+    Some(AdfDesign {
+        intercept,
+        trend,
+        start,
+        m: dy_len - start,
+        ncols: intercept as usize + 1 + trend as usize + p,
+        gamma_col: intercept as usize,
+    })
+}
+
+impl AdfDesign {
+    /// Writes row `i` into `row[..self.ncols]`.
+    fn fill_row(&self, data: &[f64], dy: &[f64], i: usize, row: &mut [f64]) {
+        let t = self.start + i;
+        let mut c = 0;
+        if self.intercept {
+            row[c] = 1.0;
+            c += 1;
+        }
+        row[c] = data[t]; // y_{t-1}
+        c += 1;
+        if self.trend {
+            row[c] = (t + 1) as f64;
+            c += 1;
+        }
+        let lags = self.ncols - c;
+        for lag in 1..=lags {
+            row[c + lag - 1] = dy[t - lag];
+        }
+    }
+}
+
+/// `X'X` (`ncols × ncols`, symmetric) and `X'y` of the design.
+fn adf_gram(design: &AdfDesign, data: &[f64], dy: &[f64], y: &[f64]) -> (Vec<f64>, Vec<f64>) {
+    let ncols = design.ncols;
     let mut xtx = vec![0.0_f64; ncols * ncols];
-    for i in 0..m {
-        let row = &x_data[i * ncols..(i + 1) * ncols];
+    let mut xty = vec![0.0_f64; ncols];
+    let mut row = vec![0.0_f64; ncols];
+    for (i, &yi) in y.iter().enumerate().take(design.m) {
+        design.fill_row(data, dy, i, &mut row);
         for j in 0..ncols {
             for k in j..ncols {
                 xtx[j * ncols + k] += row[j] * row[k];
             }
+            xty[j] += row[j] * yi;
         }
     }
     // Mirror upper to lower
@@ -2487,16 +2509,24 @@ fn adf_ols_core(
             xtx[k * ncols + j] = xtx[j * ncols + k];
         }
     }
+    (xtx, xty)
+}
 
-    // Compute X'y (ncols × 1)
-    let mut xty = vec![0.0_f64; ncols];
-    for i in 0..m {
-        let row = &x_data[i * ncols..(i + 1) * ncols];
-        for j in 0..ncols {
-            xty[j] += row[j] * y[i];
-        }
-    }
-
+/// Solves the normal equations of the leading `ncols` columns of `design`
+/// (`xtx` and `xty` are theirs) and returns (gamma_t_stat, rss, k).
+///
+/// Solves X'Xβ = X'y using Gaussian elimination.
+fn adf_solve(
+    design: &AdfDesign,
+    ncols: usize,
+    xtx: &[f64],
+    xty: &[f64],
+    data: &[f64],
+    dy: &[f64],
+    y: &[f64],
+) -> Option<(f64, f64, usize)> {
+    let m = design.m;
+    let gamma_col = design.gamma_col;
     // A pivot is nothing when it is rounding against the sizes of the two
     // regressors it couples: X'X is in the squares of the data's units, so a
     // fixed floor would call a series in small units singular.
@@ -2558,10 +2588,15 @@ fn adf_ols_core(
 
     // Compute residuals and RSS
     let mut rss = 0.0;
-    for i in 0..m {
-        let row = &x_data[i * ncols..(i + 1) * ncols];
-        let y_hat: f64 = row.iter().zip(beta.iter()).map(|(&x, &b)| x * b).sum();
-        let resid = y[i] - y_hat;
+    let mut row = vec![0.0_f64; design.ncols];
+    for (i, &yi) in y.iter().enumerate().take(m) {
+        design.fill_row(data, dy, i, &mut row);
+        let y_hat: f64 = row[..ncols]
+            .iter()
+            .zip(beta.iter())
+            .map(|(&x, &b)| x * b)
+            .sum();
+        let resid = yi - y_hat;
         rss += resid * resid;
     }
 
@@ -2640,18 +2675,13 @@ fn adf_ols_core(
     Some((t_gamma, rss, ncols))
 }
 
-/// Runs ADF OLS and returns AIC + number of observations.
-/// AIC of the regression with `p` lags on the rows from `start` on.
-fn adf_ols_aic(data: &[f64], dy: &[f64], model: AdfModel, p: usize, start: usize) -> Option<f64> {
-    let (x_data, y_dep, m, ncols, gamma_col) = adf_build_matrix(data, dy, model, p, start)?;
-    let (_t_stat, rss, k) = adf_ols_core(&x_data, &y_dep, m, ncols, gamma_col)?;
-    Some(2.0 * k as f64 + m as f64 * (rss / m as f64).ln())
-}
-
 /// Runs the actual ADF OLS and returns the test result.
 fn adf_ols(data: &[f64], dy: &[f64], model: AdfModel, p: usize) -> Option<AdfResult> {
-    let (x_data, y_dep, m, ncols, gamma_col) = adf_build_matrix(data, dy, model, p, p)?;
-    let (gamma_t, _rss, _k) = adf_ols_core(&x_data, &y_dep, m, ncols, gamma_col)?;
+    let design = adf_design(dy.len(), model, p, p)?;
+    let y = &dy[p..];
+    let (xtx, xty) = adf_gram(&design, data, dy, y);
+    let (gamma_t, _rss, _k) = adf_solve(&design, design.ncols, &xtx, &xty, data, dy, y)?;
+    let m = design.m;
 
     let critical_values = adf_critical_values(model, m);
 
@@ -4586,5 +4616,30 @@ mod scipy_tail_reference {
         let high: Vec<f64> = (21..=30).map(f64::from).collect();
         let r = kruskal_wallis_test(&[&low, &mid, &high]).expect("valid");
         close(r.p_value, 2.49000508218493e-06, "Kruskal-Wallis p");
+    }
+
+    #[test]
+    fn adf_lag_search_agrees_with_fitting_the_chosen_count_alone() {
+        // The AIC search takes every candidate's normal equations from one
+        // accumulated X'X; the test statistic is then a separate fit of the
+        // chosen count -- the pieces must agree with a fixed-lag call.
+        let n = 6000;
+        let mut state = 3u64;
+        let mut level = 0.0;
+        let data: Vec<f64> = (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                level = 0.6 * level + ((state >> 11) as f64 / (1u64 << 53) as f64 - 0.5);
+                level
+            })
+            .collect();
+        let searched = adf_test(&data, AdfModel::Constant, AdfLags::Aic { max: None }).unwrap();
+        let fixed = adf_test(&data, AdfModel::Constant, AdfLags::Fixed(searched.n_lags)).unwrap();
+        assert_eq!(searched.statistic, fixed.statistic);
+        assert_eq!(searched.n_obs, fixed.n_obs);
+        // A stationary AR(1): the unit root is rejected at 1 %.
+        assert!(searched.rejected[0], "{}", searched.statistic);
     }
 }
