@@ -38,8 +38,10 @@ pub(crate) struct XbarRChartDto {
     /// carry.
     pub(crate) sigma_hat: f64,
     /// Degrees of freedom of `sigma_hat` -- `process_capability`'s
-    /// `sigma_within_df`, for Cp/Cpk confidence intervals.
-    pub(crate) sigma_hat_df: f64,
+    /// `sigma_within_df`, for Cp/Cpk confidence intervals. `null` when the
+    /// chart was given its sigma (`options.sigma`): the degrees of freedom are
+    /// those of the study that produced it.
+    pub(crate) sigma_hat_df: Option<f64>,
     pub(crate) xbar_points: Vec<ChartPointDto>,
     pub(crate) r_points: Vec<ChartPointDto>,
     pub(crate) in_control: bool,
@@ -210,6 +212,22 @@ pub(crate) fn rules_from_json(
         set = set.with(rule);
     }
     Ok(set)
+}
+
+/// The `sigma` of a variables chart's options -- the within sigma fixed by an
+/// earlier (Phase I) study. Absent, `undefined` and `null` all mean none: the
+/// chart then estimates its spread from the subgroups it is given.
+#[cfg(feature = "wasm")]
+pub(crate) fn sigma_from_json(
+    options: Option<&serde_json::Value>,
+) -> Result<Option<f64>, WireError> {
+    match options.and_then(|o| o.get("sigma")) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(v) => v.as_f64().map(Some).ok_or_else(|| {
+            WireError::new(code::MALFORMED_INPUT, None, "sigma: expected a number")
+                .about("sigma".to_string())
+        }),
+    }
 }
 
 pub(crate) fn point_dtos(points: &[crate::spc::ChartPoint]) -> Vec<ChartPointDto> {
@@ -1151,6 +1169,7 @@ pub(crate) fn laney_point_dtos(
 pub(crate) fn xbar_r_dto(
     subgroups: Vec<Vec<f64>>,
     rules: crate::spc::RuleSet,
+    sigma: Option<f64>,
 ) -> Result<XbarRChartDto, WireError> {
     use crate::spc::{ControlChart, XBarRChart};
 
@@ -1158,6 +1177,11 @@ pub(crate) fn xbar_r_dto(
     let mut chart = XBarRChart::new(n)
         .map_err(|e| WireError::chart("subgroups", None, &e))?
         .with_rules(rules);
+    if let Some(sigma) = sigma {
+        chart = chart
+            .with_sigma(sigma)
+            .map_err(|e| WireError::chart("options", None, &e))?;
+    }
     add_rows(&subgroups, "subgroups", |g| chart.add_sample(g))?;
     let too_few = || {
         WireError::too_few(
@@ -1178,7 +1202,7 @@ pub(crate) fn xbar_r_dto(
         r_lcl: r.lcl,
         // Present whenever the limits are: it is their centre line over d2 / c4.
         sigma_hat: chart.sigma_hat().ok_or_else(too_few)?,
-        sigma_hat_df: chart.sigma_hat_df().ok_or_else(too_few)?,
+        sigma_hat_df: chart.sigma_hat_df(),
         xbar_points: point_dtos(chart.points()),
         r_points: point_dtos(chart.r_points()),
         in_control: chart.is_in_control(),
@@ -4464,8 +4488,9 @@ pub(crate) struct XbarSChartDto {
     /// Short-term sigma implied by this chart (`S-bar / c4`), for
     /// `process_capability`'s `sigma_within`.
     pub(crate) sigma_hat: f64,
-    /// Degrees of freedom of `sigma_hat`, for `sigma_within_df`.
-    pub(crate) sigma_hat_df: f64,
+    /// Degrees of freedom of `sigma_hat`, for `sigma_within_df`; `null` when
+    /// the chart was given its sigma (`options.sigma`).
+    pub(crate) sigma_hat_df: Option<f64>,
     pub(crate) xbar_points: Vec<ChartPointDto>,
     pub(crate) s_points: Vec<ChartPointDto>,
     pub(crate) in_control: bool,
@@ -4484,8 +4509,10 @@ pub(crate) struct ImrChartDto {
     pub(crate) mr_lcl: f64,
     /// Short-term sigma implied by this chart (`MR-bar / d2(2)`).
     pub(crate) sigma_hat: f64,
-    /// Degrees of freedom of `sigma_hat` (`0.62 (n - 1)`), for `sigma_within_df`.
-    pub(crate) sigma_hat_df: f64,
+    /// Degrees of freedom of `sigma_hat` (`0.62 (n - 1)`), for
+    /// `sigma_within_df`; `null` when the chart was given its sigma
+    /// (`options.sigma`).
+    pub(crate) sigma_hat_df: Option<f64>,
     pub(crate) i_points: Vec<ChartPointDto>,
     /// Starts at index 1: the first value has no moving range.
     pub(crate) mr_points: Vec<ChartPointDto>,
@@ -4507,6 +4534,7 @@ pub(crate) struct LimitsInputDto {
 pub(crate) fn xbar_s_dto(
     subgroups: Vec<Vec<f64>>,
     rules: crate::spc::RuleSet,
+    sigma: Option<f64>,
 ) -> Result<XbarSChartDto, WireError> {
     use crate::spc::{ControlChart, XBarSChart};
 
@@ -4514,6 +4542,11 @@ pub(crate) fn xbar_s_dto(
     let mut chart = XBarSChart::new(n)
         .map_err(|e| WireError::chart("subgroups", None, &e))?
         .with_rules(rules);
+    if let Some(sigma) = sigma {
+        chart = chart
+            .with_sigma(sigma)
+            .map_err(|e| WireError::chart("options", None, &e))?;
+    }
     add_rows(&subgroups, "subgroups", |g| chart.add_sample(g))?;
     let too_few = || {
         WireError::too_few(
@@ -4534,7 +4567,7 @@ pub(crate) fn xbar_s_dto(
         s_lcl: s.lcl,
         // Present whenever the limits are: it is their centre line over d2 / c4.
         sigma_hat: chart.sigma_hat().ok_or_else(too_few)?,
-        sigma_hat_df: chart.sigma_hat_df().ok_or_else(too_few)?,
+        sigma_hat_df: chart.sigma_hat_df(),
         xbar_points: point_dtos(chart.points()),
         s_points: point_dtos(chart.s_points()),
         in_control: chart.is_in_control(),
@@ -4544,10 +4577,16 @@ pub(crate) fn xbar_s_dto(
 pub(crate) fn imr_dto(
     values: Vec<f64>,
     rules: crate::spc::RuleSet,
+    sigma: Option<f64>,
 ) -> Result<ImrChartDto, WireError> {
     use crate::spc::{ControlChart, IndividualMRChart};
 
     let mut chart = IndividualMRChart::new().with_rules(rules);
+    if let Some(sigma) = sigma {
+        chart = chart
+            .with_sigma(sigma)
+            .map_err(|e| WireError::chart("options", None, &e))?;
+    }
     add_rows(&values, "values", |x| {
         chart.add_sample(std::slice::from_ref(x))
     })?;
@@ -4571,7 +4610,7 @@ pub(crate) fn imr_dto(
         mr_lcl: mr.lcl,
         // Present whenever the limits are: it is their centre line over d2 / c4.
         sigma_hat: chart.sigma_hat().ok_or_else(too_few)?,
-        sigma_hat_df: chart.sigma_hat_df().ok_or_else(too_few)?,
+        sigma_hat_df: chart.sigma_hat_df(),
         i_points: point_dtos(chart.points()),
         mr_points: point_dtos(chart.mr_points()),
         in_control: chart.is_in_control(),
@@ -6803,7 +6842,7 @@ mod input_error_tests {
             ("parameter_out_of_range", Some("measurements[0][0]"))
         );
 
-        let e = imr_dto(vec![1.0], crate::spc::RuleSet::default()).expect_err("one value");
+        let e = imr_dto(vec![1.0], crate::spc::RuleSet::default(), None).expect_err("one value");
         assert_eq!(
             (e.code, e.parameter.as_deref()),
             ("insufficient_data", Some("values"))

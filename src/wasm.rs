@@ -397,14 +397,25 @@ fn read_number_rows(value: &JsValue, param: &'static str) -> Result<Vec<Vec<f64>
 /// `"shewhart"`: every added test raises the false alarm rate of a stable
 /// process, so the supplementary tests are asked for, not assumed.
 /// `{ rules: [] }` applies none, leaving control limits only.
+///
+/// `{ sigma?: number }` -- the within sigma fixed by an earlier (Phase I)
+/// study, greater than 0 (ISO 7870-2 §7.5): the centre line of the X-bar chart
+/// is still the grand mean of the subgroups given, its limits are
+/// `CL ± 3 sigma / sqrt(n)`, and the R chart's centre line and limits are
+/// those of `sigma` (`d2 sigma`, `D3`/`D4` times it) instead of the subgroups'
+/// own spread. `sigma_hat` is then `sigma` and `sigma_hat_df` is `null`.
+/// Pass the `sigma_hat` of the Phase I dispersion chart after its subgroups
+/// have been homogenised, and the subgroups that remain here.
 #[wasm_bindgen(unchecked_return_type = "XbarRChartDto")]
 pub fn xbar_r_chart(
     #[wasm_bindgen(unchecked_param_type = "number[][]")] data: JsValue,
-    #[wasm_bindgen(unchecked_optional_param_type = "RuleOptions | null")] options: Option<JsValue>,
+    #[wasm_bindgen(unchecked_optional_param_type = "VariablesChartOptions | null")] options: Option<
+        JsValue,
+    >,
 ) -> Result<JsValue, JsValue> {
     let subgroups = read_number_rows(&data, "data").map_err(js_err)?;
-    let rules = rules_option(options)?;
-    to_js(&xbar_r_dto(subgroups, rules).map_err(js_err)?)
+    let (rules, sigma) = chart_options(options)?;
+    to_js(&xbar_r_dto(subgroups, rules, sigma).map_err(js_err)?)
 }
 
 /// Compute an X-bar S chart from subgroups.
@@ -427,11 +438,13 @@ pub fn xbar_r_chart(
 #[wasm_bindgen(unchecked_return_type = "XbarSChartDto")]
 pub fn xbar_s_chart(
     #[wasm_bindgen(unchecked_param_type = "number[][]")] data: JsValue,
-    #[wasm_bindgen(unchecked_optional_param_type = "RuleOptions | null")] options: Option<JsValue>,
+    #[wasm_bindgen(unchecked_optional_param_type = "VariablesChartOptions | null")] options: Option<
+        JsValue,
+    >,
 ) -> Result<JsValue, JsValue> {
     let subgroups = read_number_rows(&data, "data").map_err(js_err)?;
-    let rules = rules_option(options)?;
-    to_js(&xbar_s_dto(subgroups, rules).map_err(js_err)?)
+    let (rules, sigma) = chart_options(options)?;
+    to_js(&xbar_s_dto(subgroups, rules, sigma).map_err(js_err)?)
 }
 
 /// Compute an Individual and Moving Range (I-MR) chart.
@@ -452,11 +465,13 @@ pub fn xbar_s_chart(
 #[wasm_bindgen(unchecked_return_type = "ImrChartDto")]
 pub fn imr_chart(
     #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] values: JsValue,
-    #[wasm_bindgen(unchecked_optional_param_type = "RuleOptions | null")] options: Option<JsValue>,
+    #[wasm_bindgen(unchecked_optional_param_type = "VariablesChartOptions | null")] options: Option<
+        JsValue,
+    >,
 ) -> Result<JsValue, JsValue> {
     let values = read_numbers(&values, "values").map_err(js_err)?;
-    let rules = rules_option(options)?;
-    to_js(&imr_dto(values, rules).map_err(js_err)?)
+    let (rules, sigma) = chart_options(options)?;
+    to_js(&imr_dto(values, rules, sigma).map_err(js_err)?)
 }
 
 /// Apply run tests to a series against control limits the caller supplies.
@@ -502,6 +517,10 @@ export type RuleSetName = "shewhart" | "western_electric" | "nelson";
 export interface RuleOptions {
     rules?: RuleSetName | RunRule[] | null;
 }
+/** The options of the variables charts (X-bar R, X-bar S, I-MR): the run tests, and the within sigma fixed by an earlier (Phase I) study — greater than 0. */
+export interface VariablesChartOptions extends RuleOptions {
+    sigma?: number | null;
+}
 /** A known centre line from a Phase I study. */
 export interface PChartOptions {
     p_bar?: number | null;
@@ -538,6 +557,20 @@ fn rules_option(options: Option<JsValue>) -> Result<crate::spc::RuleSet, JsValue
             rules_from_json(Some(from_js(o, "options")?)).map_err(js_err)
         }
         _ => Ok(crate::spc::RuleSet::default()),
+    }
+}
+
+/// The optional `{ rules?, sigma? }` argument of the variables charts: the run
+/// tests and the within sigma fixed by an earlier study.
+fn chart_options(options: Option<JsValue>) -> Result<(crate::spc::RuleSet, Option<f64>), JsValue> {
+    match options {
+        Some(o) if !o.is_undefined() && !o.is_null() => {
+            let value: serde_json::Value = from_js(o, "options")?;
+            let sigma = crate::wire::sigma_from_json(Some(&value)).map_err(js_err)?;
+            let rules = rules_from_json(Some(value)).map_err(js_err)?;
+            Ok((rules, sigma))
+        }
+        _ => Ok((crate::spc::RuleSet::default(), None)),
     }
 }
 
@@ -2474,6 +2507,7 @@ mod binding_contract_tests {
         let chart = xbar_r_dto(
             SUBGROUPS.iter().map(|g| g.to_vec()).collect(),
             crate::spc::RuleSet::default(),
+            None,
         )
         .expect("valid");
         let cap = dto(json!({
@@ -2489,7 +2523,8 @@ mod binding_contract_tests {
         assert!(cpk.lower < cap.cpk.unwrap() && cap.cpk.unwrap() < cpk.upper);
         // The range spends degrees of freedom: fewer than m (n - 1).
         let pooled = (SUBGROUPS.len() * (SUBGROUPS[0].len() - 1)) as f64;
-        assert!(chart.sigma_hat_df > 0.0 && chart.sigma_hat_df < pooled);
+        let df = chart.sigma_hat_df.expect("estimated from the subgroups");
+        assert!(df > 0.0 && df < pooled);
     }
 
     #[test]
@@ -2566,7 +2601,7 @@ mod binding_contract_tests {
     fn xbar_s_chart_reports_the_crate_chart() {
         use crate::spc::{ControlChart, RuleSet, XBarSChart};
         let subgroups = shifted_subgroups();
-        let d = xbar_s_dto(subgroups.clone(), RuleSet::default()).expect("valid input");
+        let d = xbar_s_dto(subgroups.clone(), RuleSet::default(), None).expect("valid input");
 
         let mut chart = XBarSChart::new(5).expect("5 is in range");
         for g in &subgroups {
@@ -2589,8 +2624,8 @@ mod binding_contract_tests {
         let mut subgroups = shifted_subgroups();
         subgroups[7].pop();
         for result in [
-            xbar_s_dto(subgroups.clone(), RuleSet::default()).map(|_| ()),
-            xbar_r_dto(subgroups, RuleSet::default()).map(|_| ()),
+            xbar_s_dto(subgroups.clone(), RuleSet::default(), None).map(|_| ()),
+            xbar_r_dto(subgroups, RuleSet::default(), None).map(|_| ()),
         ] {
             let e = result.expect_err("ragged subgroup");
             assert!(e.message.contains("subgroups[7]"), "{e}");
@@ -2613,7 +2648,7 @@ mod binding_contract_tests {
     fn imr_chart_reports_the_crate_chart() {
         use crate::spc::{ControlChart, IndividualMRChart, RuleSet};
         let values: Vec<f64> = shifted_subgroups().iter().map(|g| g[0]).collect();
-        let d = imr_dto(values.clone(), RuleSet::default()).expect("valid input");
+        let d = imr_dto(values.clone(), RuleSet::default(), None).expect("valid input");
 
         let mut chart = IndividualMRChart::new();
         for &x in &values {
@@ -2633,7 +2668,7 @@ mod binding_contract_tests {
     #[test]
     fn imr_chart_needs_two_values() {
         use crate::spc::RuleSet;
-        let e = imr_dto(vec![1.0], RuleSet::default()).expect_err("one value has no range");
+        let e = imr_dto(vec![1.0], RuleSet::default(), None).expect_err("one value has no range");
         assert!(e.message.contains("two"), "{e}");
     }
 
@@ -2642,7 +2677,7 @@ mod binding_contract_tests {
     #[test]
     fn run_rules_finds_what_the_chart_found() {
         use crate::spc::RuleSet;
-        let chart = xbar_r_dto(shifted_subgroups(), RuleSet::default()).expect("valid");
+        let chart = xbar_r_dto(shifted_subgroups(), RuleSet::default(), None).expect("valid");
         let flagged = chart
             .xbar_points
             .iter()
@@ -3676,6 +3711,70 @@ mod engine_card_tests {
         assert_eq!(
             crate::engine_card::clock_and_entropy_uses(),
             Vec::<(String, &str)>::new()
+        );
+    }
+
+    // ── The within sigma a variables chart can be given ────────────────
+
+    fn phase_subgroups() -> Vec<Vec<f64>> {
+        (0..20)
+            .map(|g| {
+                let shift = if g >= 10 { 0.6 } else { 0.0 };
+                (0..5)
+                    .map(|i| 10.0 + shift + 0.1 * (((g * 3 + i * 7) % 5) as f64 - 2.0))
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn variables_charts_take_a_fixed_sigma_through_the_wire() {
+        use crate::spc::RuleSet;
+        let groups = phase_subgroups();
+        let n = groups[0].len() as f64;
+        let free = xbar_r_dto(groups.clone(), RuleSet::default(), None).unwrap();
+        let fixed = xbar_r_dto(groups.clone(), RuleSet::default(), Some(0.5)).unwrap();
+        assert_eq!(fixed.sigma_hat, 0.5);
+        assert_eq!(fixed.sigma_hat_df, None);
+        assert!(free.sigma_hat_df.is_some());
+        assert_eq!(fixed.xbar_cl, free.xbar_cl);
+        assert!((fixed.xbar_ucl - fixed.xbar_cl - 1.5 / n.sqrt()).abs() < 1e-12);
+        assert_ne!(fixed.r_cl, free.r_cl);
+
+        let s = xbar_s_dto(groups, RuleSet::default(), Some(0.5)).unwrap();
+        assert_eq!((s.sigma_hat, s.sigma_hat_df), (0.5, None));
+        let values: Vec<f64> = phase_subgroups().iter().map(|g| g[0]).collect();
+        let i = imr_dto(values, RuleSet::default(), Some(0.5)).unwrap();
+        assert!((i.i_ucl - i.i_cl - 1.5).abs() < 1e-12);
+        assert_eq!((i.sigma_hat, i.sigma_hat_df), (0.5, None));
+    }
+
+    #[test]
+    fn a_bad_fixed_sigma_is_refused_with_its_bounds() {
+        use crate::spc::RuleSet;
+        for bad in [0.0, -1.0] {
+            let e = xbar_r_dto(phase_subgroups(), RuleSet::default(), Some(bad))
+                .expect_err("sigma must exceed 0");
+            assert_eq!(e.code, "parameter_out_of_range");
+            assert_eq!(e.parameter.as_deref(), Some("sigma"));
+        }
+        let e = crate::wire::sigma_from_json(Some(&serde_json::json!({ "sigma": "wide" })))
+            .expect_err("a string is not a number");
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("malformed_input", Some("sigma"))
+        );
+        assert_eq!(
+            crate::wire::sigma_from_json(Some(&serde_json::json!({}))).unwrap(),
+            None
+        );
+        assert_eq!(
+            crate::wire::sigma_from_json(Some(&serde_json::json!({ "sigma": null }))).unwrap(),
+            None
+        );
+        assert_eq!(
+            crate::wire::sigma_from_json(Some(&serde_json::json!({ "sigma": 0.25 }))).unwrap(),
+            Some(0.25)
         );
     }
 }

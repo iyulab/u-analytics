@@ -252,6 +252,8 @@ pub struct XBarRChart {
     r_limits: Option<ControlLimits>,
     /// Run tests applied when limits are computed.
     rules: RuleSet,
+    /// A within sigma fixed by an earlier study (`with_sigma`).
+    sigma_standard: Option<f64>,
 }
 
 impl XBarRChart {
@@ -280,6 +282,31 @@ impl XBarRChart {
     pub fn rules(&self) -> RuleSet {
         self.rules
     }
+
+    /// Fix the within-subgroup variation at a `sigma` known from an earlier
+    /// (Phase I) study -- the two-stage procedure of ISO 7870-2 (§7.5): the
+    /// dispersion chart is homogenised first and its sigma fixed, and the
+    /// location chart is then built on the subgroups that remain with *that*
+    /// sigma, however many of them it drops. The centre line of the location
+    /// chart is still the grand mean of the subgroups given; its limits are
+    /// `CL ± 3 sigma / sqrt(n)`, and the dispersion chart's centre line and
+    /// limits are those of `sigma` instead of the subgroups' own spread.
+    /// [`sigma_hat`](Self::sigma_hat) then returns `sigma` itself and
+    /// [`sigma_hat_df`](Self::sigma_hat_df) is `None` -- the degrees of freedom
+    /// belong to the study that produced `sigma`, which the caller knows.
+    ///
+    /// # Errors
+    ///
+    /// [`ControlChartError::InvalidStandard`] unless `sigma` is finite and
+    /// greater than 0.
+    pub fn with_sigma(mut self, sigma: f64) -> Result<Self, ControlChartError> {
+        if !(sigma.is_finite() && sigma > 0.0) {
+            return Err(ControlChartError::rate_standard("sigma", sigma));
+        }
+        self.sigma_standard = Some(sigma);
+        self.recompute();
+        Ok(self)
+    }
     /// Create a new X-bar-R chart with the given subgroup size.
     ///
     /// # Errors
@@ -306,6 +333,7 @@ impl XBarRChart {
             xbar_limits: None,
             r_limits: None,
             rules: RuleSet::default(),
+            sigma_standard: None,
         })
     }
 
@@ -334,6 +362,9 @@ impl XBarRChart {
     /// ```
     pub fn sigma_hat(&self) -> Option<f64> {
         let r_bar = self.r_limits.as_ref()?.cl;
+        if let Some(sigma) = self.sigma_standard {
+            return Some(sigma);
+        }
         let d2 = D2[self.subgroup_size - 2];
         (d2 > 0.0).then(|| r_bar / d2)
     }
@@ -364,6 +395,9 @@ impl XBarRChart {
     /// ```
     pub fn sigma_hat_df(&self) -> Option<f64> {
         self.r_limits.as_ref()?;
+        if self.sigma_standard.is_some() {
+            return None;
+        }
         let cv = (D4[self.subgroup_size - 2] - 1.0) / 3.0;
         Some(equivalent_df(cv * cv / self.subgroups.len() as f64))
     }
@@ -405,15 +439,22 @@ impl XBarRChart {
         // Grand mean and average range
         let grand_mean = u_numflow::stats::mean(&xbar_values)
             .expect("xbar_values should be non-empty with finite values");
-        let r_bar = u_numflow::stats::mean(&r_values)
-            .expect("r_values should be non-empty with finite values");
+        // A fixed sigma stands in for the subgroups' own spread (`with_sigma`).
+        let r_bar = match self.sigma_standard {
+            Some(sigma) => sigma * D2[idx],
+            None => u_numflow::stats::mean(&r_values)
+                .expect("r_values should be non-empty with finite values"),
+        };
 
         // X-bar chart limits
-        let a2 = A2[idx];
+        let half_width = match self.sigma_standard {
+            Some(sigma) => 3.0 * sigma / (self.subgroup_size as f64).sqrt(),
+            None => A2[idx] * r_bar,
+        };
         self.xbar_limits = Some(ControlLimits {
-            ucl: grand_mean + a2 * r_bar,
+            ucl: grand_mean + half_width,
             cl: grand_mean,
-            lcl: grand_mean - a2 * r_bar,
+            lcl: grand_mean - half_width,
         });
 
         // R chart limits
@@ -541,6 +582,8 @@ pub struct XBarSChart {
     s_limits: Option<ControlLimits>,
     /// Run tests applied when limits are computed.
     rules: RuleSet,
+    /// A within sigma fixed by an earlier study (`with_sigma`).
+    sigma_standard: Option<f64>,
 }
 
 impl XBarSChart {
@@ -569,6 +612,31 @@ impl XBarSChart {
     pub fn rules(&self) -> RuleSet {
         self.rules
     }
+
+    /// Fix the within-subgroup variation at a `sigma` known from an earlier
+    /// (Phase I) study -- the two-stage procedure of ISO 7870-2 (§7.5): the
+    /// dispersion chart is homogenised first and its sigma fixed, and the
+    /// location chart is then built on the subgroups that remain with *that*
+    /// sigma, however many of them it drops. The centre line of the location
+    /// chart is still the grand mean of the subgroups given; its limits are
+    /// `CL ± 3 sigma / sqrt(n)`, and the dispersion chart's centre line and
+    /// limits are those of `sigma` instead of the subgroups' own spread.
+    /// [`sigma_hat`](Self::sigma_hat) then returns `sigma` itself and
+    /// [`sigma_hat_df`](Self::sigma_hat_df) is `None` -- the degrees of freedom
+    /// belong to the study that produced `sigma`, which the caller knows.
+    ///
+    /// # Errors
+    ///
+    /// [`ControlChartError::InvalidStandard`] unless `sigma` is finite and
+    /// greater than 0.
+    pub fn with_sigma(mut self, sigma: f64) -> Result<Self, ControlChartError> {
+        if !(sigma.is_finite() && sigma > 0.0) {
+            return Err(ControlChartError::rate_standard("sigma", sigma));
+        }
+        self.sigma_standard = Some(sigma);
+        self.recompute();
+        Ok(self)
+    }
     /// Create a new X-bar-S chart with the given subgroup size.
     ///
     /// # Errors
@@ -595,6 +663,7 @@ impl XBarSChart {
             xbar_limits: None,
             s_limits: None,
             rules: RuleSet::default(),
+            sigma_standard: None,
         })
     }
 
@@ -619,6 +688,9 @@ impl XBarSChart {
     /// ```
     pub fn sigma_hat(&self) -> Option<f64> {
         let s_bar = self.s_limits.as_ref()?.cl;
+        if let Some(sigma) = self.sigma_standard {
+            return Some(sigma);
+        }
         let c4 = C4[self.subgroup_size - 2];
         (c4 > 0.0).then(|| s_bar / c4)
     }
@@ -632,6 +704,9 @@ impl XBarSChart {
     /// Returns `None` if there is not enough data for control limits.
     pub fn sigma_hat_df(&self) -> Option<f64> {
         self.s_limits.as_ref()?;
+        if self.sigma_standard.is_some() {
+            return None;
+        }
         let c4 = C4[self.subgroup_size - 2];
         Some(equivalent_df(
             (1.0 - c4 * c4) / (c4 * c4 * self.subgroups.len() as f64),
@@ -676,15 +751,22 @@ impl XBarSChart {
         // Grand mean and average S
         let grand_mean = u_numflow::stats::mean(&xbar_values)
             .expect("xbar_values should be non-empty with finite values");
-        let s_bar = u_numflow::stats::mean(&s_values)
-            .expect("s_values should be non-empty with finite values");
+        // A fixed sigma stands in for the subgroups' own spread (`with_sigma`).
+        let s_bar = match self.sigma_standard {
+            Some(sigma) => sigma * C4[idx],
+            None => u_numflow::stats::mean(&s_values)
+                .expect("s_values should be non-empty with finite values"),
+        };
 
         // X-bar chart limits
-        let a3 = A3[idx];
+        let half_width = match self.sigma_standard {
+            Some(sigma) => 3.0 * sigma / (self.subgroup_size as f64).sqrt(),
+            None => A3[idx] * s_bar,
+        };
         self.xbar_limits = Some(ControlLimits {
-            ucl: grand_mean + a3 * s_bar,
+            ucl: grand_mean + half_width,
             cl: grand_mean,
-            lcl: grand_mean - a3 * s_bar,
+            lcl: grand_mean - half_width,
         });
 
         // S chart limits
@@ -811,6 +893,8 @@ pub struct IndividualMRChart {
     mr_limits: Option<ControlLimits>,
     /// Run tests applied when limits are computed.
     rules: RuleSet,
+    /// A sigma fixed by an earlier study (`with_sigma`).
+    sigma_standard: Option<f64>,
 }
 
 impl IndividualMRChart {
@@ -839,6 +923,31 @@ impl IndividualMRChart {
     pub fn rules(&self) -> RuleSet {
         self.rules
     }
+
+    /// Fix the within-subgroup variation at a `sigma` known from an earlier
+    /// (Phase I) study -- the two-stage procedure of ISO 7870-2 (§7.5): the
+    /// dispersion chart is homogenised first and its sigma fixed, and the
+    /// location chart is then built on the subgroups that remain with *that*
+    /// sigma, however many of them it drops. The centre line of the location
+    /// chart is still the grand mean of the subgroups given; its limits are
+    /// `CL ± 3 sigma / sqrt(n)`, and the dispersion chart's centre line and
+    /// limits are those of `sigma` instead of the subgroups' own spread.
+    /// [`sigma_hat`](Self::sigma_hat) then returns `sigma` itself and
+    /// [`sigma_hat_df`](Self::sigma_hat_df) is `None` -- the degrees of freedom
+    /// belong to the study that produced `sigma`, which the caller knows.
+    ///
+    /// # Errors
+    ///
+    /// [`ControlChartError::InvalidStandard`] unless `sigma` is finite and
+    /// greater than 0.
+    pub fn with_sigma(mut self, sigma: f64) -> Result<Self, ControlChartError> {
+        if !(sigma.is_finite() && sigma > 0.0) {
+            return Err(ControlChartError::rate_standard("sigma", sigma));
+        }
+        self.sigma_standard = Some(sigma);
+        self.recompute();
+        Ok(self)
+    }
     /// Create a new Individual-MR chart.
     pub fn new() -> Self {
         Self {
@@ -848,6 +957,7 @@ impl IndividualMRChart {
             i_limits: None,
             mr_limits: None,
             rules: RuleSet::default(),
+            sigma_standard: None,
         }
     }
 
@@ -876,6 +986,9 @@ impl IndividualMRChart {
     /// ```
     pub fn sigma_hat(&self) -> Option<f64> {
         let mr_bar = self.mr_limits.as_ref()?.cl;
+        if let Some(sigma) = self.sigma_standard {
+            return Some(sigma);
+        }
         Some(mr_bar / D2[0])
     }
 
@@ -888,6 +1001,9 @@ impl IndividualMRChart {
     /// Returns `None` if there is not enough data for control limits.
     pub fn sigma_hat_df(&self) -> Option<f64> {
         self.mr_limits.as_ref()?;
+        if self.sigma_standard.is_some() {
+            return None;
+        }
         Some(0.62 * (self.observations.len() - 1) as f64)
     }
 
@@ -921,14 +1037,22 @@ impl IndividualMRChart {
         // X-bar and MR-bar
         let x_bar = u_numflow::stats::mean(&self.observations)
             .expect("observations should be non-empty with finite values");
-        let mr_bar = u_numflow::stats::mean(&mr_values)
-            .expect("mr_values should be non-empty with finite values");
+        // A fixed sigma stands in for the moving ranges' own mean (`with_sigma`).
+        let mr_bar = match self.sigma_standard {
+            Some(sigma) => sigma * D2[0],
+            None => u_numflow::stats::mean(&mr_values)
+                .expect("mr_values should be non-empty with finite values"),
+        };
 
         // I chart limits
+        let half_width = match self.sigma_standard {
+            Some(sigma) => 3.0 * sigma,
+            None => E2 * mr_bar,
+        };
         self.i_limits = Some(ControlLimits {
-            ucl: x_bar + E2 * mr_bar,
+            ucl: x_bar + half_width,
             cl: x_bar,
-            lcl: x_bar - E2 * mr_bar,
+            lcl: x_bar - half_width,
         });
 
         // MR chart limits (LCL is always 0 for n=2)
@@ -1633,5 +1757,104 @@ mod tests {
             (sigma_within - sigma_overall).abs() > 1e-6,
             "short-term and long-term sigma must differ on drifting subgroups: within={sigma_within}, overall={sigma_overall}"
         );
+    }
+
+    // ── Fixed sigma (Phase I standard, ISO 7870-2 §7.5) ────────────────
+
+    const PHASE_I: [[f64; 5]; 4] = [
+        [25.0, 26.0, 24.5, 25.5, 25.0],
+        [25.2, 24.8, 25.1, 24.9, 25.3],
+        [25.1, 25.0, 24.7, 25.3, 24.9],
+        [26.1, 25.4, 25.2, 24.6, 25.8],
+    ];
+
+    #[test]
+    fn xbar_r_with_a_fixed_sigma_keeps_the_grand_mean_and_replaces_the_spread() {
+        let sigma = 0.4;
+        let mut free = XBarRChart::new(5).unwrap();
+        let mut fixed = XBarRChart::new(5).unwrap().with_sigma(sigma).unwrap();
+        for g in &PHASE_I {
+            free.add_sample(g).unwrap();
+            fixed.add_sample(g).unwrap();
+        }
+        let (f, x) = (
+            free.control_limits().unwrap(),
+            fixed.control_limits().unwrap(),
+        );
+        assert_eq!(f.cl, x.cl, "the centre line is still the grand mean");
+        let half = 3.0 * sigma / 5.0_f64.sqrt();
+        assert!((x.ucl - x.cl - half).abs() < 1e-12 && (x.cl - x.lcl - half).abs() < 1e-12);
+        let r = fixed.r_limits().unwrap();
+        assert!((r.cl - sigma * D2[3]).abs() < 1e-12);
+        assert!((r.ucl - D4[3] * sigma * D2[3]).abs() < 1e-12);
+        assert_eq!(fixed.sigma_hat(), Some(sigma));
+        assert_eq!(fixed.sigma_hat_df(), None);
+        assert!(free.sigma_hat_df().is_some());
+        assert_ne!(f.ucl, x.ucl);
+    }
+
+    #[test]
+    fn dropping_subgroups_for_the_location_chart_leaves_the_fixed_dispersion_alone() {
+        // Phase I step 2: the sigma is fixed first; removing a subgroup then
+        // moves the grand mean but neither dispersion limits nor the half-width.
+        let sigma = 0.35;
+        let build = |groups: &[[f64; 5]]| {
+            let mut chart = XBarRChart::new(5).unwrap().with_sigma(sigma).unwrap();
+            for g in groups {
+                chart.add_sample(g).unwrap();
+            }
+            chart
+        };
+        let all = build(&PHASE_I);
+        let kept = build(&PHASE_I[..3]);
+        assert_eq!(all.r_limits(), kept.r_limits());
+        let (a, k) = (
+            all.control_limits().unwrap(),
+            kept.control_limits().unwrap(),
+        );
+        assert!((a.ucl - a.cl - (k.ucl - k.cl)).abs() < 1e-12);
+        assert_ne!(a.cl, k.cl);
+    }
+
+    #[test]
+    fn xbar_s_and_imr_with_a_fixed_sigma() {
+        let sigma = 0.5;
+        let mut s = XBarSChart::new(5).unwrap().with_sigma(sigma).unwrap();
+        for g in &PHASE_I {
+            s.add_sample(g).unwrap();
+        }
+        let x = s.control_limits().unwrap();
+        assert!((x.ucl - x.cl - 3.0 * sigma / 5.0_f64.sqrt()).abs() < 1e-12);
+        let sl = s.s_limits().unwrap();
+        assert!((sl.cl - sigma * C4[3]).abs() < 1e-12);
+        assert_eq!(s.sigma_hat(), Some(sigma));
+        assert_eq!(s.sigma_hat_df(), None);
+
+        let mut i = IndividualMRChart::new().with_sigma(sigma).unwrap();
+        for v in [10.0, 10.4, 9.8, 10.1] {
+            i.add_sample(&[v]).unwrap();
+        }
+        let il = i.control_limits().unwrap();
+        assert!((il.ucl - il.cl - 3.0 * sigma).abs() < 1e-12);
+        let ml = i.mr_limits().unwrap();
+        assert!((ml.cl - sigma * D2[0]).abs() < 1e-12);
+        assert!((ml.ucl - D4_MR * sigma * D2[0]).abs() < 1e-12);
+        assert_eq!(i.sigma_hat(), Some(sigma));
+        assert_eq!(i.sigma_hat_df(), None);
+    }
+
+    #[test]
+    fn a_fixed_sigma_must_be_a_positive_finite_number() {
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(matches!(
+                XBarRChart::new(5).unwrap().with_sigma(bad),
+                Err(ControlChartError::InvalidStandard {
+                    parameter: "sigma",
+                    ..
+                })
+            ));
+            assert!(XBarSChart::new(5).unwrap().with_sigma(bad).is_err());
+            assert!(IndividualMRChart::new().with_sigma(bad).is_err());
+        }
     }
 }

@@ -62,12 +62,14 @@ public sealed record ChartPoint(int Index, double Value, IReadOnlyList<RunRule> 
 /// <summary>
 /// X̄-R chart. <see cref="SigmaHat"/> is R̄ / d2; <see cref="SigmaHatDf"/> its degrees of freedom
 /// (David's approximation) — pass both to <see cref="AnalyticsClient.ProcessCapability"/> for Cp/Cpk intervals.
+/// A chart given its sigma (<c>sigma</c> argument) reports that value as <see cref="SigmaHat"/> and <c>null</c> degrees
+/// of freedom: they belong to the study that produced it.
 /// </summary>
 public sealed record XbarRChartResult(
     double XbarCl, double XbarUcl, double XbarLcl,
     double RCl, double RUcl, double RLcl,
     double SigmaHat,
-    double SigmaHatDf,
+    double? SigmaHatDf,
     IReadOnlyList<ChartPoint> XbarPoints,
     IReadOnlyList<ChartPoint> RPoints,
     bool InControl);
@@ -77,7 +79,7 @@ public sealed record XbarSChartResult(
     double XbarCl, double XbarUcl, double XbarLcl,
     double SCl, double SUcl, double SLcl,
     double SigmaHat,
-    double SigmaHatDf,
+    double? SigmaHatDf,
     IReadOnlyList<ChartPoint> XbarPoints,
     IReadOnlyList<ChartPoint> SPoints,
     bool InControl);
@@ -87,7 +89,7 @@ public sealed record ImrChartResult(
     double ICl, double IUcl, double ILcl,
     double MrCl, double MrUcl, double MrLcl,
     double SigmaHat,
-    double SigmaHatDf,
+    double? SigmaHatDf,
     IReadOnlyList<ChartPoint> IPoints,
     IReadOnlyList<ChartPoint> MrPoints,
     bool InControl);

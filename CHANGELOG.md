@@ -10,8 +10,24 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Added
 
+- `XBarRChart`, `XBarSChart` and `IndividualMRChart` take a within sigma fixed by an earlier (Phase I) study:
+  `with_sigma(sigma)`. This is the two-stage procedure of ISO 7870-2 (§7.5) -- the dispersion chart is
+  homogenised first and its sigma fixed, and the location chart is built on the subgroups that remain with that
+  sigma, however many it drops. The location chart's centre line is still the grand mean of the subgroups given,
+  its limits are `CL ± 3 sigma / sqrt(n)`, and the dispersion chart is that of `sigma`; `sigma_hat()` returns it.
+  WebAssembly: `xbar_r_chart`, `xbar_s_chart` and `imr_chart` take `{ sigma? }` in their options (declared
+  `VariablesChartOptions`); C ABI: `sigma` in the request of `uanalytics_xbar_r_chart`, `uanalytics_xbar_s_chart`
+  and `uanalytics_imr_chart`; .NET: `sigma` on `XbarRChart`, `XbarSChart` and `ImrChart`. A sigma that is not
+  above 0 is refused (`parameter_out_of_range`, `parameter: "sigma"`).
 - `regression::vif_from_correlation`: the variance inflation factors of a correlation matrix (the diagonal of its
   inverse), by one eigendecomposition. A variable that is a linear combination of the others is infinite.
+
+### Changed
+
+- **Breaking** `sigma_hat_df` of the three variables charts is absent (`None`, `null`, .NET `double?`) when the chart
+  was given its sigma: the degrees of freedom belong to the study that produced it. It is a number otherwise, as
+  before; `XbarRChartResult.SigmaHatDf`, `XbarSChartResult.SigmaHatDf` and `ImrChartResult.SigmaHatDf` became
+  `double?` and `XbarRChartDto`, `XbarSChartDto` and `ImrChartDto` declare `number | null`.
 
 ### Fixed
 

@@ -109,7 +109,7 @@ public class BehaviourTests
 
         double[][] groups = [[9.8, 10.1, 10.0, 9.9, 10.2], [10.3, 9.7, 10.0, 10.1, 9.9], [10.4, 9.6, 10.0, 10.2, 9.8]];
         var chart = _client.XbarRChart(groups);
-        Assert.InRange(chart.SigmaHatDf, 0.1, 3 * 4);
+        Assert.InRange(chart.SigmaHatDf!.Value, 0.1, 3 * 4);
         var composed = _client.ProcessCapability([.. groups.SelectMany(g => g)], 11, 9,
             sigmaWithin: chart.SigmaHat, sigmaWithinDf: chart.SigmaHatDf);
         Assert.NotNull(composed.Intervals.Cp);
@@ -264,5 +264,29 @@ public class BehaviourTests
         var many = Assert.Throws<AnalyticsException>(() => _client.ExponentialSmoothing(use, SmoothingMethod.Simple, horizon: 100_000, crossing: new Crossing(100, Paths: 20_000)));
         Assert.Equal("crossing.paths", many.Parameter);
         Assert.Equal(10_000, many.Details!.Value.GetProperty("max").GetDouble());
+    }
+
+    [Fact]
+    public void A_variables_chart_given_its_sigma_builds_its_limits_on_it()
+    {
+        double[][] groups = [[9.8, 10.1, 10.0, 9.9, 10.2], [10.3, 9.7, 10.0, 10.1, 9.9], [10.4, 9.6, 10.0, 10.2, 9.8]];
+        var free = _client.XbarRChart(groups);
+        var fixedSigma = _client.XbarRChart(groups, sigma: 0.2);
+
+        // The centre line is still the grand mean; the half-width is 3 sigma / sqrt(n).
+        Assert.Equal(free.XbarCl, fixedSigma.XbarCl, 12);
+        Assert.Equal(3 * 0.2 / Math.Sqrt(5), fixedSigma.XbarUcl - fixedSigma.XbarCl, 12);
+        Assert.Equal(0.2, fixedSigma.SigmaHat);
+        Assert.Null(fixedSigma.SigmaHatDf);
+        Assert.NotNull(free.SigmaHatDf);
+
+        var s = _client.XbarSChart(groups, sigma: 0.2);
+        Assert.Equal(0.2, s.SigmaHat);
+        var i = _client.ImrChart([1.0, 1.4, 0.9, 1.2], sigma: 0.2);
+        Assert.Equal(3 * 0.2, i.IUcl - i.ICl, 12);
+
+        var e = Assert.Throws<AnalyticsException>(() => _client.ImrChart([1.0, 1.4], sigma: 0.0));
+        Assert.Equal("parameter_out_of_range", e.ErrorCode);
+        Assert.Equal("sigma", e.Parameter);
     }
 }

@@ -155,6 +155,11 @@ struct SpcChartRequest {
     /// `"shewhart"`, the 3-sigma test alone.
     #[serde(default)]
     rules: Option<serde_json::Value>,
+    /// The within sigma fixed by an earlier (Phase I) study, greater than 0:
+    /// the limits are then built on it rather than on the subgroups' own
+    /// spread (see the WASM binding's `sigma` option). Absent: estimated.
+    #[serde(default)]
+    sigma: Option<f64>,
 }
 
 /// SPC X-bar/R control chart.
@@ -189,7 +194,7 @@ pub unsafe extern "C" fn uanalytics_xbar_r_chart(
             Ok(r) => r,
             Err(e) => return write_error(result_ptr, ERR_COMPUTE, &e),
         };
-        match crate::wire::xbar_r_dto(req.subgroups, rules) {
+        match crate::wire::xbar_r_dto(req.subgroups, rules, req.sigma) {
             Ok(dto) => write_json(result_ptr, &dto),
             Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
         }
@@ -208,6 +213,9 @@ struct ValuesRequest {
     values: Vec<f64>,
     #[serde(default)]
     rules: Option<serde_json::Value>,
+    /// As for `SpcChartRequest`; read by the I-MR chart only.
+    #[serde(default)]
+    sigma: Option<f64>,
 }
 
 /// Request for `uanalytics_run_rules`: a series, one set of limits, and the
@@ -258,7 +266,7 @@ pub unsafe extern "C" fn uanalytics_xbar_s_chart(
             Ok(r) => r,
             Err(e) => return write_error(result_ptr, ERR_COMPUTE, &e),
         };
-        match crate::wire::xbar_s_dto(req.subgroups, rules) {
+        match crate::wire::xbar_s_dto(req.subgroups, rules, req.sigma) {
             Ok(dto) => write_json(result_ptr, &dto),
             Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
         }
@@ -295,7 +303,7 @@ pub unsafe extern "C" fn uanalytics_imr_chart(
             Ok(r) => r,
             Err(e) => return write_error(result_ptr, ERR_COMPUTE, &e),
         };
-        match crate::wire::imr_dto(req.values, rules) {
+        match crate::wire::imr_dto(req.values, rules, req.sigma) {
             Ok(dto) => write_json(result_ptr, &dto),
             Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
         }
@@ -3081,7 +3089,7 @@ mod tests {
             &serde_json::json!({ "subgroups": groups }).to_string(),
         );
         assert_eq!(code, 0, "{body}");
-        let wire = crate::wire::xbar_r_dto(groups, RuleSet::nelson()).expect("chart");
+        let wire = crate::wire::xbar_r_dto(groups, RuleSet::nelson(), None).expect("chart");
         assert_eq!(body, serde_json::to_value(&wire).unwrap());
 
         let samples = [[3_u64, 100], [5, 120], [2, 80], [4, 100]];
@@ -3210,7 +3218,7 @@ mod tests {
             &serde_json::json!({ "subgroups": groups }).to_string(),
         );
         assert_eq!(code, 0, "{body}");
-        let wire = crate::wire::xbar_s_dto(groups, RuleSet::shewhart()).unwrap();
+        let wire = crate::wire::xbar_s_dto(groups, RuleSet::shewhart(), None).unwrap();
         assert_eq!(body, serde_json::to_value(&wire).unwrap());
 
         let values: Vec<f64> = (0..20).map(|i| 10.0 + 0.3 * ((i * 7) % 5) as f64).collect();
@@ -3219,7 +3227,7 @@ mod tests {
             &serde_json::json!({ "values": values, "rules": "nelson" }).to_string(),
         );
         assert_eq!(code, 0, "{body}");
-        let wire = crate::wire::imr_dto(values.clone(), RuleSet::nelson()).unwrap();
+        let wire = crate::wire::imr_dto(values.clone(), RuleSet::nelson(), None).unwrap();
         assert_eq!(body, serde_json::to_value(&wire).unwrap());
 
         let limits = serde_json::json!({ "ucl": 11.0, "cl": 10.5, "lcl": 10.0 });
@@ -3419,6 +3427,50 @@ mod tests {
             body["error"].as_str().unwrap().contains("weights"),
             "{body}"
         );
+    }
+
+    #[test]
+    fn ffi_variables_charts_take_a_fixed_sigma() {
+        use crate::spc::RuleSet;
+        let groups: Vec<Vec<f64>> = (0..6)
+            .map(|g| {
+                (0..5)
+                    .map(|i| 10.0 + 0.1 * ((g * 7 + i * 3) % 5) as f64)
+                    .collect()
+            })
+            .collect();
+        let (code, body) = call(
+            uanalytics_xbar_r_chart,
+            &serde_json::json!({ "subgroups": groups, "sigma": 0.2 }).to_string(),
+        );
+        assert_eq!(code, 0, "{body}");
+        let wire = crate::wire::xbar_r_dto(groups.clone(), RuleSet::default(), Some(0.2)).unwrap();
+        assert_eq!(body, serde_json::to_value(&wire).unwrap());
+        assert_eq!(body["sigma_hat"], 0.2);
+        assert!(body["sigma_hat_df"].is_null());
+
+        let (code, body) = call(
+            uanalytics_xbar_s_chart,
+            &serde_json::json!({ "subgroups": groups, "sigma": 0.2 }).to_string(),
+        );
+        assert_eq!(code, 0, "{body}");
+        assert_eq!(body["sigma_hat"], 0.2);
+
+        let (code, body) = call(
+            uanalytics_imr_chart,
+            &serde_json::json!({ "values": [1.0, 1.4, 0.9, 1.2], "sigma": 0.2 }).to_string(),
+        );
+        assert_eq!(code, 0, "{body}");
+        assert_eq!(body["sigma_hat"], 0.2);
+
+        // Not above 0: refused with the bounds, not estimated instead.
+        let (code, body) = call(
+            uanalytics_imr_chart,
+            &serde_json::json!({ "values": [1.0, 1.4], "sigma": 0.0 }).to_string(),
+        );
+        assert_ne!(code, 0);
+        assert_eq!(body["code"], "parameter_out_of_range");
+        assert_eq!(body["parameter"], "sigma");
     }
 }
 

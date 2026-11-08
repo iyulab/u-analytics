@@ -1672,9 +1672,12 @@
           "type": "number"
         },
         "sigma_hat_df": {
-          "description": "Degrees of freedom of `sigma_hat` (`0.62 (n - 1)`), for `sigma_within_df`.",
+          "description": "Degrees of freedom of `sigma_hat` (`0.62 (n - 1)`), for\n`sigma_within_df`; `null` when the chart was given its sigma\n(`options.sigma`).",
           "format": "double",
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ]
         }
       },
       "required": [
@@ -1685,7 +1688,6 @@
         "mr_ucl",
         "mr_lcl",
         "sigma_hat",
-        "sigma_hat_df",
         "i_points",
         "mr_points",
         "in_control"
@@ -3984,9 +3986,12 @@
           "type": "number"
         },
         "sigma_hat_df": {
-          "description": "Degrees of freedom of `sigma_hat` -- `process_capability`'s\n`sigma_within_df`, for Cp/Cpk confidence intervals.",
+          "description": "Degrees of freedom of `sigma_hat` -- `process_capability`'s\n`sigma_within_df`, for Cp/Cpk confidence intervals. `null` when the\nchart was given its sigma (`options.sigma`): the degrees of freedom are\nthose of the study that produced it.",
           "format": "double",
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "xbar_cl": {
           "format": "double",
@@ -4015,7 +4020,6 @@
         "r_ucl",
         "r_lcl",
         "sigma_hat",
-        "sigma_hat_df",
         "xbar_points",
         "r_points",
         "in_control"
@@ -4051,9 +4055,12 @@
           "type": "number"
         },
         "sigma_hat_df": {
-          "description": "Degrees of freedom of `sigma_hat`, for `sigma_within_df`.",
+          "description": "Degrees of freedom of `sigma_hat`, for `sigma_within_df`; `null` when\nthe chart was given its sigma (`options.sigma`).",
           "format": "double",
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "xbar_cl": {
           "format": "double",
@@ -4082,7 +4089,6 @@
         "s_ucl",
         "s_lcl",
         "sigma_hat",
-        "sigma_hat_df",
         "xbar_points",
         "s_points",
         "in_control"

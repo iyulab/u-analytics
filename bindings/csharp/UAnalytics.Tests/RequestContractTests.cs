@@ -73,9 +73,9 @@ public class RequestContractTests
     /// <summary>Every call with every setting it has given, and each option under each of its names.</summary>
     private static readonly Dictionary<string, Action<AnalyticsClient>> Full = new()
     {
-        ["XbarRChart"] = c => c.XbarRChart(Subgroups, AllRules),
-        ["XbarSChart"] = c => c.XbarSChart(Subgroups, AllRules),
-        ["ImrChart"] = c => c.ImrChart(Series, AllRules),
+        ["XbarRChart"] = c => c.XbarRChart(Subgroups, AllRules, sigma: 0.5),
+        ["XbarSChart"] = c => c.XbarSChart(Subgroups, AllRules, sigma: 0.5),
+        ["ImrChart"] = c => c.ImrChart(Series, AllRules, sigma: 0.5),
         ["RunRules"] = c => c.RunRules([0, 1, 4, 0.5, -0.2, 3.5], 3, 0, -3, AllRules),
         ["XbarRChart(Shewhart)"] = c => c.XbarRChart(Subgroups, RunRuleSet.Shewhart),
         ["XbarSChart(WesternElectric)"] = c => c.XbarSChart(Subgroups, RunRuleSet.WesternElectric),

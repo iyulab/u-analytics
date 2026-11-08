@@ -379,7 +379,7 @@ serialises, so they cannot drift from what it actually accepts and returns:
 
 ```ts
 export function spectral_residual(input: SpectralResidualInputDto): SpectralResidualDto;
-export function xbar_r_chart(data: number[][], options?: RuleOptions | null): XbarRChartDto;
+export function xbar_r_chart(data: number[][], options?: VariablesChartOptions | null): XbarRChartDto;
 export function p_chart(samples: [number, number][], options?: PChartOptions | null): PChartDto;
 ```
 
@@ -475,6 +475,31 @@ const cap = process_capability({ data, usl: 11, lsl: 9, confidence: 0.90 });
 cap.intervals.ppk.lower   // Ppk lower bound at 95 %
 ```
 
+### Fixing the within sigma (two-stage Phase I)
+
+ISO 7870-2 (§7.5) homogenises a first study in two steps: the dispersion chart
+first -- subgroups with an assignable cause are dropped and the limits redone
+until it is in control, then its sigma is *fixed* -- and the location chart
+next, on the subgroups that remain, with *that* sigma, however many more the
+location chart drops. The three variables charts take it as `sigma`, the value
+the dispersion chart ended on (its `sigma_hat`):
+
+```js
+// Step 1: the dispersion chart, until it is in control
+const dispersion = xbar_r_chart(allSubgroups);
+// Step 2: the location chart on the remaining subgroups, with step 1's sigma
+const location = xbar_r_chart(keptSubgroups, { sigma: dispersion.sigma_hat });
+```
+
+The X-bar chart's centre line is still the grand mean of the subgroups given;
+its limits are `CL ± 3 sigma / sqrt(n)`, and the R (or S, or MR) chart is that
+of `sigma` (`d2 sigma`, `c4 sigma`, with the usual `D3`/`D4`/`B3`/`B4` factors)
+rather than of the subgroups' own spread. `sigma_hat` then returns `sigma`
+and `sigma_hat_df` is `null`: the degrees of freedom belong to the study that
+produced the sigma, which the caller knows. A `sigma` that is not above 0 is
+refused with `parameter_out_of_range` (`parameter: "sigma"`, `exclusive_min:
+0`). The same sigma is the "standard given" form of a Phase II limit.
+
 ### Choosing which run tests apply
 
 By default a chart applies the 3-sigma test alone (`"shewhart"`). Every added
@@ -523,19 +548,19 @@ type RuleName = "BeyondLimits" | "NineOneSide" | "SixTrend" | "FourteenAlternati
 type RuleSetName = "shewhart" | "western_electric" | "nelson";
 type Point = { index: number, value: number, violations: RuleName[] };
 
-xbar_s_chart(subgroups: number[][], options?: { rules?: RuleSetName | RuleName[] }): {
+xbar_s_chart(subgroups: number[][], options?: { rules?: RuleSetName | RuleName[], sigma?: number }): {
   xbar_cl: number, xbar_ucl: number, xbar_lcl: number,
   s_cl: number, s_ucl: number, s_lcl: number,
-  sigma_hat: number,             // S-bar / c4
-  sigma_hat_df: number,          // its degrees of freedom (David's approximation)
+  sigma_hat: number,             // S-bar / c4 (the `sigma` option, if given)
+  sigma_hat_df: number | null,   // its degrees of freedom (David's approximation); null when `sigma` is given
   xbar_points: Point[], s_points: Point[], in_control: boolean,
 }
 
-imr_chart(values: number[], options?: { rules?: RuleSetName | RuleName[] }): {
+imr_chart(values: number[], options?: { rules?: RuleSetName | RuleName[], sigma?: number }): {
   i_cl: number, i_ucl: number, i_lcl: number,
   mr_cl: number, mr_ucl: number, mr_lcl: number,
-  sigma_hat: number,             // MR-bar / d2(2)
-  sigma_hat_df: number,          // 0.62 (n - 1)
+  sigma_hat: number,             // MR-bar / d2(2) (the `sigma` option, if given)
+  sigma_hat_df: number | null,   // 0.62 (n - 1); null when `sigma` is given
   i_points: Point[],
   mr_points: Point[],            // starts at index 1: the first value has no moving range
   in_control: boolean,
@@ -1147,9 +1172,9 @@ function's arguments as one JSON object, the response is the same JSON.
 
 | C entry point | WASM export | Request JSON |
 |---|---|---|
-| `uanalytics_xbar_r_chart` | `xbar_r_chart(subgroups, { rules? })` | `{ subgroups, rules? }` |
-| `uanalytics_xbar_s_chart` | `xbar_s_chart(subgroups, { rules? })` | `{ subgroups, rules? }` |
-| `uanalytics_imr_chart` | `imr_chart(values, { rules? })` | `{ values, rules? }` |
+| `uanalytics_xbar_r_chart` | `xbar_r_chart(subgroups, { rules?, sigma? })` | `{ subgroups, rules?, sigma? }` |
+| `uanalytics_xbar_s_chart` | `xbar_s_chart(subgroups, { rules?, sigma? })` | `{ subgroups, rules?, sigma? }` |
+| `uanalytics_imr_chart` | `imr_chart(values, { rules?, sigma? })` | `{ values, rules?, sigma? }` |
 | `uanalytics_run_rules` | `run_rules(values, limits, { rules? })` | `{ values, limits: { ucl, cl, lcl }, rules? }` |
 | `uanalytics_p_chart` | `p_chart(samples, { p_bar? })` | `{ samples: [[defectives, sample_size], …], p_bar? }` |
 | `uanalytics_laney_p_chart` | `laney_p_chart(samples, { p_bar?, phi? })` | `{ samples: [[defectives, sample_size], …], p_bar?, phi? }` |

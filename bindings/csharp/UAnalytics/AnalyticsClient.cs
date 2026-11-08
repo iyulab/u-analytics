@@ -72,16 +72,24 @@ public sealed class AnalyticsClient : IDisposable
     /// <paramref name="rules"/> names the run tests to apply, in the vocabulary
     /// <c>violations</c> reports; <c>null</c> applies <see cref="RunRuleSet.Shewhart"/> (the
     /// 3-sigma test alone), an empty array the control limits only. A named set is the
-    /// <see cref="XbarRChart(double[][], RunRuleSet)"/> overload.
+    /// <see cref="XbarRChart(double[][], RunRuleSet, double?)"/> overload.
+    /// <paramref name="sigma"/> is the within sigma fixed by an earlier (Phase I) study (ISO 7870-2
+    /// §7.5), greater than 0: the X̄ chart's centre line is still the grand mean of
+    /// <paramref name="subgroups"/>, its limits are <c>CL ± 3σ/√n</c>, and the R chart is that of
+    /// <paramref name="sigma"/> rather than of the subgroups' spread; <see cref="XbarRChartResult.SigmaHat"/>
+    /// is then <paramref name="sigma"/> and <see cref="XbarRChartResult.SigmaHatDf"/> is <c>null</c>.
+    /// <c>null</c>: estimated from the subgroups. <c>XbarSChart</c> and <c>ImrChart</c> take it the same way.
     /// </summary>
-    public XbarRChartResult XbarRChart(double[][] subgroups, IReadOnlyList<RunRule>? rules = null)
+    public XbarRChartResult XbarRChart(double[][] subgroups, IReadOnlyList<RunRule>? rules = null, double? sigma = null)
         => Call(NativeInterop.uanalytics_xbar_r_chart, AnalyticsJson.Default.XbarRChartResult,
-            ("subgroups", Request.Rows("subgroups", subgroups)), ("rules", Request.Rules(rules)));
+            ("subgroups", Request.Rows("subgroups", subgroups)), ("rules", Request.Rules(rules)),
+            ("sigma", Request.Num("sigma", sigma)));
 
     /// <summary>X-bar/R chart applying a named set of run tests.</summary>
-    public XbarRChartResult XbarRChart(double[][] subgroups, RunRuleSet rules)
+    public XbarRChartResult XbarRChart(double[][] subgroups, RunRuleSet rules, double? sigma = null)
         => Call(NativeInterop.uanalytics_xbar_r_chart, AnalyticsJson.Default.XbarRChartResult,
-            ("subgroups", Request.Rows("subgroups", subgroups)), ("rules", Request.Rules(rules)));
+            ("subgroups", Request.Rows("subgroups", subgroups)), ("rules", Request.Rules(rules)),
+            ("sigma", Request.Num("sigma", sigma)));
 
     /// <summary>
     /// P chart. Each sample is <c>[defectives, sampleSize]</c> -- the order the
@@ -182,28 +190,32 @@ public sealed class AnalyticsClient : IDisposable
     /// <c>s_*</c> limits in place of <c>r_*</c>; the usual choice once subgroups exceed about
     /// ten values. Returns <c>sigma_hat</c> (<c>S-bar / c4</c>).
     /// </summary>
-    public XbarSChartResult XbarSChart(double[][] subgroups, IReadOnlyList<RunRule>? rules = null)
+    public XbarSChartResult XbarSChart(double[][] subgroups, IReadOnlyList<RunRule>? rules = null, double? sigma = null)
         => Call(NativeInterop.uanalytics_xbar_s_chart, AnalyticsJson.Default.XbarSChartResult,
-            ("subgroups", Request.Rows("subgroups", subgroups)), ("rules", Request.Rules(rules)));
+            ("subgroups", Request.Rows("subgroups", subgroups)), ("rules", Request.Rules(rules)),
+            ("sigma", Request.Num("sigma", sigma)));
 
     /// <summary>X-bar/S chart applying a named set of run tests.</summary>
-    public XbarSChartResult XbarSChart(double[][] subgroups, RunRuleSet rules)
+    public XbarSChartResult XbarSChart(double[][] subgroups, RunRuleSet rules, double? sigma = null)
         => Call(NativeInterop.uanalytics_xbar_s_chart, AnalyticsJson.Default.XbarSChartResult,
-            ("subgroups", Request.Rows("subgroups", subgroups)), ("rules", Request.Rules(rules)));
+            ("subgroups", Request.Rows("subgroups", subgroups)), ("rules", Request.Rules(rules)),
+            ("sigma", Request.Num("sigma", sigma)));
 
     /// <summary>
     /// Individual / Moving-Range chart for a series of single observations. Returns
     /// <c>sigma_hat</c> (<c>MR-bar / d2(2)</c>) -- pass it as <c>sigmaWithin</c> to
     /// <see cref="ProcessCapability"/> for individual data, which no longer estimates one itself.
     /// </summary>
-    public ImrChartResult ImrChart(double[] values, IReadOnlyList<RunRule>? rules = null)
+    public ImrChartResult ImrChart(double[] values, IReadOnlyList<RunRule>? rules = null, double? sigma = null)
         => Call(NativeInterop.uanalytics_imr_chart, AnalyticsJson.Default.ImrChartResult,
-            ("values", Request.Nums("values", values)), ("rules", Request.Rules(rules)));
+            ("values", Request.Nums("values", values)), ("rules", Request.Rules(rules)),
+            ("sigma", Request.Num("sigma", sigma)));
 
     /// <summary>Individual / Moving-Range chart applying a named set of run tests.</summary>
-    public ImrChartResult ImrChart(double[] values, RunRuleSet rules)
+    public ImrChartResult ImrChart(double[] values, RunRuleSet rules, double? sigma = null)
         => Call(NativeInterop.uanalytics_imr_chart, AnalyticsJson.Default.ImrChartResult,
-            ("values", Request.Nums("values", values)), ("rules", Request.Rules(rules)));
+            ("values", Request.Nums("values", values)), ("rules", Request.Rules(rules)),
+            ("sigma", Request.Num("sigma", sigma)));
 
     /// <summary>
     /// Applies the run tests to a series against one set of limits -- the engine the charts
