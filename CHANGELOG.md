@@ -8,6 +8,12 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Fixed
+
+- The beta fit's log-likelihood (and so its AIC and BIC) took `ln B(α, β)` as `ln Γ(α+β) − ln Γ(α) − ln Γ(β)`, three
+  numbers whose rounding exceeds the term once a shape is large; it uses `ln_beta` of u-numflow, which subtracts
+  their Stirling series first.
+
 ## [0.34.0] - 2026-11-08
 
 Depends on u-numflow 0.16. The .NET client is `UAnalytics` 0.28.0.

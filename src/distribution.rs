@@ -1015,10 +1015,10 @@ pub fn fit_beta(data: &[f64]) -> Option<FitResult> {
         return None;
     }
 
-    // Log-likelihood: n·[ln(Γ(α+β)) - ln(Γ(α)) - ln(Γ(β))]
-    //                + (α-1)·Σln(xᵢ) + (β-1)·Σln(1-xᵢ)
-    let log_lik = nf
-        * (special::ln_gamma(alpha + beta) - special::ln_gamma(alpha) - special::ln_gamma(beta))
+    // Log-likelihood: -n·ln B(α, β) + (α-1)·Σln(xᵢ) + (β-1)·Σln(1-xᵢ);
+    // `ln_beta` rather than the three `ln Γ`, whose rounding at a large shape
+    // exceeds the whole term.
+    let log_lik = -nf * special::ln_beta(alpha, beta)
         + (alpha - 1.0) * sum_log_x
         + (beta - 1.0) * sum_log_1mx;
 
