@@ -956,7 +956,7 @@ pub fn fit_beta(data: &[f64]) -> Option<FitResult> {
     }
 
     let sum_log_x: f64 = data.iter().map(|&x| x.ln()).sum();
-    let sum_log_1mx: f64 = data.iter().map(|&x| (1.0 - x).ln()).sum();
+    let sum_log_1mx: f64 = data.iter().map(|&x| (-x).ln_1p()).sum();
     let mean_log_x = sum_log_x / nf;
     let mean_log_1mx = sum_log_1mx / nf;
 

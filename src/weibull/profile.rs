@@ -154,7 +154,7 @@ pub fn weibull_likelihood_interval(
         ),
         WeibullQuantity::BLife(p) => {
             let (t_p, wald) = ra.b_life_interval(p, confidence)?;
-            let w = (-(1.0 - p).ln()).ln();
+            let w = (-(-p).ln_1p()).ln();
             (
                 t_p,
                 (wald.upper / t_p).ln() / z,

@@ -340,7 +340,7 @@ impl ReliabilityAnalysis {
         let t_p = self.b_life(fraction_failed)?;
         let z = two_sided_z(confidence)?;
         let (beta, eta) = (self.shape, self.scale);
-        let w = (-(1.0 - fraction_failed).ln()).ln();
+        let w = (-(-fraction_failed).ln_1p()).ln();
         // Gradient of ln t_p in (beta, eta).
         let half = z * self.variance_along([-w / (beta * beta), 1.0 / eta])?.sqrt();
         Some((
@@ -435,7 +435,7 @@ mod tests {
         let z = u_numflow::special::inverse_normal_cdf(0.975);
         let p = 0.1;
         let (t_p, ci) = ra.b_life_interval(p, 0.95).unwrap();
-        let ln_tp = |b: f64, e: f64| e.ln() + (-(1.0 - p).ln()).ln() / b;
+        let ln_tp = |b: f64, e: f64| e.ln() + (-(-p).ln_1p()).ln() / b;
         let half = z * numeric_variance(&ra, ln_tp).sqrt();
         assert!(((ci.upper / t_p).ln() - half).abs() < 1e-7, "{ci:?}");
         assert!(((t_p / ci.lower).ln() - half).abs() < 1e-7, "{ci:?}");

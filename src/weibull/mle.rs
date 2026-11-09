@@ -353,7 +353,7 @@ mod tests {
         let data: Vec<f64> = (1..=n)
             .map(|i| {
                 let p = (i as f64 - 0.5) / n as f64;
-                eta * (-(1.0 - p).ln()).powf(1.0 / beta)
+                eta * (-(-p).ln_1p()).powf(1.0 / beta)
             })
             .collect();
         let fit = weibull_mle(&data).unwrap();

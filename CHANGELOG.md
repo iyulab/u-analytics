@@ -8,6 +8,7 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+
 ### Changed
 
 - Requires u-numflow 0.16.2, whose `ln_beta` keeps its digits when a shape is large (the beta fit's log-likelihood now relies on it).
@@ -17,6 +18,13 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 - The beta fit's log-likelihood (and so its AIC and BIC) took `ln B(α, β)` as `ln Γ(α+β) − ln Γ(α) − ln Γ(β)`, three
   numbers whose rounding exceeds the term once a shape is large; it uses `ln_beta` of u-numflow, which subtracts
   their Stirling series first.
+- The median-rank regression (`weibull_mrr`, `weibull_mrr_censored`) called identical failure times degenerate only when
+  `n·Σx² − (Σx)²` of `x = ln t` came out below 10⁻³⁰, but that difference of two numbers the size of `n·Σx²` is rounding
+  noise (around 10⁻¹⁶ of them), never 0: the fit went on, and the sign of the noise decided whether it returned a Weibull
+  with a random shape or `None`. It is degenerate when the difference is below 10⁻¹² of `n·Σx²`, at any time scale.
+- The Weibull percentile life, the plotting-position transforms of the regression fits and the profile likelihood took
+  `ln(1 − p)` of a probability, and the beta fit took `ln(1 − x)` of each observation: a small `p` or `x` keeps its
+  digits now (`ln_1p`) — the B-life of a ppm-level failure fraction was off in the 10th digit.
 
 ## [0.34.0] - 2026-11-08
 

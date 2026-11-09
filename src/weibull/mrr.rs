@@ -141,7 +141,7 @@ pub fn weibull_mrr_censored(
         let f_i = (adjusted - 0.3) / (total_f + 0.4);
 
         let x = t.ln();
-        let y = (-(1.0 - f_i).ln()).ln(); // ln(-ln(1 - F_i))
+        let y = (-(-f_i).ln_1p()).ln(); // ln(-ln(1 - F_i))
 
         if !x.is_finite() || !y.is_finite() {
             return None;
@@ -161,8 +161,12 @@ pub fn weibull_mrr_censored(
     let sum_x2: f64 = x_vals.iter().map(|x| x * x).sum();
     let sum_y2: f64 = y_vals.iter().map(|y| y * y).sum();
 
+    // n·Σx² − (Σx)² = n·Σ(x − x̄)²: no spread in ln t. It is the difference of two
+    // numbers the size of n·Σx², so identical times leave rounding noise of that
+    // size, not 0 — a bound in absolute terms (it was 1e-30) lets the noise
+    // through, and the fit's slope takes the noise's sign.
     let denom = n_f * sum_x2 - sum_x * sum_x;
-    if denom.abs() < 1e-30 {
+    if denom <= 1e-12 * n_f * sum_x2 {
         return None; // All x values are identical (degenerate)
     }
 
@@ -237,7 +241,7 @@ mod tests {
             .iter()
             .map(|&(t, a): &(f64, f64)| {
                 let f = (a - 0.3) / 5.4;
-                (t.ln(), (-(1.0 - f).ln()).ln())
+                (t.ln(), (-(-f).ln_1p()).ln())
             })
             .collect();
         let n = 3.0;
@@ -453,6 +457,18 @@ mod tests {
             weibull_mrr(&data).is_none(),
             "MRR should return None for identical values"
         );
+    }
+
+    /// Identical failure times have no spread in ln t at any magnitude: the
+    /// result must not depend on the rounding noise of `n·Σx² − (Σx)²`.
+    #[test]
+    fn identical_times_are_degenerate_at_every_magnitude() {
+        for t in [1e-9, 0.37, 1.0, 10.0, 12345.678, 3.7e5, 1e9] {
+            for n in [2_usize, 3, 5, 8, 20] {
+                let data = vec![t; n];
+                assert!(weibull_mrr(&data).is_none(), "t {t} n {n}");
+            }
+        }
     }
 }
 
