@@ -45,6 +45,7 @@ pub mod counter;
 pub mod decomposition;
 pub mod detection;
 pub mod distribution;
+pub mod equivalence;
 pub mod error;
 pub mod msa;
 pub mod point_process;

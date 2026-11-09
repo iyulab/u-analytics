@@ -8,6 +8,15 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- `equivalence`: two one-sided tests (TOST, Schuirmann 1987) to show that a difference is *inside* a margin rather than merely
+  not significant — `tost_one_sample` (a mean against a target), `tost_paired` and `tost_two_sample` (Welch or pooled). The result
+  carries the estimate, standard error and degrees of freedom, both one-sided statistics and p-values, the procedure's
+  p-value (the larger of the two), the `1 − 2α` interval and the decision at `α`. Margins are on the difference; `low < high`
+  and `0 < α < 0.5` are required (otherwise `None`). Against statsmodels' `ttost_mean`, `ttost_paired` and `ttost_ind`
+  the agreement is 10⁻¹² for the statistics and 10⁻⁹ in relative terms for the p-values, including a p-value of 10⁻⁶⁰ (the
+  tails are formed directly, not as `1 − cdf`). Rust API only for now; the WASM, C ABI and .NET surfaces follow.
 
 ### Changed
 

@@ -27,6 +27,7 @@ hypothesis testing for industrial quality engineering.
 | `accuracy` | Error measures of a model's predictions against observations — mean error, MAE, RMSE, CV(RMSE) and NMBE, with the residual degrees of freedom (ASHRAE Guideline 14's definitions) |
 | `distribution` | Distribution analysis (ECDF, histogram bins — Sturges/Scott/FD/Fixed, QQ-plot, KS test) |
 | `testing` | Hypothesis testing (t-tests, ANOVA, chi-squared, normality — SW/AD/JB) |
+| `equivalence` | Equivalence testing — two one-sided tests (TOST) for a mean, paired data and two samples, with the `1 − 2α` interval; a margin is on the difference, the p-value is the larger of the two |
 
 ## Features
 
