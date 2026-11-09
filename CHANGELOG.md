@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Changed
+
+- Requires u-numflow 0.16.2, whose `ln_beta` keeps its digits when a shape is large (the beta fit's log-likelihood now relies on it).
+
 ### Fixed
 
 - The beta fit's log-likelihood (and so its AIC and BIC) took `ln B(α, β)` as `ln Γ(α+β) − ln Γ(α) − ln Γ(β)`, three
