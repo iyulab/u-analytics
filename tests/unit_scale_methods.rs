@@ -11,7 +11,9 @@ use u_analytics::point_process::{
 };
 use u_analytics::regression::simple_linear_regression;
 
-const SCALES: [f64; 10] = [1e-100, 1e-50, 1e-12, 1e-9, 1e-6, 1e6, 1e9, 1e12, 1e50, 1e100];
+const SCALES: [f64; 10] = [
+    1e-100, 1e-50, 1e-12, 1e-9, 1e-6, 1e6, 1e9, 1e12, 1e50, 1e100,
+];
 
 /// A level shift in noise: 40 points around 10, then 40 around 12.
 fn shifted_series() -> Vec<f64> {
