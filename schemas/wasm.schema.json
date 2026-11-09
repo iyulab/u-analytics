@@ -1053,6 +1053,79 @@
       ],
       "type": "object"
     },
+    "EquivalenceDto": {
+      "description": "The outcome of a two one-sided tests (TOST) equivalence test.",
+      "properties": {
+        "ci_lower": {
+          "description": "Lower end of the `1 - 2 * alpha` confidence interval of the difference.",
+          "format": "double",
+          "type": "number"
+        },
+        "ci_upper": {
+          "description": "Upper end of the `1 - 2 * alpha` confidence interval of the difference.",
+          "format": "double",
+          "type": "number"
+        },
+        "df": {
+          "description": "Degrees of freedom of the t distribution (fractional for Welch).",
+          "format": "double",
+          "type": "number"
+        },
+        "equivalent": {
+          "description": "Whether equivalence is declared at level `alpha` (`p_value < alpha`).",
+          "type": "boolean"
+        },
+        "estimate": {
+          "description": "The observed difference: the mean minus `target` (one sample), the mean of\n`x - y` (paired) or `mean(a) - mean(b)` (two samples).",
+          "format": "double",
+          "type": "number"
+        },
+        "p_lower": {
+          "description": "P-value against a difference of at most `low`.",
+          "format": "double",
+          "type": "number"
+        },
+        "p_upper": {
+          "description": "P-value against a difference of at least `high`.",
+          "format": "double",
+          "type": "number"
+        },
+        "p_value": {
+          "description": "The p-value of the procedure: the larger of `p_lower` and `p_upper`.",
+          "format": "double",
+          "type": "number"
+        },
+        "std_error": {
+          "description": "Standard error of the estimate.",
+          "format": "double",
+          "type": "number"
+        },
+        "t_lower": {
+          "description": "`(estimate - low) / std_error`: the statistic of the test that the difference exceeds `low`.",
+          "format": "double",
+          "type": "number"
+        },
+        "t_upper": {
+          "description": "`(estimate - high) / std_error`: the statistic of the test that the difference is below `high`.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "estimate",
+        "std_error",
+        "df",
+        "t_lower",
+        "t_upper",
+        "p_lower",
+        "p_upper",
+        "p_value",
+        "ci_lower",
+        "ci_upper",
+        "equivalent"
+      ],
+      "type": "object"
+    },
     "EwmaDto": {
       "properties": {
         "in_control": {
@@ -5470,6 +5543,144 @@
     },
     "t_chart.output": {
       "$ref": "#/$defs/TChartDto"
+    },
+    "tost_one_sample.input": {
+      "additionalProperties": false,
+      "description": "The arguments of tost_one_sample(data, target, low, high, alpha), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "alpha": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "high": {
+          "format": "double",
+          "type": "number"
+        },
+        "low": {
+          "format": "double",
+          "type": "number"
+        },
+        "target": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "data",
+        "target",
+        "low",
+        "high"
+      ],
+      "type": "object"
+    },
+    "tost_one_sample.output": {
+      "$ref": "#/$defs/EquivalenceDto"
+    },
+    "tost_paired.input": {
+      "additionalProperties": false,
+      "description": "The arguments of tost_paired(x, y, low, high, alpha), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "alpha": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "high": {
+          "format": "double",
+          "type": "number"
+        },
+        "low": {
+          "format": "double",
+          "type": "number"
+        },
+        "x": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "y": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "low",
+        "high"
+      ],
+      "type": "object"
+    },
+    "tost_paired.output": {
+      "$ref": "#/$defs/EquivalenceDto"
+    },
+    "tost_two_sample.input": {
+      "additionalProperties": false,
+      "description": "The arguments of tost_two_sample(a, b, low, high, alpha, equal_variance), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "a": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "alpha": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "b": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "equal_variance": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "high": {
+          "format": "double",
+          "type": "number"
+        },
+        "low": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "a",
+        "b",
+        "low",
+        "high"
+      ],
+      "type": "object"
+    },
+    "tost_two_sample.output": {
+      "$ref": "#/$defs/EquivalenceDto"
     },
     "two_sample_t_test.input": {
       "additionalProperties": false,

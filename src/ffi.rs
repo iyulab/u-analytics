@@ -1039,6 +1039,44 @@ struct PValuesReq {
     p_values: Vec<f64>,
 }
 
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TostOneSampleReq {
+    data: Vec<f64>,
+    target: f64,
+    low: f64,
+    high: f64,
+    #[serde(default)]
+    alpha: Option<f64>,
+}
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TostPairedReq {
+    x: Vec<f64>,
+    y: Vec<f64>,
+    low: f64,
+    high: f64,
+    #[serde(default)]
+    alpha: Option<f64>,
+}
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TostTwoSampleReq {
+    a: Vec<f64>,
+    b: Vec<f64>,
+    low: f64,
+    high: f64,
+    #[serde(default)]
+    alpha: Option<f64>,
+    #[serde(default)]
+    equal_variance: Option<bool>,
+}
+
 wire_export!(
     /// One-sample t test of `data` against `mu0`: → `{statistic, df, p_value}`, the WebAssembly binding's result.
     uanalytics_one_sample_t_test,
@@ -1072,6 +1110,40 @@ wire_export!(
     uanalytics_wilcoxon_signed_rank_test,
     TwoReqXY,
     |r| crate::wire::hypothesis::wilcoxon_dto(&r.x, &r.y)
+);
+
+wire_export!(
+    /// Equivalence of the mean of `data` to `target` by two one-sided tests (TOST):
+    /// `{data, target, low, high, alpha?}` → `{estimate, std_error, df, t_lower, t_upper,
+    /// p_lower, p_upper, p_value, ci_lower, ci_upper, equivalent}`, the WebAssembly
+    /// binding's result. `alpha` in (0, 0.5), default 0.05.
+    uanalytics_tost_one_sample,
+    TostOneSampleReq,
+    |r| crate::wire::hypothesis::tost_one_sample_dto(&r.data, r.target, r.low, r.high, r.alpha)
+);
+
+wire_export!(
+    /// Equivalence of paired data (the mean of `x - y`) by TOST: `{x, y, low, high, alpha?}` →
+    /// the result of `uanalytics_tost_one_sample`.
+    uanalytics_tost_paired,
+    TostPairedReq,
+    |r| crate::wire::hypothesis::tost_paired_dto(&r.x, &r.y, r.low, r.high, r.alpha)
+);
+
+wire_export!(
+    /// Equivalence of two independent means by TOST: `{a, b, low, high, alpha?,
+    /// equal_variance?}` → the result of `uanalytics_tost_one_sample`. Welch unless
+    /// `equal_variance` is `true`.
+    uanalytics_tost_two_sample,
+    TostTwoSampleReq,
+    |r| crate::wire::hypothesis::tost_two_sample_dto(
+        &r.a,
+        &r.b,
+        r.low,
+        r.high,
+        r.alpha,
+        r.equal_variance
+    )
 );
 
 wire_export!(
@@ -1637,6 +1709,77 @@ mod tests {
         assert_eq!(
             (code, b["code"].as_str(), b["index"].as_u64()),
             (-3, Some("parameter_out_of_range"), Some(1))
+        );
+    }
+
+    #[test]
+    fn equivalence_tests_round_trip_with_the_wasm_codes() {
+        let (code, b) = call(
+            uanalytics_tost_one_sample,
+            r#"{"data": [99.8, 100.1, 100.3, 99.9, 100.0, 100.2, 99.7, 100.1, 100.0, 99.9],
+                "target": 100, "low": -0.5, "high": 0.5}"#,
+        );
+        assert_eq!(code, 0, "{b}");
+        assert_eq!(b["equivalent"], true, "{b}");
+        assert_eq!(b["df"].as_f64(), Some(9.0));
+        let p = b["p_value"].as_f64().unwrap();
+        assert_eq!(
+            p,
+            b["p_lower"]
+                .as_f64()
+                .unwrap()
+                .max(b["p_upper"].as_f64().unwrap())
+        );
+        // `alpha` and `equal_variance` are optional and change the answer.
+        let (_, narrow) = call(
+            uanalytics_tost_two_sample,
+            r#"{"a": [5.1, 4.9, 5.3, 5.0], "b": [5.2, 5.0, 5.4, 5.1, 5.3],
+                "low": -1, "high": 1, "alpha": 0.2, "equal_variance": true}"#,
+        );
+        let (_, welch) = call(
+            uanalytics_tost_two_sample,
+            r#"{"a": [5.1, 4.9, 5.3, 5.0], "b": [5.2, 5.0, 5.4, 5.1, 5.3], "low": -1, "high": 1}"#,
+        );
+        assert_eq!(narrow["df"].as_f64(), Some(7.0), "{narrow}");
+        assert_ne!(welch["df"], narrow["df"]);
+        let (code, b) = call(
+            uanalytics_tost_paired,
+            r#"{"x": [1, 2, 3], "y": [1, 2], "low": -1, "high": 1}"#,
+        );
+        assert_eq!(
+            (code, b["code"].as_str()),
+            (-3, Some("dimension_mismatch")),
+            "{b}"
+        );
+        let (code, b) = call(
+            uanalytics_tost_one_sample,
+            r#"{"data": [1, 2, 3], "target": 2, "low": 1, "high": -1}"#,
+        );
+        assert_eq!(
+            (code, b["code"].as_str(), b["parameter"].as_str()),
+            (-3, Some("invalid_option"), Some("high")),
+            "{b}"
+        );
+        let (code, b) = call(
+            uanalytics_tost_one_sample,
+            r#"{"data": [1, 2, 3], "target": 2, "low": -1, "high": 1, "alpha": 0.5}"#,
+        );
+        assert_eq!(
+            (
+                code,
+                b["code"].as_str(),
+                b["exclusive_min"].as_f64(),
+                b["exclusive_max"].as_f64(),
+                b["got"].as_f64()
+            ),
+            (
+                -3,
+                Some("parameter_out_of_range"),
+                Some(0.0),
+                Some(0.5),
+                Some(0.5)
+            ),
+            "{b}"
         );
     }
 

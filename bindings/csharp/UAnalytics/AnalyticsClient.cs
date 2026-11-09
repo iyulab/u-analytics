@@ -418,6 +418,46 @@ public sealed class AnalyticsClient : IDisposable
         => Call(NativeInterop.uanalytics_wilcoxon_signed_rank_test, AnalyticsJson.Default.TestResult,
             ("x", Request.Nums("x", x)), ("y", Request.Nums("y", y)));
 
+    /// <summary>
+    /// Equivalence of the mean of <paramref name="data"/> to <paramref name="target"/> by two
+    /// one-sided tests (TOST, Schuirmann 1987): is the mean minus the target inside
+    /// (<paramref name="low"/>, <paramref name="high"/>)? Equivalence is declared when both
+    /// one-sided tests reject, that is when <c>PValue</c> — the larger of the two — is below
+    /// <paramref name="alpha"/>, the same as the 1 − 2α interval lying inside the margins. At
+    /// least 2 values, not all equal; <paramref name="low"/> &lt; <paramref name="high"/>;
+    /// <paramref name="alpha"/> in (0, 0.5), <c>null</c>: 0.05.
+    /// </summary>
+    public EquivalenceResult TostOneSample(double[] data, double target, double low, double high, double? alpha = null)
+        => Call(NativeInterop.uanalytics_tost_one_sample, AnalyticsJson.Default.EquivalenceResult,
+            ("data", Request.Nums("data", data)), ("target", Request.Num("target", target)),
+            ("low", Request.Num("low", low)), ("high", Request.Num("high", high)),
+            ("alpha", Request.Num("alpha", alpha)));
+
+    /// <summary>
+    /// Equivalence of paired data by TOST: is the mean of <c>x − y</c> inside
+    /// (<paramref name="low"/>, <paramref name="high"/>)? The direction is <c>x − y</c>;
+    /// <see cref="PairedTTest"/> works on <c>y − x</c>. Same length, at least 2 pairs whose
+    /// differences are not all equal.
+    /// </summary>
+    public EquivalenceResult TostPaired(double[] x, double[] y, double low, double high, double? alpha = null)
+        => Call(NativeInterop.uanalytics_tost_paired, AnalyticsJson.Default.EquivalenceResult,
+            ("x", Request.Nums("x", x)), ("y", Request.Nums("y", y)),
+            ("low", Request.Num("low", low)), ("high", Request.Num("high", high)),
+            ("alpha", Request.Num("alpha", alpha)));
+
+    /// <summary>
+    /// Equivalence of two independent means by TOST: is <c>mean(a) − mean(b)</c> inside
+    /// (<paramref name="low"/>, <paramref name="high"/>)? Welch's standard error and degrees
+    /// of freedom, or the pooled ones with <paramref name="equalVariance"/>. At least 2 values
+    /// each, not all equal across both samples.
+    /// </summary>
+    public EquivalenceResult TostTwoSample(double[] a, double[] b, double low, double high, double? alpha = null,
+        bool equalVariance = false)
+        => Call(NativeInterop.uanalytics_tost_two_sample, AnalyticsJson.Default.EquivalenceResult,
+            ("a", Request.Nums("a", a)), ("b", Request.Nums("b", b)),
+            ("low", Request.Num("low", low)), ("high", Request.Num("high", high)),
+            ("alpha", Request.Num("alpha", alpha)), ("equal_variance", JsonValue.Create(equalVariance)));
+
     /// <summary>Jarque-Bera normality test: <c>statistic</c>, <c>df</c>, <c>p_value</c>.</summary>
     public TestResult JarqueBeraTest(double[] data)
         => Call(NativeInterop.uanalytics_jarque_bera_test, AnalyticsJson.Default.TestResult,

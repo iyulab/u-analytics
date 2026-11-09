@@ -24,7 +24,8 @@
   between readings, each step `Normal`, `Declared` (a reset or replacement you pass as
   `CounterDiscontinuity`), `Wrap` (through the register's `modulus`) or `Unexplained`
   (no increase guessed) — and `CounterTotals` over intervals
-- **Hypothesis tests**: t (one-sample, Welch, paired), Mann-Whitney, Wilcoxon,
+- **Hypothesis tests**: t (one-sample, Welch, paired), equivalence by two one-sided tests
+  (`TostOneSample`, `TostPaired`, `TostTwoSample`), Mann-Whitney, Wilcoxon,
   Jarque-Bera, Shapiro-Wilk, Anderson-Darling, Mann-Kendall, ANOVA, Kruskal-Wallis, Levene, Bartlett,
   χ² goodness of fit and independence, Fisher's exact; Bonferroni and
   Benjamini-Hochberg adjustment

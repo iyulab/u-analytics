@@ -141,4 +141,31 @@ ok(setErr && setErr.code === 'unknown_option' && setErr.parameter === 'rules' &&
   JSON.stringify(setErr.expected) === '["shewhart","western_electric","nelson"]',
   `unknown set: ${setErr ? setErr.code + ' ' + JSON.stringify(setErr.expected) : 'no error'}`)
 
+// Equivalence (TOST): the trailing `alpha` and `equal_variance` are optional
+// -- omitted, undefined and null all mean the default -- and a refusal carries
+// its code and the fields behind it.
+const fill = [99.8, 100.1, 100.3, 99.9, 100.0, 100.2, 99.7, 100.1, 100.0, 99.9]
+const tost = m.tost_one_sample(fill, 100, -0.5, 0.5)
+ok(tost.equivalent === true && tost.df === 9 && tost.p_value === Math.max(tost.p_lower, tost.p_upper),
+  `tost_one_sample ${JSON.stringify(tost)}`)
+for (const absent of [undefined, null]) {
+  ok(JSON.stringify(m.tost_one_sample(fill, 100, -0.5, 0.5, absent)) === JSON.stringify(tost),
+    `tost_one_sample alpha=${absent} differs from the omitted default`)
+}
+ok(m.tost_one_sample(fill, 100, -0.5, 0.5, 0.2).ci_upper < tost.ci_upper, 'alpha 0.2 must narrow the interval')
+const other = [100.4, 99.6, 100.2, 100.0, 99.9, 100.3, 99.8, 100.1, 100.0]
+ok(m.tost_two_sample(fill, other, -0.5, 0.5, null, true).df === 17, 'equal_variance true is the pooled df')
+ok(m.tost_two_sample(fill, other, -0.5, 0.5, undefined, null).df !== 17, 'equal_variance null is Welch')
+ok(m.tost_paired(fill.slice(0, 9), other, -0.5, 0.5).df === 8, 'tost_paired df = n - 1')
+const badLevel = refusal(() => m.tost_one_sample(fill, 100, -0.5, 0.5, 0.5))
+ok(badLevel && badLevel.code === 'parameter_out_of_range' && badLevel.parameter === 'alpha' &&
+  badLevel.exclusive_min === 0 && badLevel.exclusive_max === 0.5 && badLevel.got === 0.5,
+  `alpha 0.5: ${badLevel ? badLevel.code + ' ' + badLevel.parameter : 'no error'}`)
+const badMargins = refusal(() => m.tost_one_sample(fill, 100, 0.5, -0.5))
+ok(badMargins && badMargins.code === 'invalid_option' && badMargins.parameter === 'high',
+  `margins reversed: ${badMargins ? badMargins.code + ' ' + badMargins.parameter : 'no error'}`)
+const nanMargin = refusal(() => m.tost_paired(fill, fill, Number.NaN, 0.5))
+ok(nanMargin && nanMargin.code === 'value_not_finite' && nanMargin.parameter === 'low',
+  `NaN margin: ${nanMargin ? nanMargin.code + ' ' + nanMargin.parameter : 'no error'}`)
+
 console.log(`binding behaviour gate: ok (${checks} checks)`)

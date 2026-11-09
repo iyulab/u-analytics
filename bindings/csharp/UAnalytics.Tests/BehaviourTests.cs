@@ -200,6 +200,34 @@ public class BehaviourTests
     }
 
     [Fact]
+    public void An_equivalence_test_reads_its_margins_and_level_and_refuses_with_the_engines_codes()
+    {
+        double[] fill = [99.8, 100.1, 100.3, 99.9, 100.0, 100.2, 99.7, 100.1, 100.0, 99.9];
+        var result = _client.TostOneSample(fill, 100, -0.5, 0.5);
+        Assert.True(result.Equivalent);
+        Assert.Equal(Math.Max(result.PLower, result.PUpper), result.PValue);
+        Assert.Equal(9, result.Df);
+        // A larger alpha is a narrower 1 - 2 alpha interval.
+        var tight = _client.TostOneSample(fill, 100, -0.5, 0.5, 0.2);
+        Assert.True(tight.CiUpper - tight.CiLower < result.CiUpper - result.CiLower);
+        // Pooled variance is the pooled degrees of freedom.
+        double[] other = [100.4, 99.6, 100.2, 100.0, 99.9, 100.3, 99.8, 100.1, 100.0];
+        Assert.Equal(17, _client.TostTwoSample(fill, other, -0.5, 0.5, equalVariance: true).Df);
+        Assert.NotEqual(17, _client.TostTwoSample(fill, other, -0.5, 0.5).Df);
+
+        var margins = Assert.Throws<AnalyticsException>(() => _client.TostOneSample(fill, 100, 0.5, -0.5));
+        Assert.Equal(("invalid_option", "high"), (margins.ErrorCode, margins.Parameter));
+        var level = Assert.Throws<AnalyticsException>(() => _client.TostPaired(fill, fill[..10], -0.5, 0.5, 0.5));
+        Assert.Equal(("parameter_out_of_range", "alpha"), (level.ErrorCode, level.Parameter));
+        Assert.Equal(0.0, level.Details!.Value.GetProperty("exclusive_min").GetDouble());
+        Assert.Equal(0.5, level.Details!.Value.GetProperty("exclusive_max").GetDouble());
+        var flat = Assert.Throws<AnalyticsException>(() => _client.TostOneSample([2, 2, 2], 2, -1, 1));
+        Assert.Equal(("degenerate_data", "data"), (flat.ErrorCode, flat.Parameter));
+        var nan = Assert.Throws<AnalyticsException>(() => _client.TostTwoSample(fill, other, double.NaN, 0.5));
+        Assert.Equal(("value_not_finite", "low"), (nan.ErrorCode, nan.Parameter));
+    }
+
+    [Fact]
     public void A_missing_key_fails_rather_than_reading_as_zero()
     {
         Assert.ThrowsAny<JsonException>(() =>

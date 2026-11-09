@@ -501,6 +501,21 @@ pub(super) fn entry_points() -> Vec<(&'static str, Entry, Value)> {
             json!({ "x": [5.1, 4.9, 5.3, 5.0, 5.2, 4.8], "y": [5.6, 5.8, 5.5, 5.9, 5.4, 5.7] }),
         ),
         ep(
+            "uanalytics_tost_one_sample",
+            uanalytics_tost_one_sample,
+            json!({ "data": series(), "target": 10, "low": -0.5, "high": 0.5 }),
+        ),
+        ep(
+            "uanalytics_tost_paired",
+            uanalytics_tost_paired,
+            json!({ "x": [5.1, 4.9, 5.3, 5.0, 5.2], "y": [5.6, 5.8, 5.5, 5.9, 5.4], "low": -1, "high": 1 }),
+        ),
+        ep(
+            "uanalytics_tost_two_sample",
+            uanalytics_tost_two_sample,
+            json!({ "a": [5.1, 4.9, 5.3, 5.0], "b": [5.6, 5.8, 5.5, 5.9], "low": -1, "high": 1 }),
+        ),
+        ep(
             "uanalytics_jarque_bera_test",
             uanalytics_jarque_bera_test,
             json!({ "data": series() }),

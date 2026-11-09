@@ -564,6 +564,34 @@
         "times": {}
       }
     },
+    "uanalytics_tost_one_sample": {
+      "properties": {
+        "alpha": {},
+        "data": {},
+        "high": {},
+        "low": {},
+        "target": {}
+      }
+    },
+    "uanalytics_tost_paired": {
+      "properties": {
+        "alpha": {},
+        "high": {},
+        "low": {},
+        "x": {},
+        "y": {}
+      }
+    },
+    "uanalytics_tost_two_sample": {
+      "properties": {
+        "a": {},
+        "alpha": {},
+        "b": {},
+        "equal_variance": {},
+        "high": {},
+        "low": {}
+      }
+    },
     "uanalytics_two_sample_t_test": {
       "properties": {
         "a": {},

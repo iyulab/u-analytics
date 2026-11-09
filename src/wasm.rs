@@ -24,7 +24,8 @@ use crate::wire::{
         adf_dto, anderson_darling_dto, chi_squared_gof_dto, chi_squared_independence_dto,
         fisher_exact_dto, groups_test_dto, jarque_bera_dto, kpss_dto, mann_kendall_dto,
         mann_whitney_dto, one_sample_t_dto, one_way_anova_dto, p_adjust_dto, paired_t_dto,
-        shapiro_wilk_dto, two_sample_t_dto, wilcoxon_dto, AdfInputDto, KpssInputDto,
+        shapiro_wilk_dto, tost_one_sample_dto, tost_paired_dto, tost_two_sample_dto,
+        two_sample_t_dto, wilcoxon_dto, AdfInputDto, KpssInputDto,
     },
     imr_dto, kde_dto, laney_p_dto, laney_u_dto, multi_pelt_dto, np_chart_dto, p_chart_dto,
     pacf_dto, pelt_dto, percentile_capability_dto,
@@ -1198,6 +1199,59 @@ pub fn wilcoxon_signed_rank_test(
     to_js(&wilcoxon_dto(&x, &y).map_err(js_err)?)
 }
 
+/// Equivalence of one mean to a target, by two one-sided tests (TOST, Schuirmann 1987):
+/// is `mean(data) - target` inside `(low, high)`? `low` and `high` are margins on the
+/// difference, so `target = 100, low = -0.5, high = 0.5` asks whether the mean is within
+/// 0.5 of 100. Equivalence is declared when both one-sided tests reject, that is when
+/// `p_value` (the larger of `p_lower` and `p_upper`) is below `alpha` -- the same as the
+/// `1 - 2 * alpha` interval of the difference lying inside the margins. Need >= 2 values
+/// that are not all equal, `low < high` and `alpha` in (0, 0.5), default 0.05.
+#[wasm_bindgen(unchecked_return_type = "EquivalenceDto")]
+pub fn tost_one_sample(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] data: JsValue,
+    target: f64,
+    low: f64,
+    high: f64,
+    #[wasm_bindgen(unchecked_optional_param_type = "number | null")] alpha: Option<f64>,
+) -> Result<JsValue, JsValue> {
+    let data = read_numbers(&data, "data").map_err(js_err)?;
+    to_js(&tost_one_sample_dto(&data, target, low, high, alpha).map_err(js_err)?)
+}
+
+/// Equivalence of paired data by TOST: is the mean of `x - y` inside `(low, high)`? Note the
+/// direction: `paired_t_test` works on `y - x`. Same length, need >= 2 pairs whose
+/// differences are not all equal; `alpha` in (0, 0.5), default 0.05.
+#[wasm_bindgen(unchecked_return_type = "EquivalenceDto")]
+pub fn tost_paired(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] x: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] y: JsValue,
+    low: f64,
+    high: f64,
+    #[wasm_bindgen(unchecked_optional_param_type = "number | null")] alpha: Option<f64>,
+) -> Result<JsValue, JsValue> {
+    let x = read_numbers(&x, "x").map_err(js_err)?;
+    let y = read_numbers(&y, "y").map_err(js_err)?;
+    to_js(&tost_paired_dto(&x, &y, low, high, alpha).map_err(js_err)?)
+}
+
+/// Equivalence of two independent samples by TOST: is `mean(a) - mean(b)` inside
+/// `(low, high)`? Welch's standard error and degrees of freedom, or with `equal_variance`
+/// `true` the pooled ones (default `false`). Need >= 2 values each, not all equal across both
+/// samples; `alpha` in (0, 0.5), default 0.05.
+#[wasm_bindgen(unchecked_return_type = "EquivalenceDto")]
+pub fn tost_two_sample(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] a: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] b: JsValue,
+    low: f64,
+    high: f64,
+    #[wasm_bindgen(unchecked_optional_param_type = "number | null")] alpha: Option<f64>,
+    #[wasm_bindgen(unchecked_optional_param_type = "boolean | null")] equal_variance: Option<bool>,
+) -> Result<JsValue, JsValue> {
+    let a = read_numbers(&a, "a").map_err(js_err)?;
+    let b = read_numbers(&b, "b").map_err(js_err)?;
+    to_js(&tost_two_sample_dto(&a, &b, low, high, alpha, equal_variance).map_err(js_err)?)
+}
+
 /// Chi-squared goodness of fit: `observed` counts (>= 0) against `expected` frequencies (> 0), same length >= 2.
 #[wasm_bindgen(unchecked_return_type = "TestResultDto")]
 pub fn chi_squared_goodness_of_fit(
@@ -2105,6 +2159,147 @@ mod binding_contract_tests {
             (e.code, e.index),
             (crate::wire::code::PARAMETER_OUT_OF_RANGE.name(), Some(1))
         );
+    }
+
+    // --- equivalence tests (TOST) ---
+
+    const FILL: [f64; 10] = [
+        99.8, 100.1, 100.3, 99.9, 100.0, 100.2, 99.7, 100.1, 100.0, 99.9,
+    ];
+    const OTHER: [f64; 9] = [100.4, 99.6, 100.2, 100.0, 99.9, 100.3, 99.8, 100.1, 100.0];
+
+    #[test]
+    fn a_tost_reports_what_the_crate_computes() {
+        let dto = tost_one_sample_dto(&FILL, 100.0, -0.5, 0.5, Some(0.1)).unwrap();
+        let direct = crate::equivalence::tost_one_sample(&FILL, 100.0, -0.5, 0.5, 0.1).unwrap();
+        assert_eq!(
+            (dto.estimate, dto.df, dto.p_lower, dto.p_upper, dto.p_value),
+            (
+                direct.estimate,
+                direct.df,
+                direct.p_lower,
+                direct.p_upper,
+                direct.p_value
+            )
+        );
+        assert_eq!(
+            (dto.ci_lower, dto.ci_upper, dto.equivalent),
+            (direct.ci_lower, direct.ci_upper, direct.equivalent)
+        );
+
+        let paired = tost_paired_dto(&FILL[..9], &OTHER, -0.5, 0.5, None).unwrap();
+        let direct = crate::equivalence::tost_paired(&FILL[..9], &OTHER, -0.5, 0.5, 0.05).unwrap();
+        assert_eq!(
+            (paired.estimate, paired.p_value),
+            (direct.estimate, direct.p_value)
+        );
+
+        let two = tost_two_sample_dto(&FILL, &OTHER, -0.5, 0.5, None, None).unwrap();
+        let direct =
+            crate::equivalence::tost_two_sample(&FILL, &OTHER, -0.5, 0.5, 0.05, false).unwrap();
+        assert_eq!((two.df, two.p_value), (direct.df, direct.p_value));
+    }
+
+    #[test]
+    fn a_tost_without_a_level_runs_at_five_percent_and_welch() {
+        let omitted = tost_two_sample_dto(&FILL, &OTHER, -0.5, 0.5, None, None).unwrap();
+        let explicit =
+            tost_two_sample_dto(&FILL, &OTHER, -0.5, 0.5, Some(0.05), Some(false)).unwrap();
+        assert_eq!(
+            (omitted.ci_lower, omitted.ci_upper, omitted.df),
+            (explicit.ci_lower, explicit.ci_upper, explicit.df)
+        );
+        let pooled = tost_two_sample_dto(&FILL, &OTHER, -0.5, 0.5, None, Some(true)).unwrap();
+        assert_eq!(pooled.df, 17.0);
+        assert_ne!(pooled.df, omitted.df);
+        // The level moves the interval.
+        let wide = tost_one_sample_dto(&FILL, 100.0, -0.5, 0.5, Some(0.01)).unwrap();
+        let narrow = tost_one_sample_dto(&FILL, 100.0, -0.5, 0.5, Some(0.2)).unwrap();
+        assert!(wide.ci_upper - wide.ci_lower > narrow.ci_upper - narrow.ci_lower);
+    }
+
+    #[test]
+    fn tost_refusals_name_the_argument() {
+        let at = |e: crate::wire::WireError| {
+            (e.code, e.parameter.as_deref().map(str::to_owned), e.index)
+        };
+
+        // Margins: reversed or equal is a refusal of a combination, named on `high`.
+        for (low, high) in [(1.0, -1.0), (0.5, 0.5)] {
+            let e = tost_one_sample_dto(&FILL, 100.0, low, high, None).unwrap_err();
+            assert_eq!(
+                at(e),
+                ("invalid_option", Some("high".to_string()), None),
+                "{low}..{high}"
+            );
+        }
+        // Not finite: the argument, not a statistic.
+        let e = tost_one_sample_dto(&FILL, 100.0, f64::NAN, 0.5, None).unwrap_err();
+        assert_eq!(at(e), ("value_not_finite", Some("low".to_string()), None));
+        let e = tost_paired_dto(&FILL, &FILL, -0.5, f64::INFINITY, None).unwrap_err();
+        assert_eq!(at(e), ("value_not_finite", Some("high".to_string()), None));
+        let e = tost_one_sample_dto(&FILL, f64::NAN, -0.5, 0.5, None).unwrap_err();
+        assert_eq!(
+            at(e),
+            ("value_not_finite", Some("target".to_string()), None)
+        );
+        let e = tost_two_sample_dto(&FILL, &OTHER, -0.5, 0.5, Some(f64::NAN), None).unwrap_err();
+        assert_eq!(at(e), ("value_not_finite", Some("alpha".to_string()), None));
+
+        // The level: open at both ends, the bounds and the value sent.
+        for bad in [0.0, 0.5, 0.7, -0.1, 1.0] {
+            let e = tost_one_sample_dto(&FILL, 100.0, -0.5, 0.5, Some(bad)).unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some("alpha")),
+                "{bad}"
+            );
+            assert_eq!(
+                e.details,
+                vec![
+                    ("min", Detail::Null),
+                    ("exclusive_min", Detail::Num(0.0)),
+                    ("max", Detail::Null),
+                    ("exclusive_max", Detail::Num(0.5)),
+                    ("got", Detail::Num(bad)),
+                ]
+            );
+        }
+
+        // Too few values, mismatched pairs, no variation.
+        let e = tost_one_sample_dto(&[1.0], 0.0, -1.0, 1.0, None).unwrap_err();
+        assert_eq!(
+            (e.code, e.parameter.as_deref(), e.details.clone()),
+            (
+                "insufficient_data",
+                Some("data"),
+                vec![("min", Detail::Num(2.0)), ("got", Detail::Num(1.0))]
+            )
+        );
+        let e = tost_two_sample_dto(&FILL, &[1.0], -1.0, 1.0, None, None).unwrap_err();
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("insufficient_data", Some("b"))
+        );
+        let e = tost_paired_dto(&FILL, &OTHER, -1.0, 1.0, None).unwrap_err();
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("dimension_mismatch", Some("y"))
+        );
+        let e = tost_one_sample_dto(&[2.0, 2.0, 2.0], 2.0, -1.0, 1.0, None).unwrap_err();
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("degenerate_data", Some("data"))
+        );
+        let e = tost_paired_dto(&[1.0, 2.0, 3.0], &[0.5, 1.5, 2.5], -1.0, 1.0, None).unwrap_err();
+        assert_eq!(
+            (e.code, e.parameter.as_deref()),
+            ("degenerate_data", Some("y"))
+        );
+        let e = tost_two_sample_dto(&[1.0, 1.0], &[2.0, 2.0], -2.0, 2.0, None, None).unwrap_err();
+        assert_eq!(e.code, "degenerate_data");
+        // One constant sample is still a test.
+        assert!(tost_two_sample_dto(&[1.0, 1.0], &[2.0, 2.5, 3.0], -3.0, 3.0, None, None).is_ok());
     }
 
     #[test]
@@ -3537,6 +3732,42 @@ mod engine_card_tests {
             "one_sample_t_test",
             vec![arg("data", numbers()), arg("mu0", num())],
             test(),
+        );
+        let equivalence = || s.of::<hypothesis::EquivalenceDto>();
+        let alpha = || optional("alpha", s.of::<Option<f64>>());
+        s.op(
+            "tost_one_sample",
+            vec![
+                arg("data", numbers()),
+                arg("target", num()),
+                arg("low", num()),
+                arg("high", num()),
+                alpha(),
+            ],
+            equivalence(),
+        );
+        s.op(
+            "tost_paired",
+            vec![
+                arg("x", numbers()),
+                arg("y", numbers()),
+                arg("low", num()),
+                arg("high", num()),
+                alpha(),
+            ],
+            equivalence(),
+        );
+        s.op(
+            "tost_two_sample",
+            vec![
+                arg("a", numbers()),
+                arg("b", numbers()),
+                arg("low", num()),
+                arg("high", num()),
+                alpha(),
+                optional("equal_variance", s.of::<Option<bool>>()),
+            ],
+            equivalence(),
         );
         for (id, a, b) in [
             ("two_sample_t_test", "a", "b"),

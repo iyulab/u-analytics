@@ -37,6 +37,7 @@ namespace UAnalytics;
 [JsonSerializable(typeof(TrendTestResult))]
 [JsonSerializable(typeof(PowerLawFitResult))]
 [JsonSerializable(typeof(TestResult))]
+[JsonSerializable(typeof(EquivalenceResult))]
 [JsonSerializable(typeof(ShapiroWilkResult))]
 [JsonSerializable(typeof(AndersonDarlingResult))]
 [JsonSerializable(typeof(AdfResult))]

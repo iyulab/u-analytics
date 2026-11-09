@@ -392,6 +392,26 @@ public sealed record CounterDiscontinuity(double Time, double Start, double? Las
 /// <summary>A test statistic, its degrees of freedom (0 where the test has none) and its p value.</summary>
 public sealed record TestResult(double Statistic, double Df, double PValue);
 
+/// <summary>
+/// A two one-sided tests (TOST) equivalence test: the observed difference and its standard
+/// error, the statistic and p value of each one-sided test (<c>Lower</c> against a difference
+/// of at most the lower margin, <c>Upper</c> against one of at least the upper margin), the
+/// p value of the procedure (the larger of the two), the 1 − 2α confidence interval of the
+/// difference and whether equivalence is declared at α.
+/// </summary>
+public sealed record EquivalenceResult(
+    double Estimate,
+    double StdError,
+    double Df,
+    double TLower,
+    double TUpper,
+    double PLower,
+    double PUpper,
+    double PValue,
+    double CiLower,
+    double CiUpper,
+    bool Equivalent);
+
 /// <summary>Shapiro-Wilk W and its p value.</summary>
 public sealed record ShapiroWilkResult(double W, double PValue);
 

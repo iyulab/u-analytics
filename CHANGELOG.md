@@ -16,7 +16,12 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   p-value (the larger of the two), the `1 − 2α` interval and the decision at `α`. Margins are on the difference; `low < high`
   and `0 < α < 0.5` are required (otherwise `None`). Against statsmodels' `ttost_mean`, `ttost_paired` and `ttost_ind`
   the agreement is 10⁻¹² for the statistics and 10⁻⁹ in relative terms for the p-values, including a p-value of 10⁻⁶⁰ (the
-  tails are formed directly, not as `1 − cdf`). Rust API only for now; the WASM, C ABI and .NET surfaces follow.
+  tails are formed directly, not as `1 − cdf`). The WebAssembly functions `tost_one_sample`, `tost_paired` and `tost_two_sample` (an optional trailing
+  `alpha`, default 0.05, and for two samples `equal_variance`, default `false`; they return an `EquivalenceDto`), the C ABI
+  entry points `uanalytics_tost_one_sample`, `uanalytics_tost_paired` and `uanalytics_tost_two_sample`, and the .NET methods
+  `TostOneSample`, `TostPaired` and `TostTwoSample` (returning `EquivalenceResult`) carry it too. Margins with `low >= high`
+  are refused as `invalid_option` on `high`, and an `alpha` outside (0, 0.5) as `parameter_out_of_range` (`exclusive_min`
+  0, `exclusive_max` 0.5 and `got`); data with no variation is `degenerate_data`.
 
 ### Changed
 

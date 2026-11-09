@@ -1697,6 +1697,197 @@ pub(crate) mod hypothesis {
             })
     }
 
+    /// The outcome of a two one-sided tests (TOST) equivalence test.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct EquivalenceDto {
+        /// The observed difference: the mean minus `target` (one sample), the mean of
+        /// `x - y` (paired) or `mean(a) - mean(b)` (two samples).
+        pub(crate) estimate: f64,
+        /// Standard error of the estimate.
+        pub(crate) std_error: f64,
+        /// Degrees of freedom of the t distribution (fractional for Welch).
+        pub(crate) df: f64,
+        /// `(estimate - low) / std_error`: the statistic of the test that the difference exceeds `low`.
+        pub(crate) t_lower: f64,
+        /// `(estimate - high) / std_error`: the statistic of the test that the difference is below `high`.
+        pub(crate) t_upper: f64,
+        /// P-value against a difference of at most `low`.
+        pub(crate) p_lower: f64,
+        /// P-value against a difference of at least `high`.
+        pub(crate) p_upper: f64,
+        /// The p-value of the procedure: the larger of `p_lower` and `p_upper`.
+        pub(crate) p_value: f64,
+        /// Lower end of the `1 - 2 * alpha` confidence interval of the difference.
+        pub(crate) ci_lower: f64,
+        /// Upper end of the `1 - 2 * alpha` confidence interval of the difference.
+        pub(crate) ci_upper: f64,
+        /// Whether equivalence is declared at level `alpha` (`p_value < alpha`).
+        pub(crate) equivalent: bool,
+    }
+
+    /// The level a TOST is run at when none is given.
+    pub(crate) const DEFAULT_TOST_ALPHA: f64 = 0.05;
+
+    fn finite_scalar(param: &'static str, value: f64) -> Result<(), WireError> {
+        if value.is_finite() {
+            Ok(())
+        } else {
+            Err(WireError::new(
+                code::VALUE_NOT_FINITE,
+                None,
+                format!("{param}: expected a finite number, got {value}"),
+            )
+            .about(param))
+        }
+    }
+
+    /// The margins and the level of a TOST, checked together and in the order
+    /// of the arguments: each finite, `low < high` (`invalid_option` on
+    /// `high` -- the relation between two settings, not a range of one) and
+    /// `alpha` in `(0, 0.5)`, past which the `1 - 2 * alpha` interval is empty.
+    /// Returns the level, `0.05` when none was given.
+    fn tost_level(low: f64, high: f64, alpha: Option<f64>) -> Result<f64, WireError> {
+        finite_scalar("low", low)?;
+        finite_scalar("high", high)?;
+        if low >= high {
+            return Err(WireError::new(
+                code::INVALID_OPTION,
+                None,
+                format!("high: the upper margin must exceed the lower one, got low = {low}, high = {high}"),
+            )
+            .about("high"));
+        }
+        let alpha = alpha.unwrap_or(DEFAULT_TOST_ALPHA);
+        finite_scalar("alpha", alpha)?;
+        let (above, below) = (Bound::Open(0.0), Bound::Open(0.5));
+        if !within(alpha, above, below) {
+            return Err(WireError::out_of_range(
+                "alpha",
+                above,
+                below,
+                alpha,
+                format!(
+                    "alpha: must be {} (the 1 - 2 * alpha interval is empty from 0.5), got {alpha}",
+                    describe(above, below)
+                ),
+            ));
+        }
+        Ok(alpha)
+    }
+
+    /// The result as the wire carries it. A `None` is data with no variation
+    /// (`undefined`); a statistic past what a double holds -- a standard error
+    /// near the smallest double -- has no JSON form either, and is refused as
+    /// the same lack of information rather than sent as `null`.
+    fn tost_dto(
+        result: Option<crate::equivalence::EquivalenceResult>,
+        test: &str,
+        undefined: impl FnOnce() -> WireError,
+    ) -> Result<EquivalenceDto, WireError> {
+        let r = result.ok_or_else(undefined)?;
+        let numbers = [
+            r.estimate,
+            r.std_error,
+            r.df,
+            r.t_lower,
+            r.t_upper,
+            r.p_lower,
+            r.p_upper,
+            r.p_value,
+            r.ci_lower,
+            r.ci_upper,
+        ];
+        if numbers.iter().any(|v| !v.is_finite()) {
+            return Err(WireError::degenerate_data(format!(
+                "{test}: the standard error is too small for the statistic to be a finite number"
+            )));
+        }
+        Ok(EquivalenceDto {
+            estimate: r.estimate,
+            std_error: r.std_error,
+            df: r.df,
+            t_lower: r.t_lower,
+            t_upper: r.t_upper,
+            p_lower: r.p_lower,
+            p_upper: r.p_upper,
+            p_value: r.p_value,
+            ci_lower: r.ci_lower,
+            ci_upper: r.ci_upper,
+            equivalent: r.equivalent,
+        })
+    }
+
+    /// TOST of one mean: is `mean(data) - target` inside `(low, high)`?
+    pub(crate) fn tost_one_sample_dto(
+        data: &[f64],
+        target: f64,
+        low: f64,
+        high: f64,
+        alpha: Option<f64>,
+    ) -> Result<EquivalenceDto, WireError> {
+        let data = at_least(data.to_vec(), 2, "data")?;
+        finite_scalar("target", target)?;
+        let alpha = tost_level(low, high, alpha)?;
+        tost_dto(
+            crate::equivalence::tost_one_sample(&data, target, low, high, alpha),
+            "tost_one_sample",
+            || no_variation("tost_one_sample", "data"),
+        )
+    }
+
+    /// TOST of paired data: is the mean of `x - y` inside `(low, high)`?
+    pub(crate) fn tost_paired_dto(
+        x: &[f64],
+        y: &[f64],
+        low: f64,
+        high: f64,
+        alpha: Option<f64>,
+    ) -> Result<EquivalenceDto, WireError> {
+        same_length(x, y, "x", "y")?;
+        let x = at_least(x.to_vec(), 2, "x")?;
+        let alpha = tost_level(low, high, alpha)?;
+        tost_dto(
+            crate::equivalence::tost_paired(&x, y, low, high, alpha),
+            "tost_paired",
+            || {
+                WireError::degenerate_data(
+                    "tost_paired: every difference x - y is the same, so the statistic is undefined",
+                )
+                .about("y")
+            },
+        )
+    }
+
+    /// TOST of two independent samples: is `mean(a) - mean(b)` inside
+    /// `(low, high)`? Welch's variance unless `equal_variance` is `true`.
+    pub(crate) fn tost_two_sample_dto(
+        a: &[f64],
+        b: &[f64],
+        low: f64,
+        high: f64,
+        alpha: Option<f64>,
+        equal_variance: Option<bool>,
+    ) -> Result<EquivalenceDto, WireError> {
+        let a = at_least(a.to_vec(), 2, "a")?;
+        let b = at_least(b.to_vec(), 2, "b")?;
+        let alpha = tost_level(low, high, alpha)?;
+        tost_dto(
+            crate::equivalence::tost_two_sample(
+                &a,
+                &b,
+                low,
+                high,
+                alpha,
+                equal_variance.unwrap_or(false),
+            ),
+            "tost_two_sample",
+            || both_constant("tost_two_sample"),
+        )
+    }
+
     pub(crate) fn jarque_bera_dto(data: &[f64]) -> Result<TestResultDto, WireError> {
         let data = at_least(data.to_vec(), 8, "data")?;
         crate::testing::jarque_bera_test(&data)

@@ -939,6 +939,18 @@ two_sample_t_test(a, b): TestResult                       // Welch; >= 2 each
 paired_t_test(x, y): TestResult                           // same length, >= 2 pairs
 mann_whitney_u_test(a, b): TestResult                     // >= 2 each
 wilcoxon_signed_rank_test(x, y): TestResult               // pairs with x = y dropped, >= 2 remain
+type EquivalenceDto = {
+  estimate: number, std_error: number, df: number,   // the difference, its se, the t df
+  t_lower: number, t_upper: number,                  // (estimate - low) / se, (estimate - high) / se
+  p_lower: number, p_upper: number,                  // P(T >= t_lower), P(T <= t_upper)
+  p_value: number,                                   // the procedure's: max(p_lower, p_upper)
+  ci_lower: number, ci_upper: number,                // the 1 - 2 * alpha interval of the difference
+  equivalent: boolean }                              // p_value < alpha
+tost_one_sample(data, target: number, low: number, high: number,
+                alpha?: number | null): EquivalenceDto   // mean - target inside (low, high); >= 2 values
+tost_paired(x, y, low, high, alpha?): EquivalenceDto     // mean of x - y (paired_t_test is y - x)
+tost_two_sample(a, b, low, high, alpha?: number | null,
+                equal_variance?: boolean | null): EquivalenceDto  // mean(a) - mean(b); Welch unless true
 jarque_bera_test(data): TestResult                        // >= 8 values
 shapiro_wilk_test(data): { w: number, p_value: number }   // 3 to 5000 values (Royston 1995)
 mann_kendall_test(data):                                  // >= 4 values
@@ -951,6 +963,25 @@ chi_squared_independence(table: number[][]): TestResult      // >= 2 x 2, counts
 fisher_exact_test(table: [[a, b], [c, d]]): TestResult       // whole counts
 bonferroni_correction(p_values): Float64Array                // min(p * m, 1), input order
 benjamini_hochberg(p_values): Float64Array                   // FDR (1995), input order; p in [0, 1]
+```
+
+Equivalence — to show that a difference is *inside* a margin rather than merely not
+detected — is two one-sided tests (TOST, Schuirmann 1987). `low` and `high` are the
+margins on the difference (`low < high`; `target = 100, low = -0.5, high = 0.5` asks
+whether the mean is within 0.5 of 100), `alpha` is in (0, 0.5) and defaults to 0.05.
+Equivalence is declared when both one-sided tests reject: `p_value` is the larger of
+`p_lower` and `p_upper` (never their product or sum), and `equivalent` is the same
+statement as the `1 − 2α` interval `[ci_lower, ci_upper]` lying inside `(low, high)`.
+A margin pair with `low >= high` throws `invalid_option` on `high`; `alpha` outside
+(0, 0.5) throws `parameter_out_of_range` with `exclusive_min` 0, `exclusive_max` 0.5
+and `got`.
+
+```js
+const { tost_one_sample } = require("@iyulab/u-analytics");
+const weights = [99.8, 100.1, 100.3, 99.9, 100.0, 100.2, 99.7, 100.1, 100.0, 99.9];
+const r = tost_one_sample(weights, 100, -0.5, 0.5);
+console.log(r.equivalent, r.p_value < 0.05); // true true
+if (!r.equivalent || !(r.p_value < 0.05)) throw new Error("unexpected");
 ```
 
 Event-time trend of one unit — `times` ascending and `> 0`; `observation` is
@@ -1235,7 +1266,10 @@ scalar as `{ "sigma": s }` / `{ "ppm": p }` → `{ "value": … }` (`uanalytics_
 The hypothesis tests take their WASM arguments as one object and return the WASM
 results — `uanalytics_one_sample_t_test` `{data, mu0}`, `uanalytics_two_sample_t_test` /
 `uanalytics_mann_whitney_u_test` `{a, b}`, `uanalytics_paired_t_test` /
-`uanalytics_wilcoxon_signed_rank_test` `{x, y}`, `uanalytics_jarque_bera_test` /
+`uanalytics_wilcoxon_signed_rank_test` `{x, y}`, the equivalence tests
+`uanalytics_tost_one_sample` `{data, target, low, high, alpha?}`, `uanalytics_tost_paired`
+`{x, y, low, high, alpha?}` and `uanalytics_tost_two_sample`
+`{a, b, low, high, alpha?, equal_variance?}`, `uanalytics_jarque_bera_test` /
 `uanalytics_shapiro_wilk_test` / `uanalytics_mann_kendall_test` `{data}`,
 `uanalytics_one_way_anova` / `uanalytics_kruskal_wallis_test` / `uanalytics_levene_test` /
 `uanalytics_bartlett_test` `{groups}`, `uanalytics_chi_squared_goodness_of_fit`
@@ -1256,7 +1290,7 @@ in the CHANGELOG entry that changes it.
 ## Test Status
 
 ```text
-560 lib tests (576 with `ffi`, 604 with `wasm`) + 88 doc-tests
+745 lib tests (815 with `ffi`, 841 with `wasm`) + 124 doc-tests
 0 clippy warnings
 ```
 
