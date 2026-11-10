@@ -28,6 +28,7 @@ hypothesis testing for industrial quality engineering.
 | `distribution` | Distribution analysis (ECDF, histogram bins — Sturges/Scott/FD/Fixed, QQ-plot, KS test) |
 | `testing` | Hypothesis testing (t-tests, ANOVA, chi-squared, normality — SW/AD/JB) |
 | `equivalence` | Equivalence testing — two one-sided tests (TOST) for a mean, paired data and two samples, with the `1 − 2α` interval; a margin is on the difference, the p-value is the larger of the two |
+| `tolerance` | Normal tolerance intervals — the exact `(P, γ)` factor `k` (one- and two-sided, from the confidence integral rather than an approximation) and the interval `x̄ ± k·s` of a sample |
 
 ## Features
 

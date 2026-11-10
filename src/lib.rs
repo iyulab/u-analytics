@@ -54,6 +54,7 @@ pub mod seasonality;
 pub mod smoothing;
 pub mod spc;
 pub mod testing;
+pub mod tolerance;
 pub mod weibull;
 
 /// The JSON wire contract shared by the `ffi` and `wasm` transports.

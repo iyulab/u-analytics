@@ -22,6 +22,19 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   `TostOneSample`, `TostPaired` and `TostTwoSample` (returning `EquivalenceResult`) carry it too. Margins with `low >= high`
   are refused as `invalid_option` on `high`, and an `alpha` outside (0, 0.5) as `parameter_out_of_range` (`exclusive_min`
   0, `exclusive_max` 0.5 and `got`); data with no variation is `degenerate_data`.
+- `tolerance`: normal (P, γ) tolerance intervals — `tolerance_factor(n, coverage, confidence, Sided)` and
+  `tolerance_interval_normal(data, coverage, confidence, Sided)` (a `ToleranceInterval` of `mean`, `std_dev`, `n`, `k`, `lower`
+  and `upper`; a one-sided statement uses one of the two bounds). The factor `k` is the root of the exact confidence
+  integral, not Howe's approximation (which is only the starting point of the root search): the one-sided one is the
+  noncentral-`t` quantile `t'_{γ; n−1, z_P√n}/√n` integrated directly, so it holds where the noncentral-`t` series gives out
+  (`z_P√n` beyond about 37), and the two-sided one is the Eisenhart–Hastay–Wallis / Wald–Wolfowitz condition solved exactly. Against
+  40-digit `mpmath` computations (both orders of integration for the two-sided case; `scipy.stats.nct` for the one-sided) the
+  factor agrees to a relative 3e-15 for `n` from 2 to 100 000 and `P`, `γ` from 0.5 to 0.9999, and it tends to `z_P` and
+  `z_{(1+P)/2}` as `n` grows. The two-sided factors commonly quoted for 95 % / 95 % (3.379, 2.752 and 2.379 for `n` = 10, 20 and 50) are, to the digits printed,
+  the Wald–Wolfowitz approximation and are 0.4 %, 0.3 % and 0.1 % low — the exact factors are 3.3934, 2.7603 and 2.3816 (a Monte
+  Carlo puts the confidence of the quoted ones at 94.86 %, 94.84 % and 94.91 %); the one-sided factors are the quoted ones
+  (2.911, 2.396). `None` for `n < 2`, non-finite data, no variation, or `coverage` or
+  `confidence` outside (0, 1). Rust API only.
 
 ### Changed
 
