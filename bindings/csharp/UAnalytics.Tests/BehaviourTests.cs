@@ -228,6 +228,41 @@ public class BehaviourTests
     }
 
     [Fact]
+    public void A_tolerance_interval_is_the_exact_factor_times_the_spread_and_refuses_with_the_engines_codes()
+    {
+        // 95 % of the population, 95 % confidence, n = 10: the exact factors, not the tabulated approximations.
+        Assert.Equal(3.393429478712608, _client.ToleranceFactor(10, 0.95, 0.95, Sided.TwoSided), 9);
+        Assert.Equal(2.9109634130781664, _client.ToleranceFactor(10, 0.95, 0.95, Sided.OneSided), 9);
+
+        double[] diameters = [10.02, 9.98, 10.01, 10.00, 9.99, 10.03, 9.97, 10.01, 10.00, 9.99];
+        foreach (var sided in Enum.GetValues<Sided>())
+        {
+            var t = _client.ToleranceInterval(diameters, 0.95, 0.95, sided);
+            Assert.Equal(10, t.N);
+            Assert.Equal(_client.ToleranceFactor(10, 0.95, 0.95, sided), t.K);
+            Assert.Equal(t.Mean - t.K * t.StdDev, t.Lower, 12);
+            Assert.Equal(t.Mean + t.K * t.StdDev, t.Upper, 12);
+        }
+
+        var count = Assert.Throws<AnalyticsException>(() => _client.ToleranceFactor(1, 0.95, 0.95, Sided.TwoSided));
+        Assert.Equal(("parameter_out_of_range", "n"), (count.ErrorCode, count.Parameter));
+        Assert.Equal(2.0, count.Details!.Value.GetProperty("min").GetDouble());
+        Assert.Equal(1.0, count.Details!.Value.GetProperty("got").GetDouble());
+        var negative = Assert.Throws<AnalyticsException>(() => _client.ToleranceFactor(-3, 0.95, 0.95, Sided.TwoSided));
+        Assert.Equal(("parameter_out_of_range", "n"), (negative.ErrorCode, negative.Parameter));
+        var level = Assert.Throws<AnalyticsException>(() => _client.ToleranceFactor(10, 1, 0.95, Sided.OneSided));
+        Assert.Equal(("parameter_out_of_range", "coverage"), (level.ErrorCode, level.Parameter));
+        Assert.Equal(0.0, level.Details!.Value.GetProperty("exclusive_min").GetDouble());
+        Assert.Equal(1.0, level.Details!.Value.GetProperty("exclusive_max").GetDouble());
+        var nan = Assert.Throws<AnalyticsException>(() => _client.ToleranceInterval(diameters, 0.95, double.NaN, Sided.TwoSided));
+        Assert.Equal(("value_not_finite", "confidence"), (nan.ErrorCode, nan.Parameter));
+        var flat = Assert.Throws<AnalyticsException>(() => _client.ToleranceInterval([2, 2, 2], 0.95, 0.95, Sided.TwoSided));
+        Assert.Equal(("degenerate_data", "data"), (flat.ErrorCode, flat.Parameter));
+        var few = Assert.Throws<AnalyticsException>(() => _client.ToleranceInterval([2], 0.95, 0.95, Sided.TwoSided));
+        Assert.Equal(("insufficient_data", "data"), (few.ErrorCode, few.Parameter));
+    }
+
+    [Fact]
     public void A_missing_key_fails_rather_than_reading_as_zero()
     {
         Assert.ThrowsAny<JsonException>(() =>

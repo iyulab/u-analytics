@@ -46,6 +46,10 @@ use crate::wire::{
     PredictionErrorsInputDto, RegressionInputDto, SeasonalityInputDto, SmoothingInputDto,
     SpectralResidualInputDto, StlInputDto, WireError,
 };
+use crate::wire::{
+    tolerance::{tolerance_factor_value, tolerance_interval_dto},
+    Whole,
+};
 
 // ---------------------------------------------------------------------------
 // Serializable DTO types
@@ -1252,6 +1256,69 @@ pub fn tost_two_sample(
     to_js(&tost_two_sample_dto(&a, &b, low, high, alpha, equal_variance).map_err(js_err)?)
 }
 
+/// A name argument as sent: a string, or `malformed_input` at `param`. Read from the
+/// `JsValue` rather than taken as a `String` so that a number or `null` is refused
+/// here, not coerced by the glue.
+fn read_name(value: &JsValue, param: &'static str) -> Result<String, WireError> {
+    value.as_string().ok_or_else(|| {
+        WireError::new(
+            crate::wire::code::MALFORMED_INPUT,
+            None,
+            format!("{param}: expected a name (a string)"),
+        )
+        .about(param)
+    })
+}
+
+/// The factor `k` of a normal tolerance interval `mean ± k * s`: the number of sample
+/// standard deviations either side of the mean that contains at least `coverage` of the
+/// population with probability `confidence`, for a sample of `n` values.
+///
+/// It is the root of the exact confidence equation (Eisenhart, Hastay and Wallis 1947 for
+/// the two-sided case; the noncentral `t` for the one-sided one), not an approximation, so
+/// it differs in the third or fourth digit from the factors in tables that print the
+/// Wald-Wolfowitz or Howe formula. `sided` is `"two_sided"` (the symmetric interval) or
+/// `"one_sided"` (one bound: `mean - k * s` or `mean + k * s`).
+///
+/// `n` is a whole number >= 2 (a fraction throws `malformed_input`, anything below 2
+/// `parameter_out_of_range` with `min` 2 and `got`); `coverage` and `confidence` are in
+/// (0, 1), open at both ends (`parameter_out_of_range` with `exclusive_min` 0,
+/// `exclusive_max` 1 and `got`); another `sided` is `unknown_option` with `got` and
+/// `expected`.
+#[wasm_bindgen]
+pub fn tolerance_factor(
+    #[wasm_bindgen(unchecked_param_type = "number")] n: JsValue,
+    coverage: f64,
+    confidence: f64,
+    #[wasm_bindgen(unchecked_param_type = "\"two_sided\" | \"one_sided\"")] sided: JsValue,
+) -> Result<f64, JsValue> {
+    let n: Whole = from_js(n, "n")?;
+    let sided = read_name(&sided, "sided").map_err(js_err)?;
+    tolerance_factor_value(n, coverage, confidence, &sided).map_err(js_err)
+}
+
+/// The normal tolerance interval of a sample: `mean ± k * std_dev` with the factor of
+/// [`tolerance_factor`] for `data.length`, `coverage`, `confidence` and `sided` -- at least
+/// `coverage` of the population lies inside, with probability `confidence`. It speaks about
+/// individual values (a specification limit), where a confidence interval speaks about the
+/// mean, and it assumes the population is normal.
+///
+/// A one-sided statement uses **one** of `lower` and `upper`: "at least `coverage` of the
+/// population is above `lower`" or "... below `upper`", each with `confidence`. Both are
+/// returned; quoting them as an interval is the two-sided statement with the larger
+/// two-sided factor. Need >= 2 values that are not all equal.
+#[wasm_bindgen(unchecked_return_type = "ToleranceIntervalDto")]
+pub fn tolerance_interval(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] data: JsValue,
+    coverage: f64,
+    confidence: f64,
+    #[wasm_bindgen(unchecked_param_type = "\"two_sided\" | \"one_sided\"")] sided: JsValue,
+) -> Result<JsValue, JsValue> {
+    let data = read_numbers(&data, "data").map_err(js_err)?;
+    let sided = read_name(&sided, "sided").map_err(js_err)?;
+    to_js(&tolerance_interval_dto(&data, coverage, confidence, &sided).map_err(js_err)?)
+}
+
 /// Chi-squared goodness of fit: `observed` counts (>= 0) against `expected` frequencies (> 0), same length >= 2.
 #[wasm_bindgen(unchecked_return_type = "TestResultDto")]
 pub fn chi_squared_goodness_of_fit(
@@ -2300,6 +2367,178 @@ mod binding_contract_tests {
         assert_eq!(e.code, "degenerate_data");
         // One constant sample is still a test.
         assert!(tost_two_sample_dto(&[1.0, 1.0], &[2.0, 2.5, 3.0], -3.0, 3.0, None, None).is_ok());
+    }
+
+    // --- tolerance intervals ---
+
+    #[test]
+    fn a_tolerance_interval_reports_what_the_crate_computes() {
+        use crate::tolerance::{tolerance_factor, tolerance_interval_normal, Sided};
+        for (name, sided) in [
+            ("two_sided", Sided::TwoSided),
+            ("one_sided", Sided::OneSided),
+        ] {
+            let k = tolerance_factor_value(Whole(10.0), 0.95, 0.9, name).unwrap();
+            assert_eq!(Some(k), tolerance_factor(10, 0.95, 0.9, sided));
+
+            let dto = tolerance_interval_dto(&FILL, 0.95, 0.9, name).unwrap();
+            let direct = tolerance_interval_normal(&FILL, 0.95, 0.9, sided).unwrap();
+            assert_eq!(
+                (dto.mean, dto.std_dev, dto.n, dto.k, dto.lower, dto.upper),
+                (
+                    direct.mean,
+                    direct.std_dev,
+                    direct.n,
+                    direct.k,
+                    direct.lower,
+                    direct.upper
+                )
+            );
+            // The factor of the interval is the factor of its sample size.
+            assert_eq!(
+                dto.k,
+                tolerance_factor_value(Whole(FILL.len() as f64), 0.95, 0.9, name).unwrap()
+            );
+        }
+        // The published factor: 95 % of the population, 95 % confidence, n = 10.
+        let k = tolerance_factor_value(Whole(10.0), 0.95, 0.95, "two_sided").unwrap();
+        assert!((k - 3.393429478712608).abs() < 1e-11);
+        // The same whole number read from a float.
+        assert_eq!(
+            super::from_json::<Whole>(serde_json::json!(10.0), "n")
+                .unwrap()
+                .0,
+            10.0
+        );
+    }
+
+    #[test]
+    fn tolerance_refusals_name_the_argument() {
+        let at = |e: crate::wire::WireError| (e.code, e.parameter.as_deref().map(str::to_owned));
+
+        // A count: a fraction is a shape error where it sits, a number outside
+        // the range is a range error -- a negative one the same as a small one.
+        let e = super::from_json::<Whole>(serde_json::json!(2.5), "n").unwrap_err();
+        assert_eq!(at(e), ("malformed_input", Some("n".to_string())));
+        let e = super::from_json::<Whole>(serde_json::json!(null), "n").unwrap_err();
+        assert_eq!(at(e), ("malformed_input", Some("n".to_string())));
+        for got in [1.0, 0.0, -1.0] {
+            let e = tolerance_factor_value(Whole(got), 0.95, 0.95, "two_sided").unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some("n")),
+                "{got}"
+            );
+            assert_eq!(
+                e.details,
+                vec![
+                    ("min", Detail::Num(2.0)),
+                    ("max", Detail::Null),
+                    ("got", Detail::Num(got)),
+                ]
+            );
+        }
+        assert!(tolerance_factor_value(Whole(2.0), 0.95, 0.95, "one_sided").is_ok());
+
+        // Proportions: open at both ends, the bounds and the value sent.
+        for (parameter, coverage, confidence, bad) in [
+            ("coverage", 0.0, 0.95, 0.0),
+            ("coverage", 1.0, 0.95, 1.0),
+            ("coverage", 1.5, 0.95, 1.5),
+            ("confidence", 0.95, 0.0, 0.0),
+            ("confidence", 0.95, 1.0, 1.0),
+            ("confidence", 0.95, -0.1, -0.1),
+        ] {
+            let e =
+                tolerance_factor_value(Whole(10.0), coverage, confidence, "two_sided").unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some(parameter))
+            );
+            assert_eq!(
+                e.details,
+                vec![
+                    ("min", Detail::Null),
+                    ("exclusive_min", Detail::Num(0.0)),
+                    ("max", Detail::Null),
+                    ("exclusive_max", Detail::Num(1.0)),
+                    ("got", Detail::Num(bad)),
+                ]
+            );
+            let e = tolerance_interval_dto(&FILL, coverage, confidence, "one_sided").unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some(parameter))
+            );
+        }
+        let e = tolerance_factor_value(Whole(10.0), f64::NAN, 0.95, "two_sided").unwrap_err();
+        assert_eq!(at(e), ("value_not_finite", Some("coverage".to_string())));
+        let e = tolerance_interval_dto(&FILL, 0.95, f64::INFINITY, "two_sided").unwrap_err();
+        assert_eq!(at(e), ("value_not_finite", Some("confidence".to_string())));
+
+        // A name nobody knows is refused, never read as a default.
+        for bad in ["both", "", "TwoSided", "two-sided"] {
+            let e = tolerance_factor_value(Whole(10.0), 0.95, 0.95, bad).unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("unknown_option", Some("sided")),
+                "{bad:?}"
+            );
+            assert_eq!(
+                e.details,
+                vec![
+                    ("got", Detail::Text(bad.to_string())),
+                    ("expected", Detail::List(vec!["two_sided", "one_sided"])),
+                ]
+            );
+            let e = tolerance_interval_dto(&FILL, 0.95, 0.95, bad).unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("unknown_option", Some("sided"))
+            );
+        }
+
+        // Too few values, no variation, a spread no double holds.
+        let e = tolerance_interval_dto(&[1.0], 0.95, 0.95, "two_sided").unwrap_err();
+        assert_eq!(
+            (e.code, e.parameter.as_deref(), e.details.clone()),
+            (
+                "insufficient_data",
+                Some("data"),
+                vec![("min", Detail::Num(2.0)), ("got", Detail::Num(1.0))]
+            )
+        );
+        let e = tolerance_interval_dto(&[2.0, 2.0, 2.0], 0.95, 0.95, "two_sided").unwrap_err();
+        assert_eq!(at(e), ("degenerate_data", Some("data".to_string())));
+        let e =
+            tolerance_interval_dto(&[-f64::MAX, f64::MAX], 0.95, 0.95, "two_sided").unwrap_err();
+        assert_eq!(e.code, "internal");
+        // The data are checked before the settings, in the order of the arguments.
+        let e = tolerance_interval_dto(&[1.0], 2.0, 0.95, "x").unwrap_err();
+        assert_eq!(e.code, "insufficient_data");
+    }
+
+    #[test]
+    fn extreme_settings_are_answered_or_refused_never_null_or_hung() {
+        // The factor tends to the normal quantile as `n` grows; at the edge of
+        // (0, 1) it may not be found. Either way the answer is a finite number
+        // or a refusal, never `null` and never a loop.
+        let started = std::time::Instant::now();
+        let k = tolerance_factor_value(Whole(1e300), 0.95, 0.95, "two_sided").unwrap();
+        assert!((k - 1.959963984540054).abs() < 1e-6, "{k}");
+        for (n, coverage, confidence) in [
+            (2.0, 1.0 - 1e-12, 1.0 - 1e-12),
+            (2.0, 1.0 - 1e-15, 0.5),
+            (2.0, f64::MIN_POSITIVE, 0.5),
+        ] {
+            for sided in ["two_sided", "one_sided"] {
+                match tolerance_factor_value(Whole(n), coverage, confidence, sided) {
+                    Ok(k) => assert!(k.is_finite(), "{n} {coverage} {confidence} {sided}"),
+                    Err(e) => assert_eq!(e.code, "internal", "{n} {coverage} {confidence}"),
+                }
+            }
+        }
+        assert!(started.elapsed().as_secs() < 60, "{:?}", started.elapsed());
     }
 
     #[test]
@@ -3566,14 +3805,14 @@ mod engine_card_tests {
     //! schemas it points at are generated from the types they read and return.
 
     use super::*;
-    use crate::engine_card::{arg, optional, Schemas};
+    use crate::engine_card::{arg, optional, string_enum, Schemas};
     use crate::wire::{
-        counter, hypothesis, point_process, reliability, AcfDto, CapabilityDto, ChartPointDto,
-        CorrelationMatrixDto, CusumDto, DistributionFitDto, EwmaDto, FixedLimitChartDto, GChartDto,
-        GageRRAnovaResultDto, GageRRResultDto, GoodnessOfFitResultDto, ImrChartDto, KdeDto,
-        LaneyPChartDto, LaneyUChartDto, PChartDto, PacfDto, PeltResultDto, PercentileCapabilityDto,
-        RegressionDto, SeasonalityDto, SpectralResidualDto, StlDto, TChartDto, UChartDto,
-        XbarRChartDto, XbarSChartDto,
+        counter, hypothesis, point_process, reliability, tolerance, AcfDto, CapabilityDto,
+        ChartPointDto, CorrelationMatrixDto, CusumDto, DistributionFitDto, EwmaDto,
+        FixedLimitChartDto, GChartDto, GageRRAnovaResultDto, GageRRResultDto,
+        GoodnessOfFitResultDto, ImrChartDto, KdeDto, LaneyPChartDto, LaneyUChartDto, PChartDto,
+        PacfDto, PeltResultDto, PercentileCapabilityDto, RegressionDto, SeasonalityDto,
+        SpectralResidualDto, StlDto, TChartDto, UChartDto, XbarRChartDto, XbarSChartDto,
     };
 
     fn schemas() -> Schemas {
@@ -3732,6 +3971,32 @@ mod engine_card_tests {
             "one_sample_t_test",
             vec![arg("data", numbers()), arg("mu0", num())],
             test(),
+        );
+        let sided = || {
+            arg(
+                "sided",
+                string_enum(crate::wire::tolerance::SIDED.iter().map(|(name, _)| *name)),
+            )
+        };
+        s.op(
+            "tolerance_factor",
+            vec![
+                arg("n", s.of::<Whole>()),
+                arg("coverage", num()),
+                arg("confidence", num()),
+                sided(),
+            ],
+            num(),
+        );
+        s.op(
+            "tolerance_interval",
+            vec![
+                arg("data", numbers()),
+                arg("coverage", num()),
+                arg("confidence", num()),
+                sided(),
+            ],
+            s.of::<tolerance::ToleranceIntervalDto>(),
         );
         let equivalence = || s.of::<hypothesis::EquivalenceDto>();
         let alpha = || optional("alpha", s.of::<Option<f64>>());

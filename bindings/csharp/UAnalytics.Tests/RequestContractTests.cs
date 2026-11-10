@@ -123,6 +123,10 @@ public class RequestContractTests
         ["TostOneSample"] = c => c.TostOneSample(Series, 10, -0.5, 0.5, 0.1),
         ["TostPaired"] = c => c.TostPaired(Series[..10], Series[10..], -0.5, 0.5, 0.1),
         ["TostTwoSample"] = c => c.TostTwoSample(Series[..10], Series[10..], -0.5, 0.5, 0.1, equalVariance: true),
+        ["ToleranceFactor"] = c => c.ToleranceFactor(10, 0.95, 0.9, Sided.TwoSided),
+        ["ToleranceFactor(OneSided)"] = c => c.ToleranceFactor(10, 0.95, 0.9, Sided.OneSided),
+        ["ToleranceInterval"] = c => c.ToleranceInterval(Series, 0.95, 0.9, Sided.TwoSided),
+        ["ToleranceInterval(OneSided)"] = c => c.ToleranceInterval(Series, 0.95, 0.9, Sided.OneSided),
         ["JarqueBeraTest"] = c => c.JarqueBeraTest(Series),
         ["ShapiroWilkTest"] = c => c.ShapiroWilkTest(Series),
         ["AndersonDarlingTest"] = c => c.AndersonDarlingTest(Series),
@@ -287,6 +291,8 @@ public class RequestContractTests
         Assert.Equal(RequestKeys.Names("uanalytics_detect_changepoints", "$.cost"), Names(Enum.GetValues<PeltCost>(), AnalyticsJson.Default.PeltCost));
         Assert.Equal(RequestKeys.Names("uanalytics_correlation_matrix", "$.method"), Names(Enum.GetValues<CorrelationMethod>(), AnalyticsJson.Default.CorrelationMethod));
         Assert.Equal(RequestKeys.Names("uanalytics_percentile_capability", "$.distribution"), Names(Enum.GetValues<DistributionFamily>(), AnalyticsJson.Default.DistributionFamily));
+        Assert.Equal(RequestKeys.Names("uanalytics_tolerance_factor", "$.sided"), Names(Enum.GetValues<Sided>(), AnalyticsJson.Default.Sided));
+        Assert.Equal(RequestKeys.Names("uanalytics_tolerance_interval", "$.sided"), Names(Enum.GetValues<Sided>(), AnalyticsJson.Default.Sided));
     }
 
     private static string[] Names<T>(T[] values, JsonTypeInfo<T> info)

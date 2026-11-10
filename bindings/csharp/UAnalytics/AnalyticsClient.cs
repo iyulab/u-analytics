@@ -458,6 +458,35 @@ public sealed class AnalyticsClient : IDisposable
             ("low", Request.Num("low", low)), ("high", Request.Num("high", high)),
             ("alpha", Request.Num("alpha", alpha)), ("equal_variance", JsonValue.Create(equalVariance)));
 
+    /// <summary>
+    /// The factor <c>k</c> of a normal tolerance interval <c>mean ± k·s</c>: the number of sample
+    /// standard deviations either side of the mean that holds at least <paramref name="coverage"/>
+    /// of the population with probability <paramref name="confidence"/>, for <paramref name="n"/>
+    /// values. It is the root of the exact confidence equation, not an approximation, so it differs
+    /// in the third or fourth digit from tables that print the Wald–Wolfowitz or Howe formula.
+    /// <paramref name="n"/> is at least 2; <paramref name="coverage"/> and
+    /// <paramref name="confidence"/> are in (0, 1), open at both ends.
+    /// </summary>
+    public double ToleranceFactor(int n, double coverage, double confidence, Sided sided)
+        => Call(NativeInterop.uanalytics_tolerance_factor, AnalyticsJson.Default.ValueBody,
+            ("n", JsonValue.Create(n)), ("coverage", Request.Num("coverage", coverage)),
+            ("confidence", Request.Num("confidence", confidence)),
+            ("sided", Request.Option(sided, AnalyticsJson.Default.Sided))).Value;
+
+    /// <summary>
+    /// The normal tolerance interval of <paramref name="data"/>: <c>mean ± k·s</c> with the factor of
+    /// <see cref="ToleranceFactor"/> for the sample size — at least <paramref name="coverage"/> of the
+    /// population lies inside, with probability <paramref name="confidence"/>. It speaks about
+    /// individual values, where a confidence interval speaks about the mean, and it assumes the
+    /// population is normal. A one-sided statement uses <b>one</b> of <c>Lower</c> and <c>Upper</c>.
+    /// At least 2 values, not all equal.
+    /// </summary>
+    public ToleranceIntervalResult ToleranceInterval(double[] data, double coverage, double confidence, Sided sided)
+        => Call(NativeInterop.uanalytics_tolerance_interval, AnalyticsJson.Default.ToleranceIntervalResult,
+            ("data", Request.Nums("data", data)), ("coverage", Request.Num("coverage", coverage)),
+            ("confidence", Request.Num("confidence", confidence)),
+            ("sided", Request.Option(sided, AnalyticsJson.Default.Sided)));
+
     /// <summary>Jarque-Bera normality test: <c>statistic</c>, <c>df</c>, <c>p_value</c>.</summary>
     public TestResult JarqueBeraTest(double[] data)
         => Call(NativeInterop.uanalytics_jarque_bera_test, AnalyticsJson.Default.TestResult,

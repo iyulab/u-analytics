@@ -3628,6 +3628,51 @@
       ],
       "type": "object"
     },
+    "ToleranceIntervalDto": {
+      "description": "A normal tolerance interval: `mean ± k * std_dev`, the factor `k` of\nthis `n`, coverage, confidence and sidedness.",
+      "properties": {
+        "k": {
+          "description": "The tolerance factor `k`.",
+          "format": "double",
+          "type": "number"
+        },
+        "lower": {
+          "description": "`mean - k * std_dev`: the lower end of the two-sided interval, or the lower\nbound of a one-sided statement.",
+          "format": "double",
+          "type": "number"
+        },
+        "mean": {
+          "description": "Sample mean.",
+          "format": "double",
+          "type": "number"
+        },
+        "n": {
+          "description": "Number of observations.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "std_dev": {
+          "description": "Sample standard deviation (divisor `n - 1`).",
+          "format": "double",
+          "type": "number"
+        },
+        "upper": {
+          "description": "`mean + k * std_dev`: the upper end of the two-sided interval, or the upper\nbound of a one-sided statement.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "mean",
+        "std_dev",
+        "n",
+        "k",
+        "lower",
+        "upper"
+      ],
+      "type": "object"
+    },
     "TrendTestDto": {
       "description": "A trend test against a constant event rate.",
       "properties": {
@@ -5543,6 +5588,79 @@
     },
     "t_chart.output": {
       "$ref": "#/$defs/TChartDto"
+    },
+    "tolerance_factor.input": {
+      "additionalProperties": false,
+      "description": "The arguments of tolerance_factor(n, coverage, confidence, sided), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "confidence": {
+          "format": "double",
+          "type": "number"
+        },
+        "coverage": {
+          "format": "double",
+          "type": "number"
+        },
+        "n": {
+          "type": "integer"
+        },
+        "sided": {
+          "enum": [
+            "two_sided",
+            "one_sided"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "n",
+        "coverage",
+        "confidence",
+        "sided"
+      ],
+      "type": "object"
+    },
+    "tolerance_factor.output": {
+      "format": "double",
+      "type": "number"
+    },
+    "tolerance_interval.input": {
+      "additionalProperties": false,
+      "description": "The arguments of tolerance_interval(data, coverage, confidence, sided), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "confidence": {
+          "format": "double",
+          "type": "number"
+        },
+        "coverage": {
+          "format": "double",
+          "type": "number"
+        },
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "sided": {
+          "enum": [
+            "two_sided",
+            "one_sided"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "data",
+        "coverage",
+        "confidence",
+        "sided"
+      ],
+      "type": "object"
+    },
+    "tolerance_interval.output": {
+      "$ref": "#/$defs/ToleranceIntervalDto"
     },
     "tost_one_sample.input": {
       "additionalProperties": false,

@@ -412,6 +412,25 @@ public sealed record EquivalenceResult(
     double CiUpper,
     bool Equivalent);
 
+/// <summary>Whether a tolerance interval has two ends or one.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<Sided>))]
+public enum Sided
+{
+    /// <summary>The symmetric interval <c>mean ± k·s</c> that holds at least the coverage of the population.</summary>
+    [JsonStringEnumMemberName("two_sided")] TwoSided,
+    /// <summary>One bound: at least the coverage of the population lies above <c>Lower</c>, or below
+    /// <c>Upper</c>. A statement uses one of them, not the pair.</summary>
+    [JsonStringEnumMemberName("one_sided")] OneSided,
+}
+
+/// <summary>
+/// A normal tolerance interval <c>Mean ± K·StdDev</c>: the sample mean and standard deviation
+/// (divisor <c>n − 1</c>), the number of observations, the tolerance factor <c>K</c> of that
+/// size, coverage, confidence and sidedness, and both bounds. A one-sided statement uses one of
+/// <c>Lower</c> and <c>Upper</c>.
+/// </summary>
+public sealed record ToleranceIntervalResult(double Mean, double StdDev, int N, double K, double Lower, double Upper);
+
 /// <summary>Shapiro-Wilk W and its p value.</summary>
 public sealed record ShapiroWilkResult(double W, double PValue);
 

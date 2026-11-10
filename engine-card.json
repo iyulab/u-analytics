@@ -1547,6 +1547,144 @@
       }
     },
     {
+      "id": "tolerance_factor",
+      "summary": "The factor k of a normal (P, gamma) tolerance interval for a sample of n values, one- or two-sided: the exact root of the confidence equation, not an approximation.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/tolerance_factor.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/tolerance_factor.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The factor is the root of the exact confidence equation: it agrees with an independent high-precision computation for n from 2 to 100 000 and coverage and confidence from 0.5 to 0.9999, one- and two-sided.",
+            "reference_kind": "reference_implementation",
+            "reference": "mpmath 1.4.1 at 40 digits (the confidence integral over the chi variable, and for the two-sided factor also over the normal variable, with a root finder); SciPy 1.17.1, scipy.stats.nct for the one-sided factor",
+            "method": "compares the factor with the reference's for every row of the reference table",
+            "tolerance": "relative 1e-12 asserted (about 3e-15 observed)",
+            "test": "tests/tolerance_reference.rs::matches_the_independent_computation"
+          },
+          {
+            "claim": "The share of normal samples whose interval holds at least the coverage of the population is the confidence the factor was asked for, one- and two-sided.",
+            "reference_kind": "literature",
+            "reference": "The definition of a (P, gamma) tolerance interval: Wald, A. and Wolfowitz, J. (1946), Annals of Mathematical Statistics 17(2); NIST/SEMATECH e-Handbook of Statistical Methods, 7.2.6.3",
+            "method": "draws 40 000 normal samples of 10 values with a fixed seed and counts the intervals that hold the coverage",
+            "tolerance": "within 4.5 standard errors of the requested confidence",
+            "test": "tests/tolerance_reference.rs::the_interval_has_the_requested_confidence"
+          },
+          {
+            "claim": "The one-sided factors agree with the printed tables (2.911 and 2.396 at 95 % / 95 %, n = 10 and 20); the printed two-sided factors are the Wald-Wolfowitz approximation and are slightly lower than the exact factor.",
+            "reference_kind": "literature",
+            "reference": "Odeh, R. E. and Owen, D. B. (1980), Tables for Normal Tolerance Limits, Sampling Plans and Screening; NIST/SEMATECH e-Handbook of Statistical Methods, 7.2.6.3",
+            "method": "compares the factors with the printed values at 95 % / 95 % for n = 10, 20 and 50",
+            "tolerance": "one-sided within 5e-4 of the printed digits; two-sided above the printed value and within 0.5 % of it",
+            "test": "tests/tolerance_reference.rs::published_tables"
+          }
+        ],
+        "limits": [
+          "Compared with the reference for coverage and confidence from 0.5 to 0.9999 and n up to 100 000; larger n and settings nearer 0 or 1 are computed but not compared.",
+          "The two-sided digits for a coverage or confidence below 0.5 are limited by the difference of two nearby normal probabilities, and the computation is slower."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "tolerance_interval",
+      "summary": "The normal (P, gamma) tolerance interval of a sample, mean +- k s, one- or two-sided: mean, standard deviation, n, the factor k and both bounds.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/tolerance_interval.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/tolerance_interval.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The interval is the sample mean plus or minus k times the sample standard deviation (divisor n - 1) with the factor of its sample size.",
+            "reference_kind": "standard",
+            "reference": "ISO 16269-6:2014, Statistical interpretation of data - Part 6: Determination of statistical tolerance intervals; NIST/SEMATECH e-Handbook of Statistical Methods, 7.2.6.3",
+            "method": "recomputes the mean, the standard deviation and the bounds from a worked sample and the factor",
+            "tolerance": "mean within 1e-12, bounds exactly mean -/+ k s",
+            "test": "tests/tolerance_reference.rs::the_interval_is_the_mean_plus_or_minus_k_s"
+          },
+          {
+            "claim": "The factor is the root of the exact confidence equation: it agrees with an independent high-precision computation for n from 2 to 100 000 and coverage and confidence from 0.5 to 0.9999, one- and two-sided.",
+            "reference_kind": "reference_implementation",
+            "reference": "mpmath 1.4.1 at 40 digits (the confidence integral over the chi variable, and for the two-sided factor also over the normal variable, with a root finder); SciPy 1.17.1, scipy.stats.nct for the one-sided factor",
+            "method": "compares the factor with the reference's for every row of the reference table",
+            "tolerance": "relative 1e-12 asserted (about 3e-15 observed)",
+            "test": "tests/tolerance_reference.rs::matches_the_independent_computation"
+          },
+          {
+            "claim": "The share of normal samples whose interval holds at least the coverage of the population is the confidence the factor was asked for, one- and two-sided.",
+            "reference_kind": "literature",
+            "reference": "The definition of a (P, gamma) tolerance interval: Wald, A. and Wolfowitz, J. (1946), Annals of Mathematical Statistics 17(2); NIST/SEMATECH e-Handbook of Statistical Methods, 7.2.6.3",
+            "method": "draws 40 000 normal samples of 10 values with a fixed seed and counts the intervals that hold the coverage",
+            "tolerance": "within 4.5 standard errors of the requested confidence",
+            "test": "tests/tolerance_reference.rs::the_interval_has_the_requested_confidence"
+          },
+          {
+            "claim": "The one-sided factors agree with the printed tables (2.911 and 2.396 at 95 % / 95 %, n = 10 and 20); the printed two-sided factors are the Wald-Wolfowitz approximation and are slightly lower than the exact factor.",
+            "reference_kind": "literature",
+            "reference": "Odeh, R. E. and Owen, D. B. (1980), Tables for Normal Tolerance Limits, Sampling Plans and Screening; NIST/SEMATECH e-Handbook of Statistical Methods, 7.2.6.3",
+            "method": "compares the factors with the printed values at 95 % / 95 % for n = 10, 20 and 50",
+            "tolerance": "one-sided within 5e-4 of the printed digits; two-sided above the printed value and within 0.5 % of it",
+            "test": "tests/tolerance_reference.rs::published_tables"
+          }
+        ],
+        "limits": [
+          "The interval is valid for a sample from a normal population and is not robust to departures from normality; nothing here tests normality.",
+          "The factor is compared with the reference as for tolerance_factor; the bounds are not compared with another implementation's."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
       "id": "mann_whitney_u_test",
       "summary": "The Mann-Whitney U test by the normal approximation with tie correction.",
       "input": {

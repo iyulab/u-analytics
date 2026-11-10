@@ -564,6 +564,32 @@
         "times": {}
       }
     },
+    "uanalytics_tolerance_factor": {
+      "properties": {
+        "confidence": {},
+        "coverage": {},
+        "n": {},
+        "sided": {
+          "enum": [
+            "two_sided",
+            "one_sided"
+          ]
+        }
+      }
+    },
+    "uanalytics_tolerance_interval": {
+      "properties": {
+        "confidence": {},
+        "coverage": {},
+        "data": {},
+        "sided": {
+          "enum": [
+            "two_sided",
+            "one_sided"
+          ]
+        }
+      }
+    },
     "uanalytics_tost_one_sample": {
       "properties": {
         "alpha": {},

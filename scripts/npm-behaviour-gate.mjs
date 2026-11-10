@@ -168,4 +168,41 @@ const nanMargin = refusal(() => m.tost_paired(fill, fill, Number.NaN, 0.5))
 ok(nanMargin && nanMargin.code === 'value_not_finite' && nanMargin.parameter === 'low',
   `NaN margin: ${nanMargin ? nanMargin.code + ' ' + nanMargin.parameter : 'no error'}`)
 
+// Tolerance intervals: `n` is a whole number read from the JS value, `sided` a
+// closed vocabulary read from a JS string -- neither is coerced by the glue.
+const toleranceK = m.tolerance_factor(10, 0.95, 0.95, 'two_sided')
+ok(typeof toleranceK === 'number' && Math.abs(toleranceK - 3.393429478712608) < 1e-9, `tolerance_factor ${toleranceK}`)
+ok(Math.abs(m.tolerance_factor(10, 0.95, 0.95, 'one_sided') - 2.9109634130781664) < 1e-9, 'one-sided factor')
+const diameters = [10.02, 9.98, 10.01, 10.0, 9.99, 10.03, 9.97, 10.01, 10.0, 9.99]
+const tolerance = m.tolerance_interval(diameters, 0.95, 0.95, 'two_sided')
+ok(tolerance.n === 10 && tolerance.k === toleranceK && tolerance.lower < tolerance.mean && tolerance.mean < tolerance.upper &&
+  Math.abs(tolerance.upper - (tolerance.mean + tolerance.k * tolerance.std_dev)) < 1e-12,
+  `tolerance_interval ${JSON.stringify(tolerance)}`)
+ok(m.tolerance_interval(new Float64Array(diameters), 0.95, 0.95, 'one_sided').k < tolerance.k, 'one-sided k is the smaller')
+const badSided = refusal(() => m.tolerance_factor(10, 0.95, 0.95, 'both'))
+ok(badSided && badSided.code === 'unknown_option' && badSided.parameter === 'sided' && badSided.got === 'both' &&
+  JSON.stringify(badSided.expected) === '["two_sided","one_sided"]',
+  `unknown sided: ${badSided ? badSided.code + ' ' + JSON.stringify(badSided.expected) : 'no error'}`)
+for (const notAName of [null, undefined, 1]) {
+  const e2 = refusal(() => m.tolerance_interval(diameters, 0.95, 0.95, notAName))
+  ok(e2 && e2.code === 'malformed_input' && e2.parameter === 'sided', `sided=${notAName}: ${e2 ? e2.code : 'no error'}`)
+}
+const smallN = refusal(() => m.tolerance_factor(1, 0.95, 0.95, 'two_sided'))
+ok(smallN && smallN.code === 'parameter_out_of_range' && smallN.parameter === 'n' && smallN.min === 2 && smallN.got === 1,
+  `n=1: ${smallN ? smallN.code + ' ' + smallN.parameter : 'no error'}`)
+const negativeN = refusal(() => m.tolerance_factor(-1, 0.95, 0.95, 'two_sided'))
+ok(negativeN && negativeN.code === 'parameter_out_of_range' && negativeN.parameter === 'n' && negativeN.got === -1,
+  `n=-1: ${negativeN ? negativeN.code + ' ' + negativeN.parameter : 'no error'}`)
+const fractionalN = refusal(() => m.tolerance_factor(2.5, 0.95, 0.95, 'two_sided'))
+ok(fractionalN && fractionalN.code === 'malformed_input' && fractionalN.parameter === 'n',
+  `n=2.5: ${fractionalN ? fractionalN.code + ' ' + fractionalN.parameter : 'no error'}`)
+const edgeCoverage = refusal(() => m.tolerance_factor(10, 1, 0.95, 'two_sided'))
+ok(edgeCoverage && edgeCoverage.code === 'parameter_out_of_range' && edgeCoverage.parameter === 'coverage' &&
+  edgeCoverage.exclusive_min === 0 && edgeCoverage.exclusive_max === 1 && edgeCoverage.got === 1,
+  `coverage=1: ${edgeCoverage ? edgeCoverage.code + ' ' + edgeCoverage.parameter : 'no error'}`)
+const flat = refusal(() => m.tolerance_interval([2, 2, 2], 0.95, 0.95, 'two_sided'))
+ok(flat && flat.code === 'degenerate_data' && flat.parameter === 'data', `constant data: ${flat ? flat.code : 'no error'}`)
+const nanData = refusal(() => m.tolerance_interval([1, Number.NaN, 3], 0.95, 0.95, 'two_sided'))
+ok(nanData && nanData.code === 'value_not_finite' && nanData.index === 1, `NaN datum: ${nanData ? nanData.code : 'no error'}`)
+
 console.log(`binding behaviour gate: ok (${checks} checks)`)

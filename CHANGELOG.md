@@ -34,7 +34,15 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   the Wald–Wolfowitz approximation and are 0.4 %, 0.3 % and 0.1 % low — the exact factors are 3.3934, 2.7603 and 2.3816 (a Monte
   Carlo puts the confidence of the quoted ones at 94.86 %, 94.84 % and 94.91 %); the one-sided factors are the quoted ones
   (2.911, 2.396). `None` for `n < 2`, non-finite data, no variation, or `coverage` or
-  `confidence` outside (0, 1). Rust API only.
+  `confidence` outside (0, 1). The WebAssembly functions `tolerance_factor(n, coverage, confidence, sided)` (a number) and
+  `tolerance_interval(data, coverage, confidence, sided)` (a `ToleranceIntervalDto` of `mean`, `std_dev`, `n`, `k`, `lower`
+  and `upper`), the C ABI entry points `uanalytics_tolerance_factor` (`{value}`) and `uanalytics_tolerance_interval`, and the
+  .NET methods `ToleranceFactor` (a `double`) and `ToleranceInterval` (a `ToleranceIntervalResult`, with the closed
+  vocabulary `Sided`) carry it too. `sided` is `"two_sided"` or `"one_sided"` and any other name is refused as
+  `unknown_option` (`parameter`, `got`, `expected`); `n` is a whole number (a fraction is `malformed_input`) of at least 2
+  (`parameter_out_of_range` with `min` 2 and `got`, negative numbers included); `coverage` and `confidence` outside (0, 1)
+  are `parameter_out_of_range` with `exclusive_min` 0, `exclusive_max` 1 and `got`; data with no variation is
+  `degenerate_data`. No new refusal codes.
 
 ### Changed
 

@@ -1077,6 +1077,26 @@ struct TostTwoSampleReq {
     equal_variance: Option<bool>,
 }
 
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ToleranceFactorReq {
+    n: crate::wire::Whole,
+    coverage: f64,
+    confidence: f64,
+    sided: String,
+}
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ToleranceIntervalReq {
+    data: Vec<f64>,
+    coverage: f64,
+    confidence: f64,
+    sided: String,
+}
+
 wire_export!(
     /// One-sample t test of `data` against `mu0`: → `{statistic, df, p_value}`, the WebAssembly binding's result.
     uanalytics_one_sample_t_test,
@@ -1144,6 +1164,26 @@ wire_export!(
         r.alpha,
         r.equal_variance
     )
+);
+
+wire_export!(
+    /// The factor `k` of a normal tolerance interval `mean ± k * s`: `{n, coverage,
+    /// confidence, sided}` → `{value}` (the number the WebAssembly binding returns). `n` is a
+    /// whole number >= 2, `coverage` and `confidence` are in (0, 1), `sided` is
+    /// `"two_sided"` or `"one_sided"`.
+    uanalytics_tolerance_factor,
+    ToleranceFactorReq,
+    |r| crate::wire::tolerance::tolerance_factor_value(r.n, r.coverage, r.confidence, &r.sided)
+        .map(|v| serde_json::json!({ "value": v }))
+);
+
+wire_export!(
+    /// The normal tolerance interval of a sample: `{data, coverage, confidence, sided}` →
+    /// `{mean, std_dev, n, k, lower, upper}`, the WebAssembly binding's result. A one-sided
+    /// statement uses one of `lower` and `upper`.
+    uanalytics_tolerance_interval,
+    ToleranceIntervalReq,
+    |r| crate::wire::tolerance::tolerance_interval_dto(&r.data, r.coverage, r.confidence, &r.sided)
 );
 
 wire_export!(
@@ -1779,6 +1819,143 @@ mod tests {
                 Some(0.5),
                 Some(0.5)
             ),
+            "{b}"
+        );
+    }
+
+    #[test]
+    fn tolerance_intervals_round_trip_with_the_wasm_codes() {
+        let (code, b) = call(
+            uanalytics_tolerance_factor,
+            r#"{"n": 10, "coverage": 0.95, "confidence": 0.95, "sided": "two_sided"}"#,
+        );
+        assert_eq!(code, 0, "{b}");
+        assert!(
+            (b["value"].as_f64().unwrap() - 3.393429478712608).abs() < 1e-11,
+            "{b}"
+        );
+        // A whole number written as a float is still whole.
+        let (code, b) = call(
+            uanalytics_tolerance_factor,
+            r#"{"n": 10.0, "coverage": 0.95, "confidence": 0.95, "sided": "one_sided"}"#,
+        );
+        assert_eq!(code, 0, "{b}");
+        assert!(
+            (b["value"].as_f64().unwrap() - 2.9109634130781664).abs() < 1e-11,
+            "{b}"
+        );
+
+        let (code, b) = call(
+            uanalytics_tolerance_interval,
+            r#"{"data": [10.02, 9.98, 10.01, 10.00, 9.99, 10.03, 9.97, 10.01, 10.00, 9.99],
+                "coverage": 0.95, "confidence": 0.95, "sided": "two_sided"}"#,
+        );
+        assert_eq!(code, 0, "{b}");
+        assert_eq!(b["n"].as_u64(), Some(10));
+        let (mean, s, k) = (
+            b["mean"].as_f64().unwrap(),
+            b["std_dev"].as_f64().unwrap(),
+            b["k"].as_f64().unwrap(),
+        );
+        assert!(
+            (b["lower"].as_f64().unwrap() - (mean - k * s)).abs() < 1e-15,
+            "{b}"
+        );
+        assert!(
+            (b["upper"].as_f64().unwrap() - (mean + k * s)).abs() < 1e-15,
+            "{b}"
+        );
+
+        // The refusals are the WebAssembly binding's.
+        let refused = |entry: Entry, request: &str| {
+            let (code, b) = call(entry, request);
+            (
+                code,
+                b["code"].as_str().map(str::to_owned),
+                b["parameter"].as_str().map(str::to_owned),
+                b,
+            )
+        };
+        let (code, c, p, b) = refused(
+            uanalytics_tolerance_factor,
+            r#"{"n": 1, "coverage": 0.95, "confidence": 0.95, "sided": "two_sided"}"#,
+        );
+        assert_eq!(
+            (code, c.as_deref(), p.as_deref()),
+            (-3, Some("parameter_out_of_range"), Some("n")),
+            "{b}"
+        );
+        assert_eq!(
+            (b["min"].as_f64(), b["max"].is_null(), b["got"].as_f64()),
+            (Some(2.0), true, Some(1.0))
+        );
+        let (code, c, p, b) = refused(
+            uanalytics_tolerance_factor,
+            r#"{"n": 2.5, "coverage": 0.95, "confidence": 0.95, "sided": "two_sided"}"#,
+        );
+        assert_eq!(
+            (code, c.as_deref(), p.as_deref()),
+            (-2, Some("malformed_input"), Some("n")),
+            "{b}"
+        );
+        let (code, c, p, b) = refused(
+            uanalytics_tolerance_factor,
+            r#"{"n": 10, "coverage": 1, "confidence": 0.95, "sided": "two_sided"}"#,
+        );
+        assert_eq!(
+            (code, c.as_deref(), p.as_deref()),
+            (-3, Some("parameter_out_of_range"), Some("coverage")),
+            "{b}"
+        );
+        assert_eq!(
+            (
+                b["exclusive_min"].as_f64(),
+                b["exclusive_max"].as_f64(),
+                b["got"].as_f64()
+            ),
+            (Some(0.0), Some(1.0), Some(1.0))
+        );
+        let (code, c, p, b) = refused(
+            uanalytics_tolerance_interval,
+            r#"{"data": [1, 2, 3], "coverage": 0.95, "confidence": 0.95, "sided": "both"}"#,
+        );
+        assert_eq!(
+            (code, c.as_deref(), p.as_deref()),
+            (-3, Some("unknown_option"), Some("sided")),
+            "{b}"
+        );
+        assert_eq!(b["got"], "both", "{b}");
+        assert_eq!(
+            b["expected"],
+            serde_json::json!(["two_sided", "one_sided"]),
+            "{b}"
+        );
+        let (code, c, p, b) = refused(
+            uanalytics_tolerance_interval,
+            r#"{"data": [2, 2, 2], "coverage": 0.95, "confidence": 0.95, "sided": "two_sided"}"#,
+        );
+        assert_eq!(
+            (code, c.as_deref(), p.as_deref()),
+            (-3, Some("degenerate_data"), Some("data")),
+            "{b}"
+        );
+        let (code, c, p, b) = refused(
+            uanalytics_tolerance_interval,
+            r#"{"data": [1], "coverage": 0.95, "confidence": 0.95, "sided": "two_sided"}"#,
+        );
+        assert_eq!(
+            (code, c.as_deref(), p.as_deref()),
+            (-3, Some("insufficient_data"), Some("data")),
+            "{b}"
+        );
+        // A name is a string, not a number.
+        let (code, c, p, b) = refused(
+            uanalytics_tolerance_interval,
+            r#"{"data": [1, 2, 3], "coverage": 0.95, "confidence": 0.95, "sided": 2}"#,
+        );
+        assert_eq!(
+            (code, c.as_deref(), p.as_deref()),
+            (-2, Some("malformed_input"), Some("sided")),
             "{b}"
         );
     }

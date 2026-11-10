@@ -1577,7 +1577,7 @@ pub(crate) mod hypothesis {
         pub(crate) sen_slope: f64,
     }
 
-    fn no_variation(test: &str, param: &'static str) -> WireError {
+    pub(super) fn no_variation(test: &str, param: &'static str) -> WireError {
         WireError::degenerate_data(format!(
             "{test}: {param} has no variation (every value is the same), so the statistic is undefined"
         ))
@@ -1731,7 +1731,7 @@ pub(crate) mod hypothesis {
     /// The level a TOST is run at when none is given.
     pub(crate) const DEFAULT_TOST_ALPHA: f64 = 0.05;
 
-    fn finite_scalar(param: &'static str, value: f64) -> Result<(), WireError> {
+    pub(super) fn finite_scalar(param: &'static str, value: f64) -> Result<(), WireError> {
         if value.is_finite() {
             Ok(())
         } else {
@@ -6398,6 +6398,155 @@ pub(crate) mod reliability {
                 (e.code, e.parameter.as_deref()),
                 ("invalid_option", Some("lambda_range"))
             );
+        }
+    }
+}
+
+/// Normal tolerance intervals (`crate::tolerance`).
+pub(crate) mod tolerance {
+    use super::hypothesis::{finite_scalar, no_variation};
+    use super::*;
+    use crate::tolerance::{tolerance_factor, tolerance_interval_normal, Sided};
+
+    /// The sidednesses a tolerance interval takes, as `sided` names them.
+    pub(crate) const SIDED: [(&str, Sided); 2] = [
+        ("two_sided", Sided::TwoSided),
+        ("one_sided", Sided::OneSided),
+    ];
+
+    /// The fewest observations a tolerance factor exists for: the spread of a
+    /// single value is not estimated.
+    const MIN_N: usize = 2;
+
+    /// A normal tolerance interval: `mean ± k * std_dev`, the factor `k` of
+    /// this `n`, coverage, confidence and sidedness.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct ToleranceIntervalDto {
+        /// Sample mean.
+        pub(crate) mean: f64,
+        /// Sample standard deviation (divisor `n - 1`).
+        pub(crate) std_dev: f64,
+        /// Number of observations.
+        pub(crate) n: usize,
+        /// The tolerance factor `k`.
+        pub(crate) k: f64,
+        /// `mean - k * std_dev`: the lower end of the two-sided interval, or the lower
+        /// bound of a one-sided statement.
+        pub(crate) lower: f64,
+        /// `mean + k * std_dev`: the upper end of the two-sided interval, or the upper
+        /// bound of a one-sided statement.
+        pub(crate) upper: f64,
+    }
+
+    /// `n` as a count: a whole number of at least two. Whole-ness is the
+    /// reader's (`malformed_input` for a fraction); the range is checked here,
+    /// so a negative number and a too small one leave by the same door.
+    fn sample_size(n: Whole) -> Result<usize, WireError> {
+        let Whole(value) = n;
+        let (low, high) = (Bound::Closed(MIN_N as f64), Bound::Unbounded);
+        if within(value, low, high) {
+            return Ok(n.count());
+        }
+        Err(WireError::out_of_range(
+            "n",
+            low,
+            high,
+            value,
+            format!(
+                "n: a tolerance factor needs a sample size {}, got {value}",
+                describe(low, high)
+            ),
+        ))
+    }
+
+    /// A proportion strictly between 0 and 1 (open at both ends: 0 and 1 have
+    /// no finite factor).
+    fn open_unit(parameter: &'static str, value: f64) -> Result<f64, WireError> {
+        finite_scalar(parameter, value)?;
+        let (low, high) = (Bound::Open(0.0), Bound::Open(1.0));
+        if within(value, low, high) {
+            return Ok(value);
+        }
+        Err(WireError::out_of_range(
+            parameter,
+            low,
+            high,
+            value,
+            format!("{parameter}: must be {}, got {value}", describe(low, high)),
+        ))
+    }
+
+    /// `sided` by name, or `unknown_option` listing the names.
+    fn sidedness(name: &str) -> Result<Sided, WireError> {
+        named("sided", name, &SIDED)
+    }
+
+    /// The factor `k` for `n`, `coverage`, `confidence` and `sided`, in the
+    /// order of the arguments: `n` a whole number >= 2, the two proportions in
+    /// (0, 1), `sided` `"two_sided"` or `"one_sided"`.
+    pub(crate) fn tolerance_factor_value(
+        n: Whole,
+        coverage: f64,
+        confidence: f64,
+        sided: &str,
+    ) -> Result<f64, WireError> {
+        let n = sample_size(n)?;
+        let coverage = open_unit("coverage", coverage)?;
+        let confidence = open_unit("confidence", confidence)?;
+        let sided = sidedness(sided)?;
+        tolerance_factor(n, coverage, confidence, sided).ok_or_else(|| {
+            WireError::new(
+                code::INTERNAL,
+                None,
+                format!(
+                    "tolerance_factor: no finite factor was found for n = {n}, \
+                     coverage = {coverage}, confidence = {confidence}"
+                ),
+            )
+        })
+    }
+
+    /// The normal tolerance interval of `data`, checked in the order of the
+    /// arguments. A sample with no variation is `degenerate_data`; a result a
+    /// double cannot hold (a spread near the largest double) has no JSON form
+    /// and is `internal` rather than sent as `null`.
+    pub(crate) fn tolerance_interval_dto(
+        data: &[f64],
+        coverage: f64,
+        confidence: f64,
+        sided: &str,
+    ) -> Result<ToleranceIntervalDto, WireError> {
+        let data = at_least(data.to_vec(), MIN_N, "data")?;
+        let coverage = open_unit("coverage", coverage)?;
+        let confidence = open_unit("confidence", confidence)?;
+        let sided = sidedness(sided)?;
+        match tolerance_interval_normal(&data, coverage, confidence, sided) {
+            Some(t)
+                if [t.mean, t.std_dev, t.k, t.lower, t.upper]
+                    .iter()
+                    .all(|v| v.is_finite()) =>
+            {
+                Ok(ToleranceIntervalDto {
+                    mean: t.mean,
+                    std_dev: t.std_dev,
+                    n: t.n,
+                    k: t.k,
+                    lower: t.lower,
+                    upper: t.upper,
+                })
+            }
+            _ if u_numflow::stats::std_dev(&data) == Some(0.0) => {
+                Err(no_variation("tolerance_interval", "data"))
+            }
+            _ => Err(WireError::new(
+                code::INTERNAL,
+                None,
+                "tolerance_interval: the interval is not a finite number \
+                 (a spread or a bound beyond what a double holds)",
+            )),
         }
     }
 }

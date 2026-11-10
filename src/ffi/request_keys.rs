@@ -516,6 +516,16 @@ pub(super) fn entry_points() -> Vec<(&'static str, Entry, Value)> {
             json!({ "a": [5.1, 4.9, 5.3, 5.0], "b": [5.6, 5.8, 5.5, 5.9], "low": -1, "high": 1 }),
         ),
         ep(
+            "uanalytics_tolerance_factor",
+            uanalytics_tolerance_factor,
+            json!({ "n": 10, "coverage": 0.95, "confidence": 0.9, "sided": "two_sided" }),
+        ),
+        ep(
+            "uanalytics_tolerance_interval",
+            uanalytics_tolerance_interval,
+            json!({ "data": series(), "coverage": 0.95, "confidence": 0.9, "sided": "one_sided" }),
+        ),
+        ep(
             "uanalytics_jarque_bera_test",
             uanalytics_jarque_bera_test,
             json!({ "data": series() }),

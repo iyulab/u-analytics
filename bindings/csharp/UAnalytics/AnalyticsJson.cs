@@ -38,6 +38,7 @@ namespace UAnalytics;
 [JsonSerializable(typeof(PowerLawFitResult))]
 [JsonSerializable(typeof(TestResult))]
 [JsonSerializable(typeof(EquivalenceResult))]
+[JsonSerializable(typeof(ToleranceIntervalResult))]
 [JsonSerializable(typeof(ShapiroWilkResult))]
 [JsonSerializable(typeof(AndersonDarlingResult))]
 [JsonSerializable(typeof(AdfResult))]
@@ -73,4 +74,5 @@ namespace UAnalytics;
 [JsonSerializable(typeof(PeltCost))]
 [JsonSerializable(typeof(CorrelationMethod))]
 [JsonSerializable(typeof(DistributionFamily))]
+[JsonSerializable(typeof(Sided))]
 internal sealed partial class AnalyticsJson : JsonSerializerContext;

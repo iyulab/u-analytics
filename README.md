@@ -985,6 +985,41 @@ console.log(r.equivalent, r.p_value < 0.05); // true true
 if (!r.equivalent || !(r.p_value < 0.05)) throw new Error("unexpected");
 ```
 
+A normal tolerance interval says where individual values lie — "at least `coverage` of the
+population is inside, and we are `confidence` sure of that" — where a confidence interval
+speaks about the mean. It is `mean ± k·s`, and the factor `k` is the root of the exact
+confidence equation rather than a table's approximation (the two-sided factors printed in the
+classic tables are the Wald–Wolfowitz formula and are a few tenths of a percent low).
+
+```ts
+type ToleranceIntervalDto = {
+  mean: number, std_dev: number, n: number,   // the sample's, divisor n - 1
+  k: number,                                  // the factor of this n, coverage, confidence, sidedness
+  lower: number, upper: number }              // mean -/+ k * std_dev
+tolerance_factor(n: number, coverage: number, confidence: number,
+                 sided: "two_sided" | "one_sided"): number     // n a whole number >= 2
+tolerance_interval(data, coverage, confidence,
+                   sided: "two_sided" | "one_sided"): ToleranceIntervalDto  // >= 2 values, not all equal
+```
+
+`coverage` and `confidence` are in (0, 1), open at both ends: outside throws
+`parameter_out_of_range` with `exclusive_min` 0, `exclusive_max` 1 and `got`. `n` below 2
+(negative included) throws `parameter_out_of_range` with `min` 2 and `got`; a fraction is
+`malformed_input`. A `sided` that is not one of the two names throws `unknown_option` with
+`got` and `expected` — it is never read as a default. A one-sided statement uses **one** of
+`lower` and `upper`: "at least `coverage` of the population is above `lower`", or "below
+`upper`", each with `confidence`; quoting both as an interval is the two-sided statement, with
+its larger factor. The interval assumes a normal population.
+
+```js
+const { tolerance_factor, tolerance_interval } = require("@iyulab/u-analytics");
+const diameters = [10.02, 9.98, 10.01, 10.0, 9.99, 10.03, 9.97, 10.01, 10.0, 9.99];
+const k = tolerance_factor(10, 0.95, 0.95, "two_sided");
+const t = tolerance_interval(diameters, 0.95, 0.95, "two_sided");
+console.log(k.toFixed(4), t.lower.toFixed(3), t.upper.toFixed(3)); // 3.3934 9.938 10.062
+if (Math.abs(k - 3.393429478712608) > 1e-9 || t.k !== k) throw new Error("unexpected");
+```
+
 Event-time trend of one unit — `times` ascending and `> 0`; `observation` is
 `{ truncation: "time", end }` (watched until `end`) or `{ truncation: "failure" }`
 (stopped at the last event, which is then not used):
@@ -1270,7 +1305,9 @@ results — `uanalytics_one_sample_t_test` `{data, mu0}`, `uanalytics_two_sample
 `uanalytics_wilcoxon_signed_rank_test` `{x, y}`, the equivalence tests
 `uanalytics_tost_one_sample` `{data, target, low, high, alpha?}`, `uanalytics_tost_paired`
 `{x, y, low, high, alpha?}` and `uanalytics_tost_two_sample`
-`{a, b, low, high, alpha?, equal_variance?}`, `uanalytics_jarque_bera_test` /
+`{a, b, low, high, alpha?, equal_variance?}`, the tolerance functions
+`uanalytics_tolerance_factor` `{n, coverage, confidence, sided}` → `{value}` and
+`uanalytics_tolerance_interval` `{data, coverage, confidence, sided}`, `uanalytics_jarque_bera_test` /
 `uanalytics_shapiro_wilk_test` / `uanalytics_mann_kendall_test` `{data}`,
 `uanalytics_one_way_anova` / `uanalytics_kruskal_wallis_test` / `uanalytics_levene_test` /
 `uanalytics_bartlett_test` `{groups}`, `uanalytics_chi_squared_goodness_of_fit`
@@ -1291,7 +1328,7 @@ in the CHANGELOG entry that changes it.
 ## Test Status
 
 ```text
-745 lib tests (815 with `ffi`, 841 with `wasm`) + 124 doc-tests
+750 lib tests (821 with `ffi`, 849 with `wasm`) + 126 doc-tests
 0 clippy warnings
 ```
 
