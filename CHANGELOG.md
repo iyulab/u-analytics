@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-11-10
+
+Depends on u-numflow 0.16.3. The .NET client is `UAnalytics` 0.29.0.
+
 ### Added
 
 - `msa::type1`: the Type 1 gage study — `type1_gage_study(measurements, reference, lsl, usl, &Type1Options)` for repeated
@@ -64,7 +68,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Changed
 
-- Requires u-numflow 0.16.2, whose `ln_beta` keeps its digits when a shape is large (the beta fit's log-likelihood now relies on it).
+- Requires u-numflow 0.16.3, which keeps the digits of the normal tails, of the exponential and Weibull distributions at a small
+  failure probability and of the gamma, chi-squared, beta and t quantiles at a small probability, and whose `ln_beta` keeps its digits
+  when a shape is large (the beta fit's log-likelihood relies on it). The WebAssembly and native builds carry that code, so the
+  limits, p-values and fits built on those functions take the fixes with this release.
 
 ### Fixed
 
