@@ -10,6 +10,24 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Added
 
+- `msa::type1`: the Type 1 gage study — `type1_gage_study(measurements, reference, lsl, usl, &Type1Options)` for repeated
+  measurements of one reference part. It returns the mean, standard deviation and `bias = x̄ − reference`, the study variation
+  `L·s`, the capability indices `Cg = K·T / (L·s)` and `Cgk = (K·T/2 − |bias|) / (L·s/2)` for the tolerance `T = USL − LSL`,
+  `%Var (Repeatability)` (`100·L·s / T`) and `%Var (Repeatability and Bias)` (`100·K / Cgk`, `None` when `Cgk ≤ 0`), and the
+  one-sample t test of `bias = 0` (signed statistic, `n − 1` degrees of freedom, two-sided p-value formed from the tail
+  directly). The multipliers are parameters with Minitab's defaults — `tolerance_fraction` 0.2 (`K`, in (0, 1]) and
+  `sigma_multiple` 6 (`L`; `Cgk` uses half of it) — so another edition of the procedure is a configuration; the defaults give the
+  familiar `0.2·T / 6s` and `(0.1·T − |x̄ − x_ref|) / 3s`. The formulas are those of Minitab's "Methods and formulas for Type 1 Gage
+  Study" and the SPC for Excel "Type 1 Gage Study" publication, and the tests reproduce that publication's worked example (50
+  readings, `Cg` 0.343, `Cgk` 0.240, `t` 2.185, `p` 0.0337, `%Var` 58.2 and 83.22); the VDA 5 measurement-uncertainty statistics are
+  a different analysis and are not computed. Against an independent NumPy / SciPy computation (p-values cross-checked with a 50-digit
+  `mpmath` incomplete beta, down to 1e-74) the agreement is 1e-12 for `Cg` and 1e-10 for `Cgk` and `t`; the indices are unchanged by
+  scaling and shifting the data, reference and limits. `None` for fewer than 2 readings, a value that is not finite, `USL ≤ LSL`,
+  readings that are all equal, a `tolerance_fraction` outside (0, 1] or a `sigma_multiple` that is not positive. The WebAssembly
+  function `type1_gage_study(measurements, reference, lsl, usl, tolerance_fraction?, sigma_multiple?)` (a `Type1GageDto`), the C ABI
+  entry point `uanalytics_type1_gage_study`, and the .NET method `Type1GageStudy` (a `Type1GageResult`) carry it too. `USL ≤ LSL` is
+  refused as `invalid_option` on `usl`, the two options as `parameter_out_of_range` (`exclusive_min` 0, and `max` 1 for the fraction), and
+  equal readings as `degenerate_data` on `measurements`; no new refusal codes.
 - `equivalence`: two one-sided tests (TOST, Schuirmann 1987) to show that a difference is *inside* a margin rather than merely
   not significant — `tost_one_sample` (a mean against a target), `tost_paired` and `tost_two_sample` (Welch or pooled). The result
   carries the estimate, standard error and degrees of freedom, both one-sided statistics and p-values, the procedure's

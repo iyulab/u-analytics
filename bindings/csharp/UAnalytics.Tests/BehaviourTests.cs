@@ -263,6 +263,43 @@ public class BehaviourTests
     }
 
     [Fact]
+    public void A_type1_gage_study_reads_its_settings_and_refuses_with_the_engines_codes()
+    {
+        double[] readings = [10.02, 9.98, 10.05, 10.01, 9.97, 10.03, 10.0, 10.04];
+        var r = _client.Type1GageStudy(readings, 10, 9, 11);
+        Assert.Equal(8, r.N);
+        Assert.Equal(7, r.Df);
+        // The defaults: Cg = 0.2 T / 6 s, Cgk = (0.1 T - |bias|) / 3 s.
+        Assert.Equal(0.4 / (6 * r.StdDev), r.Cg, 12);
+        Assert.Equal((0.2 - Math.Abs(r.Bias)) / (3 * r.StdDev), r.Cgk, 12);
+        Assert.True(r.Cgk < r.Cg);
+        Assert.Equal(20 / r.Cgk, r.PercentVarRepeatabilityAndBias!.Value, 9);
+        // Another edition is a setting; null is the default.
+        var other = _client.Type1GageStudy(readings, 10, 9, 11, 0.15, 4);
+        Assert.Equal(r.Cg * 0.75 * 1.5, other.Cg, 12);
+        Assert.Equal(r.Cg, _client.Type1GageStudy(readings, 10, 9, 11, null, null).Cg);
+        // A bias that fills the band: a negative Cgk and no percentage.
+        var filled = _client.Type1GageStudy(readings, 9.5, 9, 11);
+        Assert.True(filled.Cgk < 0);
+        Assert.Null(filled.PercentVarRepeatabilityAndBias);
+
+        var limits = Assert.Throws<AnalyticsException>(() => _client.Type1GageStudy(readings, 10, 11, 9));
+        Assert.Equal(("invalid_option", "usl"), (limits.ErrorCode, limits.Parameter));
+        var fraction = Assert.Throws<AnalyticsException>(() => _client.Type1GageStudy(readings, 10, 9, 11, 0));
+        Assert.Equal(("parameter_out_of_range", "tolerance_fraction"), (fraction.ErrorCode, fraction.Parameter));
+        Assert.Equal(0.0, fraction.Details!.Value.GetProperty("exclusive_min").GetDouble());
+        Assert.Equal(1.0, fraction.Details!.Value.GetProperty("max").GetDouble());
+        var multiple = Assert.Throws<AnalyticsException>(() => _client.Type1GageStudy(readings, 10, 9, 11, null, -6));
+        Assert.Equal(("parameter_out_of_range", "sigma_multiple"), (multiple.ErrorCode, multiple.Parameter));
+        var flat = Assert.Throws<AnalyticsException>(() => _client.Type1GageStudy([2, 2, 2], 2, 0, 4));
+        Assert.Equal(("degenerate_data", "measurements"), (flat.ErrorCode, flat.Parameter));
+        var few = Assert.Throws<AnalyticsException>(() => _client.Type1GageStudy([2], 2, 0, 4));
+        Assert.Equal(("insufficient_data", "measurements"), (few.ErrorCode, few.Parameter));
+        var nan = Assert.Throws<AnalyticsException>(() => _client.Type1GageStudy(readings, double.NaN, 9, 11));
+        Assert.Equal(("value_not_finite", "reference"), (nan.ErrorCode, nan.Parameter));
+    }
+
+    [Fact]
     public void A_missing_key_fails_rather_than_reading_as_zero()
     {
         Assert.ThrowsAny<JsonException>(() =>

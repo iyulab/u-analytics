@@ -48,6 +48,7 @@ use crate::wire::{
 };
 use crate::wire::{
     tolerance::{tolerance_factor_value, tolerance_interval_dto},
+    type1_gage::type1_gage_study_dto,
     Whole,
 };
 
@@ -1319,6 +1320,44 @@ pub fn tolerance_interval(
     to_js(&tolerance_interval_dto(&data, coverage, confidence, &sided).map_err(js_err)?)
 }
 
+/// Type 1 gage study: the capability of a measurement device from repeated measurements of
+/// one reference part whose true value is `reference`, against the specification limits
+/// `lsl` and `usl` (tolerance `T = usl - lsl`). With the mean `x̄` and standard deviation
+/// `s` of the `measurements`, `bias = x̄ - reference`, `Cg = tolerance_fraction * T /
+/// (sigma_multiple * s)` and `Cgk = (tolerance_fraction * T / 2 - |bias|) / (sigma_multiple
+/// * s / 2)`; `t_statistic`, `df` and `p_value` are those of the one-sample t test of
+/// `bias = 0` (two-sided). `percent_var_repeatability` is `100 * sigma_multiple * s / T` and
+/// `percent_var_repeatability_and_bias` is `100 * tolerance_fraction / Cgk` (`null` when
+/// `Cgk <= 0`, the bias alone filling the band). `tolerance_fraction` (default 0.2, in (0, 1])
+/// and `sigma_multiple` (default 6, above 0) are the conventions that differ between editions
+/// and tools; the defaults are Minitab's, `Cg = 0.2 T / 6 s` and `Cgk = (0.1 T - |bias|) /
+/// 3 s`. 1.33 is the customary benchmark for both. Need >= 2 measurements that are not all
+/// equal and `lsl < usl`.
+#[wasm_bindgen(unchecked_return_type = "Type1GageDto")]
+pub fn type1_gage_study(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] measurements: JsValue,
+    reference: f64,
+    lsl: f64,
+    usl: f64,
+    #[wasm_bindgen(unchecked_optional_param_type = "number | null")] tolerance_fraction: Option<
+        f64,
+    >,
+    #[wasm_bindgen(unchecked_optional_param_type = "number | null")] sigma_multiple: Option<f64>,
+) -> Result<JsValue, JsValue> {
+    let measurements = read_numbers(&measurements, "measurements").map_err(js_err)?;
+    to_js(
+        &type1_gage_study_dto(
+            &measurements,
+            reference,
+            lsl,
+            usl,
+            tolerance_fraction,
+            sigma_multiple,
+        )
+        .map_err(js_err)?,
+    )
+}
+
 /// Chi-squared goodness of fit: `observed` counts (>= 0) against `expected` frequencies (> 0), same length >= 2.
 #[wasm_bindgen(unchecked_return_type = "TestResultDto")]
 pub fn chi_squared_goodness_of_fit(
@@ -2515,6 +2554,178 @@ mod binding_contract_tests {
         assert_eq!(e.code, "internal");
         // The data are checked before the settings, in the order of the arguments.
         let e = tolerance_interval_dto(&[1.0], 2.0, 0.95, "x").unwrap_err();
+        assert_eq!(e.code, "insufficient_data");
+    }
+
+    // --- Type 1 gage study ---
+
+    const READINGS: [f64; 8] = [10.02, 9.98, 10.05, 10.01, 9.97, 10.03, 10.0, 10.04];
+
+    #[test]
+    fn a_type1_study_reports_what_the_crate_computes() {
+        use crate::msa::type1::{type1_gage_study, Type1Options};
+        let dto = type1_gage_study_dto(&READINGS, 10.0, 9.0, 11.0, None, None).unwrap();
+        let direct =
+            type1_gage_study(&READINGS, 10.0, 9.0, 11.0, &Type1Options::default()).unwrap();
+        assert_eq!(
+            (dto.n, dto.mean, dto.std_dev, dto.bias, dto.study_variation),
+            (
+                direct.n,
+                direct.mean,
+                direct.std_dev,
+                direct.bias,
+                direct.study_variation
+            )
+        );
+        assert_eq!(
+            (dto.cg, dto.cgk, dto.t_statistic, dto.df, dto.p_value),
+            (
+                direct.cg,
+                direct.cgk,
+                direct.t_statistic,
+                direct.df,
+                direct.p_value
+            )
+        );
+        assert_eq!(
+            (
+                dto.percent_var_repeatability,
+                dto.percent_var_repeatability_and_bias
+            ),
+            (
+                direct.percent_var_repeatability,
+                direct.percent_var_repeatability_and_bias
+            )
+        );
+    }
+
+    #[test]
+    fn a_type1_study_without_options_runs_at_twenty_percent_and_six_sigma() {
+        let omitted = type1_gage_study_dto(&READINGS, 10.0, 9.0, 11.0, None, None).unwrap();
+        let explicit =
+            type1_gage_study_dto(&READINGS, 10.0, 9.0, 11.0, Some(0.2), Some(6.0)).unwrap();
+        assert_eq!((omitted.cg, omitted.cgk), (explicit.cg, explicit.cgk));
+        // Another edition is a configuration: K = 15 %, L = 4.
+        let other =
+            type1_gage_study_dto(&READINGS, 10.0, 9.0, 11.0, Some(0.15), Some(4.0)).unwrap();
+        assert!((other.cg - omitted.cg * (0.15 / 0.2) * (6.0 / 4.0)).abs() < 1e-12);
+        assert_ne!(other.cgk, omitted.cgk);
+    }
+
+    #[test]
+    fn a_type1_study_whose_bias_fills_the_band_has_no_repeatability_and_bias_percentage() {
+        let dto = type1_gage_study_dto(&READINGS, 9.5, 9.0, 11.0, None, None).unwrap();
+        assert!(dto.cgk < 0.0);
+        assert_eq!(dto.percent_var_repeatability_and_bias, None);
+    }
+
+    #[test]
+    fn type1_refusals_name_the_argument() {
+        let at = |e: crate::wire::WireError| {
+            (e.code, e.parameter.as_deref().map(str::to_owned), e.index)
+        };
+        let study = |m: &[f64], r, lo, hi, k, l| type1_gage_study_dto(m, r, lo, hi, k, l);
+
+        let e = study(&[1.0], 1.0, 0.0, 2.0, None, None).unwrap_err();
+        assert_eq!(
+            (e.code, e.parameter.as_deref(), e.details.clone()),
+            (
+                "insufficient_data",
+                Some("measurements"),
+                vec![("min", Detail::Num(2.0)), ("got", Detail::Num(1.0))]
+            )
+        );
+        let e = study(&[1.0, f64::NAN, 2.0], 1.0, 0.0, 2.0, None, None).unwrap_err();
+        assert_eq!(
+            at(e),
+            (
+                "value_not_finite",
+                Some("measurements".to_string()),
+                Some(1)
+            )
+        );
+        for (name, e) in [
+            (
+                "reference",
+                study(&READINGS, f64::NAN, 9.0, 11.0, None, None),
+            ),
+            (
+                "lsl",
+                study(&READINGS, 10.0, f64::NEG_INFINITY, 11.0, None, None),
+            ),
+            (
+                "usl",
+                study(&READINGS, 10.0, 9.0, f64::INFINITY, None, None),
+            ),
+            (
+                "tolerance_fraction",
+                study(&READINGS, 10.0, 9.0, 11.0, Some(f64::NAN), None),
+            ),
+            (
+                "sigma_multiple",
+                study(&READINGS, 10.0, 9.0, 11.0, None, Some(f64::INFINITY)),
+            ),
+        ] {
+            assert_eq!(
+                at(e.unwrap_err()),
+                ("value_not_finite", Some(name.to_string()), None)
+            );
+        }
+        // Limits: reversed or equal is a refusal of a combination, named on `usl`.
+        for (lsl, usl) in [(11.0, 9.0), (10.0, 10.0)] {
+            let e = study(&READINGS, 10.0, lsl, usl, None, None).unwrap_err();
+            assert_eq!(at(e), ("invalid_option", Some("usl".to_string()), None));
+        }
+        // The fraction: open at 0, closed at 1.
+        for bad in [0.0, -0.2, 1.5, 20.0] {
+            let e = study(&READINGS, 10.0, 9.0, 11.0, Some(bad), None).unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some("tolerance_fraction")),
+                "{bad}"
+            );
+            assert_eq!(
+                e.details,
+                vec![
+                    ("min", Detail::Null),
+                    ("exclusive_min", Detail::Num(0.0)),
+                    ("max", Detail::Num(1.0)),
+                    ("got", Detail::Num(bad)),
+                ]
+            );
+        }
+        assert!(study(&READINGS, 10.0, 9.0, 11.0, Some(1.0), None).is_ok());
+        // The multiple: above 0, no upper bound.
+        for bad in [0.0, -6.0] {
+            let e = study(&READINGS, 10.0, 9.0, 11.0, None, Some(bad)).unwrap_err();
+            assert_eq!(
+                (e.code, e.parameter.as_deref()),
+                ("parameter_out_of_range", Some("sigma_multiple")),
+                "{bad}"
+            );
+            assert_eq!(
+                e.details,
+                vec![
+                    ("min", Detail::Null),
+                    ("exclusive_min", Detail::Num(0.0)),
+                    ("max", Detail::Null),
+                    ("got", Detail::Num(bad)),
+                ]
+            );
+        }
+        // No variation, including a constant that does not sum exactly.
+        for constant in [[2.0, 2.0, 2.0], [0.1, 0.1, 0.1]] {
+            let e = study(&constant, constant[0], 0.0, 4.0, None, None).unwrap_err();
+            assert_eq!(
+                at(e),
+                ("degenerate_data", Some("measurements".to_string()), None)
+            );
+        }
+        // A spread so small that an index is not a number a double holds.
+        let e = study(&[1.0, 1.0 + f64::EPSILON], 1.0, 0.0, f64::MAX, None, None).unwrap_err();
+        assert_eq!(e.code, "degenerate_data");
+        // Arguments are checked in order: the readings before the limits.
+        let e = study(&[1.0], f64::NAN, 2.0, 1.0, Some(0.0), Some(0.0)).unwrap_err();
         assert_eq!(e.code, "insufficient_data");
     }
 
@@ -3807,8 +4018,8 @@ mod engine_card_tests {
     use super::*;
     use crate::engine_card::{arg, optional, string_enum, Schemas};
     use crate::wire::{
-        counter, hypothesis, point_process, reliability, tolerance, AcfDto, CapabilityDto,
-        ChartPointDto, CorrelationMatrixDto, CusumDto, DistributionFitDto, EwmaDto,
+        counter, hypothesis, point_process, reliability, tolerance, type1_gage, AcfDto,
+        CapabilityDto, ChartPointDto, CorrelationMatrixDto, CusumDto, DistributionFitDto, EwmaDto,
         FixedLimitChartDto, GChartDto, GageRRAnovaResultDto, GageRRResultDto,
         GoodnessOfFitResultDto, ImrChartDto, KdeDto, LaneyPChartDto, LaneyUChartDto, PChartDto,
         PacfDto, PeltResultDto, PercentileCapabilityDto, RegressionDto, SeasonalityDto,
@@ -3997,6 +4208,18 @@ mod engine_card_tests {
                 sided(),
             ],
             s.of::<tolerance::ToleranceIntervalDto>(),
+        );
+        s.op(
+            "type1_gage_study",
+            vec![
+                arg("measurements", numbers()),
+                arg("reference", num()),
+                arg("lsl", num()),
+                arg("usl", num()),
+                optional("tolerance_fraction", s.of::<Option<f64>>()),
+                optional("sigma_multiple", s.of::<Option<f64>>()),
+            ],
+            s.of::<type1_gage::Type1GageDto>(),
         );
         let equivalence = || s.of::<hypothesis::EquivalenceDto>();
         let alpha = || optional("alpha", s.of::<Option<f64>>());

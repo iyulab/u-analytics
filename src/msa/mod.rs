@@ -5,6 +5,10 @@
 //!
 //! # Overview
 //!
+//! A Type 1 gage study ([`type1`]) is the step before: one operator, one reference
+//! part, repeated; it compares the gage's repeatability and bias with the tolerance
+//! (`Cg`, `Cgk`).
+//!
 //! A Gage R&R study decomposes total measurement variation into:
 //! - **Repeatability (EV)**: Equipment variation — same operator, same part, multiple trials
 //! - **Reproducibility (AV)**: Appraiser variation — different operators, same part
@@ -14,6 +18,8 @@
 //!
 //! - AIAG (2010). *Measurement Systems Analysis*, 4th ed.
 //! - Montgomery, D.C. (2019). *Introduction to Statistical Quality Control*, 8th ed., §5.
+
+pub mod type1;
 
 use u_numflow::special;
 use u_numflow::stats;

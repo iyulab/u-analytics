@@ -127,6 +127,7 @@ public class RequestContractTests
         ["ToleranceFactor(OneSided)"] = c => c.ToleranceFactor(10, 0.95, 0.9, Sided.OneSided),
         ["ToleranceInterval"] = c => c.ToleranceInterval(Series, 0.95, 0.9, Sided.TwoSided),
         ["ToleranceInterval(OneSided)"] = c => c.ToleranceInterval(Series, 0.95, 0.9, Sided.OneSided),
+        ["Type1GageStudy"] = c => c.Type1GageStudy(Series, 10, 8, 12, 0.15, 4),
         ["JarqueBeraTest"] = c => c.JarqueBeraTest(Series),
         ["ShapiroWilkTest"] = c => c.ShapiroWilkTest(Series),
         ["AndersonDarlingTest"] = c => c.AndersonDarlingTest(Series),

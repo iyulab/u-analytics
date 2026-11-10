@@ -1197,6 +1197,57 @@ come from `spc::range_chart_factors(n)` (Rust), which refuses a subgroup size th
 tables do not cover rather than approximating it; `gage_rr_xbar_r` itself accepts
 only 2 or 3 trials, so that refusal is unreachable through it.
 
+A **Type 1 gage study** (`Cg`, `Cgk`) repeats measurements of **one** reference part whose true value is known and
+sets the gage's bias and repeatability against the tolerance `T = usl - lsl`. With the mean
+`x̄` and standard deviation `s` of the readings, a fraction `K` of the tolerance and `L`
+standard deviations as the width of the measurement spread:
+
+```text
+bias = x̄ - reference
+Cg   = K·T / (L·s)                       Cgk = (K·T/2 - |bias|) / (L·s/2)
+t    = bias / (s/√n),  df = n - 1,  two-sided p      (H0: bias = 0)
+%Var(repeatability) = 100·L·s / T = 100·K / Cg       %Var(repeatability and bias) = 100·K / Cgk
+```
+
+The defaults, `K = 0.2` (20 % of the tolerance) and `L = 6`, are Minitab's and give the usual
+`Cg = 0.2·T / 6s` and `Cgk = (0.1·T - |bias|) / 3s`; 1.33 is the customary benchmark for both.
+Other editions of the procedure quote other values — they are `tolerance_fraction` and
+`sigma_multiple`, not a fork. The formulas are those of Minitab's "Methods and formulas for
+Type 1 Gage Study" and of the SPC for Excel "Type 1 Gage Study" publication, whose worked
+example (50 readings of a 12.306 reference, `Cg` 0.343, `Cgk` 0.240, `t` 2.185, `p` 0.0337) the
+tests reproduce; they do not assert which values a given standard prescribes, and the
+measurement-uncertainty statistics of VDA 5 are a different analysis that is not computed.
+
+```ts
+type Type1GageDto = {
+  n: number, mean: number, std_dev: number,       // the readings'; divisor n - 1
+  bias: number,                                   // mean - reference
+  study_variation: number,                        // sigma_multiple * std_dev
+  cg: number, cgk: number,                        // cgk <= cg; cgk <= 0 when the bias fills the band
+  percent_var_repeatability: number,              // 100 * study_variation / (usl - lsl)
+  percent_var_repeatability_and_bias: number | null,  // 100 * tolerance_fraction / cgk; null if cgk <= 0
+  t_statistic: number, df: number, p_value: number }  // one-sample t test of bias = 0 (signed t, two-sided p)
+type1_gage_study(measurements, reference: number, lsl: number, usl: number,
+                 tolerance_fraction?: number | null,   // in (0, 1], default 0.2
+                 sigma_multiple?: number | null        // > 0, default 6
+                ): Type1GageDto                        // >= 2 readings, not all equal; lsl < usl
+```
+
+`lsl >= usl` throws `invalid_option` on `usl`; `tolerance_fraction` outside `(0, 1]` and a
+`sigma_multiple` that is not positive throw `parameter_out_of_range` (`exclusive_min` 0, and
+`max` 1 for the fraction, with `got`); readings that are all equal are `degenerate_data` on
+`measurements`. Through the C ABI it is `uanalytics_type1_gage_study`
+`{measurements, reference, lsl, usl, tolerance_fraction?, sigma_multiple?}` and returns the same
+object.
+
+```js
+const { type1_gage_study } = require("@iyulab/u-analytics");
+const readings = [12.3075, 12.3018, 12.3116, 12.3074, 12.3077, 12.3127, 12.3035, 12.2985, 12.3059, 12.3127];
+const r = type1_gage_study(readings, 12.306, 12.285, 12.335);
+console.log(r.cg.toFixed(3), r.cgk.toFixed(3), r.bias.toFixed(5)); // 0.354 0.288 0.00093
+if (Math.abs(r.cg - 0.35378253899811923) > 1e-9 || !(r.cgk < r.cg)) throw new Error("unexpected");
+```
+
 ## C FFI (NuGet `UAnalytics`)
 
 The `ffi` feature builds a `cdylib` with a C ABI for hosts that cannot load
@@ -1256,6 +1307,7 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_percentile_capability` | `percentile_capability(input)` | `input` as is |
 | `uanalytics_gage_rr_xbar_r` | `gage_rr_xbar_r(input)` | `input` as is |
 | `uanalytics_gage_rr_anova` | `gage_rr_anova(input)` | `input` as is |
+| `uanalytics_type1_gage_study` | `type1_gage_study(measurements, reference, lsl, usl, tolerance_fraction?, sigma_multiple?)` | `{ measurements, reference, lsl, usl, tolerance_fraction?, sigma_multiple? }` |
 | `uanalytics_detect_changepoints` | `detect_changepoints(input)` | `input` as is |
 | `uanalytics_detect_changepoints_multi` | `detect_changepoints_multi(input)` | `input` as is |
 | `uanalytics_cusum` | `cusum(input)` | `input` as is |
@@ -1328,7 +1380,7 @@ in the CHANGELOG entry that changes it.
 ## Test Status
 
 ```text
-750 lib tests (821 with `ffi`, 849 with `wasm`) + 126 doc-tests
+756 lib tests (828 with `ffi`, 859 with `wasm`) + 127 doc-tests
 0 clippy warnings
 ```
 

@@ -431,6 +431,29 @@ public enum Sided
 /// </summary>
 public sealed record ToleranceIntervalResult(double Mean, double StdDev, int N, double K, double Lower, double Upper);
 
+/// <summary>
+/// A Type 1 gage study: the mean, standard deviation and <c>Bias</c> (<c>mean − reference</c>) of
+/// repeated measurements of one reference part, the <c>StudyVariation</c> (<c>sigma_multiple · s</c>),
+/// the capability indices <c>Cg</c> (repeatability against the tolerance band) and <c>Cgk</c> (the
+/// same with the bias; zero or negative when the bias alone fills the band), the two percentages
+/// of the tolerance, and the one-sample t test of <c>bias = 0</c> (signed <c>TStatistic</c>,
+/// <c>Df</c>, two-sided <c>PValue</c>). <c>PercentVarRepeatabilityAndBias</c> is <c>null</c> when
+/// <c>Cgk</c> is not positive.
+/// </summary>
+public sealed record Type1GageResult(
+    int N,
+    double Mean,
+    double StdDev,
+    double Bias,
+    double StudyVariation,
+    double Cg,
+    double Cgk,
+    double PercentVarRepeatability,
+    double? PercentVarRepeatabilityAndBias,
+    double TStatistic,
+    double Df,
+    double PValue);
+
 /// <summary>Shapiro-Wilk W and its p value.</summary>
 public sealed record ShapiroWilkResult(double W, double PValue);
 

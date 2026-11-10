@@ -3715,6 +3715,89 @@
       ],
       "type": "object"
     },
+    "Type1GageDto": {
+      "description": "The result of a Type 1 gage study: the bias and spread of the readings\nand the capability indices of both against the tolerance.",
+      "properties": {
+        "bias": {
+          "description": "`mean - reference`.",
+          "format": "double",
+          "type": "number"
+        },
+        "cg": {
+          "description": "`tolerance_fraction * T / study_variation`, `T = usl - lsl`.",
+          "format": "double",
+          "type": "number"
+        },
+        "cgk": {
+          "description": "`(tolerance_fraction * T / 2 - |bias|) / (study_variation / 2)`: `cg` with the\nbias taken into account; zero or negative when the bias alone fills the band.",
+          "format": "double",
+          "type": "number"
+        },
+        "df": {
+          "description": "Degrees of freedom of that test, `n - 1`.",
+          "format": "double",
+          "type": "number"
+        },
+        "mean": {
+          "description": "Mean of the measurements.",
+          "format": "double",
+          "type": "number"
+        },
+        "n": {
+          "description": "Number of measurements.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "p_value": {
+          "description": "Two-sided p-value of that test.",
+          "format": "double",
+          "type": "number"
+        },
+        "percent_var_repeatability": {
+          "description": "`100 * study_variation / T`.",
+          "format": "double",
+          "type": "number"
+        },
+        "percent_var_repeatability_and_bias": {
+          "description": "`100 * tolerance_fraction / cgk`; `null` when `cgk <= 0`.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "std_dev": {
+          "description": "Sample standard deviation (divisor `n - 1`).",
+          "format": "double",
+          "type": "number"
+        },
+        "study_variation": {
+          "description": "`sigma_multiple * std_dev`: the spread of the measurements.",
+          "format": "double",
+          "type": "number"
+        },
+        "t_statistic": {
+          "description": "Statistic of the one-sample t test of `bias = 0`: `bias / (std_dev / sqrt(n))`.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "n",
+        "mean",
+        "std_dev",
+        "bias",
+        "study_variation",
+        "cg",
+        "cgk",
+        "percent_var_repeatability",
+        "t_statistic",
+        "df",
+        "p_value"
+      ],
+      "type": "object"
+    },
     "UChartDto": {
       "properties": {
         "in_control": {
@@ -5827,6 +5910,55 @@
     },
     "two_sample_t_test.output": {
       "$ref": "#/$defs/TestResultDto"
+    },
+    "type1_gage_study.input": {
+      "additionalProperties": false,
+      "description": "The arguments of type1_gage_study(measurements, reference, lsl, usl, tolerance_fraction, sigma_multiple), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "lsl": {
+          "format": "double",
+          "type": "number"
+        },
+        "measurements": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "reference": {
+          "format": "double",
+          "type": "number"
+        },
+        "sigma_multiple": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "tolerance_fraction": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "usl": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "measurements",
+        "reference",
+        "lsl",
+        "usl"
+      ],
+      "type": "object"
+    },
+    "type1_gage_study.output": {
+      "$ref": "#/$defs/Type1GageDto"
     },
     "u_chart.input": {
       "additionalProperties": false,

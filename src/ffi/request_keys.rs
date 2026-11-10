@@ -526,6 +526,11 @@ pub(super) fn entry_points() -> Vec<(&'static str, Entry, Value)> {
             json!({ "data": series(), "coverage": 0.95, "confidence": 0.9, "sided": "one_sided" }),
         ),
         ep(
+            "uanalytics_type1_gage_study",
+            uanalytics_type1_gage_study,
+            json!({ "measurements": series(), "reference": 10, "lsl": 8, "usl": 12 }),
+        ),
+        ep(
             "uanalytics_jarque_bera_test",
             uanalytics_jarque_bera_test,
             json!({ "data": series() }),

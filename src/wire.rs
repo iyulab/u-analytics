@@ -6551,6 +6551,157 @@ pub(crate) mod tolerance {
     }
 }
 
+/// Type 1 gage study (`crate::msa::type1`).
+pub(crate) mod type1_gage {
+    use super::hypothesis::{finite_scalar, no_variation};
+    use super::*;
+    use crate::msa::type1::{type1_gage_study, Type1Options};
+
+    /// The fewest measurements a Type 1 study has a spread for.
+    const MIN_N: usize = 2;
+
+    /// The result of a Type 1 gage study: the bias and spread of the readings
+    /// and the capability indices of both against the tolerance.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct Type1GageDto {
+        /// Number of measurements.
+        pub(crate) n: usize,
+        /// Mean of the measurements.
+        pub(crate) mean: f64,
+        /// Sample standard deviation (divisor `n - 1`).
+        pub(crate) std_dev: f64,
+        /// `mean - reference`.
+        pub(crate) bias: f64,
+        /// `sigma_multiple * std_dev`: the spread of the measurements.
+        pub(crate) study_variation: f64,
+        /// `tolerance_fraction * T / study_variation`, `T = usl - lsl`.
+        pub(crate) cg: f64,
+        /// `(tolerance_fraction * T / 2 - |bias|) / (study_variation / 2)`: `cg` with the
+        /// bias taken into account; zero or negative when the bias alone fills the band.
+        pub(crate) cgk: f64,
+        /// `100 * study_variation / T`.
+        pub(crate) percent_var_repeatability: f64,
+        /// `100 * tolerance_fraction / cgk`; `null` when `cgk <= 0`.
+        pub(crate) percent_var_repeatability_and_bias: Option<f64>,
+        /// Statistic of the one-sample t test of `bias = 0`: `bias / (std_dev / sqrt(n))`.
+        pub(crate) t_statistic: f64,
+        /// Degrees of freedom of that test, `n - 1`.
+        pub(crate) df: f64,
+        /// Two-sided p-value of that test.
+        pub(crate) p_value: f64,
+    }
+
+    /// `tolerance_fraction` when none is given, `sigma_multiple` likewise.
+    fn defaults() -> Type1Options {
+        Type1Options::default()
+    }
+
+    /// A Type 1 gage study of `measurements` of a part whose true value is
+    /// `reference`, against the limits `lsl` and `usl`, checked in the order of the
+    /// arguments: at least 2 measurements, each finite; `reference`, `lsl` and `usl`
+    /// finite, `usl > lsl` (`invalid_option` on `usl` -- a relation between two
+    /// settings, as for margins); `tolerance_fraction` in `(0, 1]` and `sigma_multiple`
+    /// above 0 (`parameter_out_of_range`); readings that are all equal are
+    /// `degenerate_data`. The two options default to 0.2 and 6.
+    pub(crate) fn type1_gage_study_dto(
+        measurements: &[f64],
+        reference: f64,
+        lsl: f64,
+        usl: f64,
+        tolerance_fraction: Option<f64>,
+        sigma_multiple: Option<f64>,
+    ) -> Result<Type1GageDto, WireError> {
+        let data = at_least(measurements.to_vec(), MIN_N, "measurements")?;
+        if let Some(index) = data.iter().position(|v| !v.is_finite()) {
+            return Err(WireError::new(
+                code::VALUE_NOT_FINITE,
+                Some(index),
+                format!(
+                    "measurements[{index}]: expected a finite number, got {}",
+                    data[index]
+                ),
+            )
+            .about("measurements"));
+        }
+        finite_scalar("reference", reference)?;
+        finite_scalar("lsl", lsl)?;
+        finite_scalar("usl", usl)?;
+        if usl <= lsl {
+            return Err(WireError::new(
+                code::INVALID_OPTION,
+                None,
+                format!(
+                    "usl: the upper limit must exceed the lower one, got lsl = {lsl}, usl = {usl}"
+                ),
+            )
+            .about("usl"));
+        }
+        let fraction = tolerance_fraction.unwrap_or(defaults().tolerance_fraction);
+        finite_scalar("tolerance_fraction", fraction)?;
+        let (above, up_to) = (Bound::Open(0.0), Bound::Closed(1.0));
+        if !within(fraction, above, up_to) {
+            return Err(WireError::out_of_range(
+                "tolerance_fraction",
+                above,
+                up_to,
+                fraction,
+                format!(
+                    "tolerance_fraction: must be {} (a fraction of the tolerance, 0.2 for 20 %), got {fraction}",
+                    describe(above, up_to)
+                ),
+            ));
+        }
+        let multiple = sigma_multiple.unwrap_or(defaults().sigma_multiple);
+        finite_scalar("sigma_multiple", multiple)?;
+        let (above, none) = (Bound::Open(0.0), Bound::Unbounded);
+        if !within(multiple, above, none) {
+            return Err(WireError::out_of_range(
+                "sigma_multiple",
+                above,
+                none,
+                multiple,
+                format!(
+                    "sigma_multiple: must be {} (standard deviations in the measurement spread), got {multiple}",
+                    describe(above, none)
+                ),
+            ));
+        }
+        let options = Type1Options {
+            tolerance_fraction: fraction,
+            sigma_multiple: multiple,
+        };
+        match type1_gage_study(&data, reference, lsl, usl, &options) {
+            Some(r) => Ok(Type1GageDto {
+                n: r.n,
+                mean: r.mean,
+                std_dev: r.std_dev,
+                bias: r.bias,
+                study_variation: r.study_variation,
+                cg: r.cg,
+                cgk: r.cgk,
+                percent_var_repeatability: r.percent_var_repeatability,
+                percent_var_repeatability_and_bias: r.percent_var_repeatability_and_bias,
+                t_statistic: r.t_statistic,
+                df: r.df,
+                p_value: r.p_value,
+            }),
+            // Everything else was checked above: no spread, or a spread so small
+            // (or a bias and limits so large) that an index is not a finite number.
+            None if data.iter().all(|&v| v == data[0]) => {
+                Err(no_variation("type1_gage_study", "measurements"))
+            }
+            None => Err(WireError::degenerate_data(
+                "type1_gage_study: the spread of the measurements is too small for the \
+                 capability indices to be finite numbers",
+            )
+            .about("measurements")),
+        }
+    }
+}
+
 /// Increments of a cumulative counter (`crate::counter`).
 pub(crate) mod counter {
     use super::*;

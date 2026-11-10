@@ -624,6 +624,16 @@
         "b": {}
       }
     },
+    "uanalytics_type1_gage_study": {
+      "properties": {
+        "lsl": {},
+        "measurements": {},
+        "reference": {},
+        "sigma_multiple": {},
+        "tolerance_fraction": {},
+        "usl": {}
+      }
+    },
     "uanalytics_u_chart": {
       "properties": {
         "samples": {},

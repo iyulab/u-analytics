@@ -10,7 +10,10 @@
 - **Process capability**: Cp, Cpk, Pp, Ppk, Cpm, and a percentile method for
   non-normal data
 - **Measurement systems analysis**: Gage R&R by the Average & Range method and by
-  ANOVA, each returning the charts the method plots
+  ANOVA, each returning the charts the method plots; `Type1GageStudy` — repeated
+  measurements of one reference part against the tolerance: bias (with its t test),
+  `Cg` and `Cgk` and the two `%Var` figures, the 20 % and 6-sigma conventions being
+  settings (`toleranceFraction`, `sigmaMultiple`)
 - **Reliability**: Weibull fitting by maximum likelihood (`WeibullMle`) and median-rank
   regression (`WeibullMrr`); `WeibullReliability` — MTBF, R(t), h(t) and B-lives, with
   confidence intervals when given an MLE fit (`WeibullReliability(fit, …)`) or its `Covariance`

@@ -205,4 +205,35 @@ ok(flat && flat.code === 'degenerate_data' && flat.parameter === 'data', `consta
 const nanData = refusal(() => m.tolerance_interval([1, Number.NaN, 3], 0.95, 0.95, 'two_sided'))
 ok(nanData && nanData.code === 'value_not_finite' && nanData.index === 1, `NaN datum: ${nanData ? nanData.code : 'no error'}`)
 
+// Type 1 gage study: the trailing `tolerance_fraction` and `sigma_multiple` are optional
+// (omitted, undefined and null all mean the default), Cg and Cgk are the quoted closed
+// forms at the defaults, and a refusal carries its code and the fields behind it.
+const readings = [10.02, 9.98, 10.05, 10.01, 9.97, 10.03, 10.0, 10.04]
+const t1 = m.type1_gage_study(readings, 10, 9, 11)
+ok(t1.n === 8 && t1.df === 7 && Math.abs(t1.cg - 0.4 / (6 * t1.std_dev)) < 1e-12 &&
+  Math.abs(t1.cgk - (0.2 - Math.abs(t1.bias)) / (3 * t1.std_dev)) < 1e-12 && t1.cgk < t1.cg,
+  `type1_gage_study ${JSON.stringify(t1)}`)
+for (const absent of [undefined, null]) {
+  ok(JSON.stringify(m.type1_gage_study(readings, 10, 9, 11, absent, absent)) === JSON.stringify(t1),
+    `type1_gage_study options=${absent} differ from the omitted defaults`)
+}
+const t1b = m.type1_gage_study(readings, 10, 9, 11, 0.15, 4)
+ok(Math.abs(t1b.cg - t1.cg * 0.75 * 1.5) < 1e-12, 'tolerance_fraction 0.15 and sigma_multiple 4 scale Cg by K and 1/L')
+const t1c = m.type1_gage_study(readings, 9.5, 9, 11)
+ok(t1c.cgk < 0 && t1c.percent_var_repeatability_and_bias === null,
+  `a bias that fills the band has no repeatability-and-bias percentage: ${JSON.stringify(t1c)}`)
+const badLimits = refusal(() => m.type1_gage_study(readings, 10, 11, 9))
+ok(badLimits && badLimits.code === 'invalid_option' && badLimits.parameter === 'usl',
+  `limits reversed: ${badLimits ? badLimits.code + ' ' + badLimits.parameter : 'no error'}`)
+const badFraction = refusal(() => m.type1_gage_study(readings, 10, 9, 11, 0))
+ok(badFraction && badFraction.code === 'parameter_out_of_range' && badFraction.parameter === 'tolerance_fraction' &&
+  badFraction.exclusive_min === 0 && badFraction.max === 1 && badFraction.got === 0,
+  `tolerance_fraction 0: ${badFraction ? badFraction.code + ' ' + badFraction.parameter : 'no error'}`)
+const flat1 = refusal(() => m.type1_gage_study([2, 2, 2], 2, 0, 4))
+ok(flat1 && flat1.code === 'degenerate_data' && flat1.parameter === 'measurements',
+  `equal readings: ${flat1 ? flat1.code + ' ' + flat1.parameter : 'no error'}`)
+const nanRef = refusal(() => m.type1_gage_study(readings, Number.NaN, 9, 11))
+ok(nanRef && nanRef.code === 'value_not_finite' && nanRef.parameter === 'reference',
+  `NaN reference: ${nanRef ? nanRef.code + ' ' + nanRef.parameter : 'no error'}`)
+
 console.log(`binding behaviour gate: ok (${checks} checks)`)

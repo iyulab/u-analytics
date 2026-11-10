@@ -1685,6 +1685,73 @@
       }
     },
     {
+      "id": "type1_gage_study",
+      "summary": "A Type 1 gage study: repeated measurements of one reference part give the bias, the repeatability and the capability indices Cg and Cgk against the tolerance, with the t test of the bias.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/type1_gage_study.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/type1_gage_study.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The study reproduces the worked example of a published Type 1 gage study (50 readings of a 12.306 reference, limits 12.285 and 12.335, 20 % and 6 standard deviations): average, standard deviation, bias, t statistic, p-value, Cg, Cgk and both percentages.",
+            "reference_kind": "literature",
+            "reference": "BPI Consulting, LLC (2024), Type 1 Gage Study (SPC for Excel); Minitab, LLC, Methods and formulas for Type 1 Gage Study",
+            "method": "compares each statistic with the value the publication prints, at the precision it prints",
+            "tolerance": "half a unit of the last printed digit",
+            "test": "tests/type1_reference.rs::reproduces_the_published_example"
+          },
+          {
+            "claim": "Cg, Cgk, the bias, the t statistic and its two-sided p-value agree with an independent computation from the definitions, for the default 20 % and 6 standard deviations and for 15 % / 4, 10 % / 5.15 and 25 % / 6, including p-values near 1e-40 and 1e-74.",
+            "reference_kind": "reference_implementation",
+            "reference": "NumPy 2 (std with ddof=1) and SciPy 1.17.1 (scipy.stats.ttest_1samp); the two-sided p-value cross-checked with the regularised incomplete beta function of mpmath at 50 digits",
+            "method": "compares every statistic of the result with the reference's for each case of the reference table",
+            "tolerance": "relative 1e-12 for Cg, 1e-10 for Cgk and t, 1e-9 for p asserted",
+            "test": "tests/type1_reference.rs::matches_the_independent_computation"
+          },
+          {
+            "claim": "The indices are unchanged when data, reference and limits are multiplied by one positive constant and when one constant is added to all of them.",
+            "reference_kind": "literature",
+            "reference": "The definitions: Cg and Cgk are ratios of lengths, and the t statistic is location- and scale-free",
+            "method": "recomputes each reference case after scaling by powers of two and after shifting, and compares with the unscaled result",
+            "tolerance": "relative 1e-12 under scaling, 1e-7 under shifting (the means are differences of close numbers)",
+            "test": "tests/type1_reference.rs::the_indices_are_scale_equivariant"
+          }
+        ],
+        "limits": [
+          "The multipliers are parameters: the defaults (20 % of the tolerance, 6 standard deviations) are Minitab's and the usual ones, other editions of the procedure quote other values, and this operation does not assert which value any one standard prescribes.",
+          "The measurement-uncertainty statistics of VDA 5 (u_MS, %QMS) are a different analysis and are not computed.",
+          "The study needs two sided specification limits; a one-sided tolerance (an upper limit and a natural zero) is not supported.",
+          "The t test assumes the readings are independent and normal."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
       "id": "mann_whitney_u_test",
       "summary": "The Mann-Whitney U test by the normal approximation with tie correction.",
       "input": {

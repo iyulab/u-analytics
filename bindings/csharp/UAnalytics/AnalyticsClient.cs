@@ -487,6 +487,30 @@ public sealed class AnalyticsClient : IDisposable
             ("confidence", Request.Num("confidence", confidence)),
             ("sided", Request.Option(sided, AnalyticsJson.Default.Sided)));
 
+    /// <summary>
+    /// Type 1 gage study: the capability of a measurement device from repeated
+    /// <paramref name="measurements"/> of one reference part whose true value is
+    /// <paramref name="reference"/>, against the specification limits <paramref name="lsl"/> and
+    /// <paramref name="usl"/> (tolerance <c>T = usl − lsl</c>). With the mean <c>x̄</c> and standard
+    /// deviation <c>s</c>: <c>Bias = x̄ − reference</c>, <c>Cg = K·T / (L·s)</c> and
+    /// <c>Cgk = (K·T/2 − |Bias|) / (L·s/2)</c> for <c>K = </c><paramref name="toleranceFraction"/> and
+    /// <c>L = </c><paramref name="sigmaMultiple"/>, with the one-sample t test of <c>Bias = 0</c>. The
+    /// defaults — 20 % of the tolerance and 6 standard deviations — are Minitab's
+    /// (<c>Cg = 0.2·T / 6s</c>, <c>Cgk = (0.1·T − |Bias|) / 3s</c>); other editions of the procedure
+    /// quote other values, which are a setting here. 1.33 is the customary benchmark for both.
+    /// At least 2 measurements, not all equal; <c>lsl &lt; usl</c>;
+    /// <paramref name="toleranceFraction"/> in (0, 1], <c>null</c>: 0.2;
+    /// <paramref name="sigmaMultiple"/> above 0, <c>null</c>: 6.
+    /// </summary>
+    public Type1GageResult Type1GageStudy(double[] measurements, double reference, double lsl, double usl,
+        double? toleranceFraction = null, double? sigmaMultiple = null)
+        => Call(NativeInterop.uanalytics_type1_gage_study, AnalyticsJson.Default.Type1GageResult,
+            ("measurements", Request.Nums("measurements", measurements)),
+            ("reference", Request.Num("reference", reference)),
+            ("lsl", Request.Num("lsl", lsl)), ("usl", Request.Num("usl", usl)),
+            ("tolerance_fraction", Request.Num("tolerance_fraction", toleranceFraction)),
+            ("sigma_multiple", Request.Num("sigma_multiple", sigmaMultiple)));
+
     /// <summary>Jarque-Bera normality test: <c>statistic</c>, <c>df</c>, <c>p_value</c>.</summary>
     public TestResult JarqueBeraTest(double[] data)
         => Call(NativeInterop.uanalytics_jarque_bera_test, AnalyticsJson.Default.TestResult,

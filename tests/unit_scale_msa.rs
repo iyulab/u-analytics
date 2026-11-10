@@ -2,6 +2,7 @@
 //! measured in another unit: a gage in metres reads micrometres of variation,
 //! so the variance the study works with is far below any fixed number.
 
+use u_analytics::msa::type1::{type1_gage_study, Type1Options};
 use u_analytics::msa::{gage_rr_anova, GageRRInput};
 
 const SCALES: [f64; 7] = [1e-12, 1e-9, 1e-6, 1e-3, 1e3, 1e6, 1e9];
@@ -70,5 +71,45 @@ fn the_anova_study_gives_the_same_verdict_in_any_unit() {
             got.interaction_significant, base.interaction_significant,
             "interaction at {k:e}"
         );
+    }
+}
+
+/// A Type 1 study of one part measured in another unit: the capability
+/// indices, the t statistic and its p-value are dimensionless.
+#[test]
+fn a_type1_study_gives_the_same_indices_in_any_unit() {
+    let readings: Vec<f64> = (0..30)
+        .map(|i| 20.004 + 0.0012 * ((i * 7 % 11) as f64 - 5.0) / 5.0)
+        .collect();
+    let run = |k: f64| {
+        let scaled: Vec<f64> = readings.iter().map(|v| v * k).collect();
+        type1_gage_study(
+            &scaled,
+            20.002 * k,
+            19.95 * k,
+            20.05 * k,
+            &Type1Options::default(),
+        )
+        .expect("a study")
+    };
+    let base = run(1.0);
+    for k in SCALES {
+        let got = run(k);
+        for (what, a, b) in [
+            ("Cg", got.cg, base.cg),
+            ("Cgk", got.cgk, base.cgk),
+            ("t", got.t_statistic, base.t_statistic),
+            ("p", got.p_value, base.p_value),
+            (
+                "%Var",
+                got.percent_var_repeatability,
+                base.percent_var_repeatability,
+            ),
+        ] {
+            assert!(
+                (a - b).abs() <= 1e-9 * b.abs().max(1e-300),
+                "{what} at {k:e}: {a} vs {b}"
+            );
+        }
     }
 }

@@ -22,7 +22,7 @@
 //! - [`distribution`] — Distribution analysis (ECDF, histogram bins, QQ-plot, KS test)
 //! - [`testing`] — Hypothesis testing (t-tests, ANOVA, chi-squared, normality)
 //! - [`error`] — Refusals shared by more than one module ([`error::TimeSeriesError`])
-//! - [`msa`] — Measurement System Analysis (Gage R&R, ANOVA method)
+//! - [`msa`] — Measurement System Analysis (Gage R&R, ANOVA method; Type 1 gage study, `Cg` and `Cgk`)
 //!
 //! ## Design Philosophy
 //!

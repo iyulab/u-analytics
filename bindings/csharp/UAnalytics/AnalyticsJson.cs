@@ -39,6 +39,7 @@ namespace UAnalytics;
 [JsonSerializable(typeof(TestResult))]
 [JsonSerializable(typeof(EquivalenceResult))]
 [JsonSerializable(typeof(ToleranceIntervalResult))]
+[JsonSerializable(typeof(Type1GageResult))]
 [JsonSerializable(typeof(ShapiroWilkResult))]
 [JsonSerializable(typeof(AndersonDarlingResult))]
 [JsonSerializable(typeof(AdfResult))]

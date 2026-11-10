@@ -1097,6 +1097,20 @@ struct ToleranceIntervalReq {
     sided: String,
 }
 
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Type1GageStudyReq {
+    measurements: Vec<f64>,
+    reference: f64,
+    lsl: f64,
+    usl: f64,
+    #[serde(default)]
+    tolerance_fraction: Option<f64>,
+    #[serde(default)]
+    sigma_multiple: Option<f64>,
+}
+
 wire_export!(
     /// One-sample t test of `data` against `mu0`: → `{statistic, df, p_value}`, the WebAssembly binding's result.
     uanalytics_one_sample_t_test,
@@ -1184,6 +1198,25 @@ wire_export!(
     uanalytics_tolerance_interval,
     ToleranceIntervalReq,
     |r| crate::wire::tolerance::tolerance_interval_dto(&r.data, r.coverage, r.confidence, &r.sided)
+);
+
+wire_export!(
+    /// Type 1 gage study of repeated measurements of one reference part: `{measurements,
+    /// reference, lsl, usl, tolerance_fraction?, sigma_multiple?}` → `{n, mean, std_dev, bias,
+    /// study_variation, cg, cgk, percent_var_repeatability,
+    /// percent_var_repeatability_and_bias, t_statistic, df, p_value}`, the WebAssembly
+    /// binding's result. `tolerance_fraction` in (0, 1], default 0.2; `sigma_multiple` above 0,
+    /// default 6; `percent_var_repeatability_and_bias` is `null` when `cgk <= 0`.
+    uanalytics_type1_gage_study,
+    Type1GageStudyReq,
+    |r| crate::wire::type1_gage::type1_gage_study_dto(
+        &r.measurements,
+        r.reference,
+        r.lsl,
+        r.usl,
+        r.tolerance_fraction,
+        r.sigma_multiple
+    )
 );
 
 wire_export!(
@@ -1957,6 +1990,89 @@ mod tests {
             (code, c.as_deref(), p.as_deref()),
             (-2, Some("malformed_input"), Some("sided")),
             "{b}"
+        );
+    }
+
+    #[test]
+    fn type1_gage_study_round_trips_with_the_wasm_codes() {
+        let (code, b) = call(
+            uanalytics_type1_gage_study,
+            r#"{"measurements": [10.02, 9.98, 10.05, 10.01, 9.97, 10.03, 10.0, 10.04],
+                "reference": 10.0, "lsl": 9.0, "usl": 11.0}"#,
+        );
+        assert_eq!(code, 0, "{b}");
+        assert_eq!(b["n"].as_u64(), Some(8));
+        assert_eq!(b["df"].as_f64(), Some(7.0));
+        let (cg, cgk, s, bias) = (
+            b["cg"].as_f64().unwrap(),
+            b["cgk"].as_f64().unwrap(),
+            b["std_dev"].as_f64().unwrap(),
+            b["bias"].as_f64().unwrap(),
+        );
+        assert!((cg - 0.4 / (6.0 * s)).abs() < 1e-12, "{b}");
+        assert!((cgk - (0.2 - bias.abs()) / (3.0 * s)).abs() < 1e-12, "{b}");
+        // The options are optional and change the answer.
+        let (code, other) = call(
+            uanalytics_type1_gage_study,
+            r#"{"measurements": [10.02, 9.98, 10.05, 10.01, 9.97, 10.03, 10.0, 10.04],
+                "reference": 10.0, "lsl": 9.0, "usl": 11.0,
+                "tolerance_fraction": 0.15, "sigma_multiple": 4}"#,
+        );
+        assert_eq!(code, 0, "{other}");
+        assert!((other["cg"].as_f64().unwrap() - cg * 0.75 * 1.5).abs() < 1e-12);
+        // A bias that fills the band leaves no repeatability-and-bias percentage: `null`.
+        let (code, b) = call(
+            uanalytics_type1_gage_study,
+            r#"{"measurements": [10.02, 9.98, 10.05, 10.01], "reference": 9.5,
+                "lsl": 9.0, "usl": 11.0}"#,
+        );
+        assert_eq!(code, 0, "{b}");
+        assert!(b["cgk"].as_f64().unwrap() < 0.0);
+        assert!(b["percent_var_repeatability_and_bias"].is_null(), "{b}");
+        // Refusals carry the WebAssembly codes.
+        let refuse = |request: &str| {
+            let (code, b) = call(uanalytics_type1_gage_study, request);
+            assert_eq!(code, -3, "{b}");
+            b
+        };
+        let b = refuse(r#"{"measurements": [1], "reference": 1, "lsl": 0, "usl": 2}"#);
+        assert_eq!(
+            (
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["got"].as_f64()
+            ),
+            (Some("insufficient_data"), Some("measurements"), Some(1.0))
+        );
+        let b = refuse(r#"{"measurements": [1, 2, 3], "reference": 1, "lsl": 2, "usl": 0}"#);
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("invalid_option"), Some("usl"))
+        );
+        let b = refuse(
+            r#"{"measurements": [1, 2, 3], "reference": 1, "lsl": 0, "usl": 2,
+                "tolerance_fraction": 0}"#,
+        );
+        assert_eq!(
+            (
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["exclusive_min"].as_f64(),
+                b["max"].as_f64(),
+                b["got"].as_f64()
+            ),
+            (
+                Some("parameter_out_of_range"),
+                Some("tolerance_fraction"),
+                Some(0.0),
+                Some(1.0),
+                Some(0.0)
+            )
+        );
+        let b = refuse(r#"{"measurements": [2, 2, 2], "reference": 2, "lsl": 0, "usl": 4}"#);
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("degenerate_data"), Some("measurements"))
         );
     }
 
