@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-11-14
+
+The .NET client is `UAnalytics` 0.30.0.
+
 ### Added
 
 - `spc::short_run`: charts for a process that runs in groups (a part number, a recipe), each group with a target and a spread of its
