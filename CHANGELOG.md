@@ -8,6 +8,20 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- `spc::hotelling`: Hotelling's T² control chart for individual observations of correlated variables, in the Rust API (the
+  WebAssembly, C ABI and .NET surfaces follow). `phase_i(data, alpha)` charts `m` historical rows against their own mean and
+  covariance with the exact Beta limit `(m − 1)²/m · B⁻¹(1 − α; p/2, (m − p − 1)/2)` (Tracy, Young & Mason 1992; needs
+  `m > p + 1`); `phase_ii(observations, estimates, alpha)` charts new rows against estimates from `m` earlier ones with the exact F limit
+  `p(m + 1)(m − 1)/(m(m − p)) · F⁻¹(1 − α; p, m − p)` (needs `m > p`); `estimate_from` takes the estimates of a cleaned Phase I data set,
+  and `phase_i_limit` / `phase_ii_limit` give the limits alone. `T²` is the squared Mahalanobis distance from a Cholesky
+  factorisation of the covariance; a singular covariance (a constant variable, one that is a linear combination of others, or
+  collinear to rounding) is `HotellingError::Degenerate` rather than a meaningless number. The tests check `T²` against a
+  Gaussian-elimination solve of the definition, that `p = 1` is the squared z-score, invariance under an affine map of the variables,
+  that each limit is the `1 − α` quantile of its distribution, the arcsine case (`m = 3`, `p = 1`) and the in-control signal rate.
+  MEWMA is not part of this cut.
+
 ## [0.36.0] - 2026-11-14
 
 The .NET client is `UAnalytics` 0.30.0.

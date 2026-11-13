@@ -22,6 +22,11 @@
 //! - [`standardized_p_chart`], [`standardized_u_chart`] — P and U points against
 //!   the centre of each point's own group
 //!
+//! # Multivariate Charts
+//!
+//! - [`hotelling`] — Hotelling's T² for individual observations of correlated variables,
+//!   Phase I (exact Beta limit) and Phase II (exact F limit)
+//!
 //! # Run Rules
 //!
 //! - [`RuleSet`] — any subset of the tests; [`RuleSet::shewhart`] (the 3-sigma
@@ -38,6 +43,7 @@
 
 mod attributes;
 mod chart;
+pub mod hotelling;
 mod rules;
 mod short_run;
 mod variables;
