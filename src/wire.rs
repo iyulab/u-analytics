@@ -6702,6 +6702,551 @@ pub(crate) mod type1_gage {
     }
 }
 
+/// Short-run charts (`crate::spc::short_run`): a process that runs in groups,
+/// charted on a scale common to all of them.
+///
+/// The group of each observation is a whole number indexing `targets` (and
+/// `spreads`, `centers`). Where a refusal is about one group rather than one
+/// row, its `index` is the group.
+pub(crate) mod short_run {
+    use super::*;
+    use crate::spc::{
+        deviation_chart, standardized_chart, standardized_p_chart, standardized_u_chart,
+        GroupStandard, RuleSet, ShortRunAttributeChart, ShortRunChart, ShortRunError,
+        ShortRunScale,
+    };
+
+    /// A variables short-run chart: an individuals-and-moving-range chart of
+    /// the transformed values, centred at 0.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct ShortRunChartDto {
+        /// `"deviation"` (`x - target`) or `"standardized"`
+        /// (`(x - target) / spread`).
+        #[cfg_attr(feature = "wasm", tsify(type = "\"deviation\" | \"standardized\""))]
+        pub(crate) scale: &'static str,
+        /// The group of each observation, in the order given.
+        pub(crate) groups: Vec<usize>,
+        pub(crate) i_cl: f64,
+        pub(crate) i_ucl: f64,
+        pub(crate) i_lcl: f64,
+        pub(crate) mr_cl: f64,
+        pub(crate) mr_ucl: f64,
+        pub(crate) mr_lcl: f64,
+        /// Sigma of the plotted values: 1 for a standardized chart, the given
+        /// or moving-range estimate for a deviation chart.
+        pub(crate) sigma_hat: f64,
+        /// The spread used for each group; `null` for a group no observation
+        /// names. Empty for a deviation chart, whose spread is shared.
+        pub(crate) group_spreads: Vec<Option<f64>>,
+        /// The plotted values with their run-test violations.
+        pub(crate) i_points: Vec<ChartPointDto>,
+        /// Starts at index 1: the first value has no moving range.
+        pub(crate) mr_points: Vec<ChartPointDto>,
+        pub(crate) in_control: bool,
+    }
+
+    /// An attributes short-run chart: each sample against the centre of its
+    /// own group.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct ShortRunAttributeChartDto {
+        /// The group of each sample, in the order given.
+        pub(crate) groups: Vec<usize>,
+        /// The centre line used for each group; `null` for a group no sample
+        /// names.
+        pub(crate) group_centers: Vec<Option<f64>>,
+        /// Each with its own group's centre and limits, and `z`, the point on
+        /// the scale where every limit is +/-3.
+        pub(crate) points: Vec<AttributeChartPointDto>,
+        pub(crate) in_control: bool,
+    }
+
+    /// The `groups` argument: whole numbers >= 0, one per observation.
+    pub(crate) fn group_rows(
+        value: &serde_json::Value,
+        label: &str,
+    ) -> Result<Vec<usize>, WireError> {
+        Ok(count_rows(value, label)?
+            .into_iter()
+            .map(|g| usize::try_from(g).unwrap_or(usize::MAX))
+            .collect())
+    }
+
+    /// An optional array of numbers named `key` in the `options` object --
+    /// `spreads` or `centers`. Absent, `undefined` and `null` all mean none.
+    #[cfg_attr(not(feature = "wasm"), allow(dead_code))]
+    pub(crate) fn numbers_option(
+        options: Option<&serde_json::Value>,
+        key: &'static str,
+    ) -> Result<Option<Vec<f64>>, WireError> {
+        let malformed = |message: String| {
+            WireError::new(code::MALFORMED_INPUT, None, message).about(key.to_string())
+        };
+        match options.and_then(|o| o.get(key)) {
+            None | Some(serde_json::Value::Null) => Ok(None),
+            Some(v) => {
+                let items = v
+                    .as_array()
+                    .ok_or_else(|| malformed(format!("{key}: expected an array of numbers")))?;
+                items
+                    .iter()
+                    .enumerate()
+                    .map(|(i, x)| {
+                        x.as_f64().ok_or_else(|| {
+                            let mut e =
+                                malformed(format!("{key}[{i}]: expected a number, got {x}"));
+                            e.index = Some(i);
+                            e
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(Some)
+            }
+        }
+    }
+
+    /// Refuses an `options` object that is not an object, or holds a key the
+    /// function does not take.
+    #[cfg(feature = "wasm")]
+    fn check_option_keys(
+        options: &serde_json::Value,
+        allowed: &[&'static str],
+    ) -> Result<(), WireError> {
+        let Some(map) = options.as_object() else {
+            return Err(
+                WireError::new(code::MALFORMED_INPUT, None, "options: expected an object")
+                    .about("options"),
+            );
+        };
+        match map.keys().find(|k| !allowed.contains(&k.as_str())) {
+            Some(key) => Err(WireError::unknown_option("options", key, allowed)),
+            None => Ok(()),
+        }
+    }
+
+    /// What a variables short-run chart reads from its `options`.
+    #[cfg(feature = "wasm")]
+    pub(crate) struct VariablesOptions {
+        pub(crate) rules: RuleSet,
+        /// The deviation chart's fixed sigma.
+        pub(crate) sigma: Option<f64>,
+        /// The standardized chart's known spreads.
+        pub(crate) spreads: Option<Vec<f64>>,
+    }
+
+    /// The options of a variables short-run chart: `{ rules?, sigma? }` for
+    /// the deviation chart (`takes = "sigma"`), `{ rules?, spreads? }` for the
+    /// standardized one (`takes = "spreads"`); what is not given or not taken
+    /// is `None`.
+    #[cfg(feature = "wasm")]
+    pub(crate) fn variables_options(
+        options: Option<serde_json::Value>,
+        takes: &'static str,
+    ) -> Result<VariablesOptions, WireError> {
+        let Some(value) = options.filter(|v| !v.is_null()) else {
+            return Ok(VariablesOptions {
+                rules: RuleSet::default(),
+                sigma: None,
+                spreads: None,
+            });
+        };
+        check_option_keys(&value, &["rules", takes])?;
+        let sigma = if takes == "sigma" {
+            sigma_from_json(Some(&value))?
+        } else {
+            None
+        };
+        let spreads = if takes == "spreads" {
+            numbers_option(Some(&value), "spreads")?
+        } else {
+            None
+        };
+        let rules = rules_from_json(Some(value))?;
+        Ok(VariablesOptions {
+            rules,
+            sigma,
+            spreads,
+        })
+    }
+
+    /// The options of an attributes short-run chart: `{ centers? }`.
+    #[cfg(feature = "wasm")]
+    pub(crate) fn attributes_options(
+        options: Option<serde_json::Value>,
+    ) -> Result<Option<Vec<f64>>, WireError> {
+        let Some(value) = options.filter(|v| !v.is_null()) else {
+            return Ok(None);
+        };
+        check_option_keys(&value, &["centers"])?;
+        numbers_option(Some(&value), "centers")
+    }
+
+    /// A short-run refusal as the wire reports it. `rows` names the argument
+    /// the observations came in (`values` or `samples`), `known` the one a
+    /// known per-group quantity came in (`spreads` or `centers`).
+    fn refusal(error: ShortRunError, rows: &'static str, known: &'static str) -> WireError {
+        let message = error.to_string();
+        match error {
+            ShortRunError::LengthMismatch {
+                parameter,
+                expected,
+                got,
+            } => WireError::new(code::DIMENSION_MISMATCH, None, message)
+                .about(parameter)
+                .with("expected", Detail::Num(expected as f64))
+                .with("got", Detail::Num(got as f64)),
+            ShortRunError::NonFinite { parameter, index } => {
+                WireError::new(code::VALUE_NOT_FINITE, Some(index), message).about(parameter)
+            }
+            ShortRunError::GroupOutOfRange {
+                index,
+                group,
+                groups,
+            } => {
+                let mut e = WireError::out_of_range(
+                    "groups",
+                    Bound::Closed(0.0),
+                    Bound::Closed(groups.saturating_sub(1) as f64),
+                    group as f64,
+                    message,
+                );
+                e.index = Some(index);
+                e
+            }
+            ShortRunError::InvalidStandard { group, error } => {
+                use crate::spc::ControlChartError as E;
+                match error {
+                    E::InvalidStandard {
+                        parameter,
+                        got,
+                        min,
+                        exclusive_min,
+                        max,
+                        exclusive_max,
+                        ..
+                    } => {
+                        let name = if parameter == "sigma" { "sigma" } else { known };
+                        let mut e = WireError::out_of_range(
+                            name,
+                            Bound::from_pair(min, exclusive_min),
+                            Bound::from_pair(max, exclusive_max),
+                            got,
+                            message,
+                        );
+                        e.index = group;
+                        e
+                    }
+                    other => WireError::chart(known, group, &other),
+                }
+            }
+            ShortRunError::Sample { index, error } => WireError::chart(rows, Some(index), &error),
+            ShortRunError::TooFew { group, min, got } => {
+                let mut e = WireError::too_few(rows, min, got, message);
+                e.index = group;
+                e
+            }
+            ShortRunError::Degenerate { group } => {
+                let mut e = WireError::new(code::DEGENERATE_DATA, Some(group), message);
+                e.parameter = Some(rows.into());
+                e
+            }
+        }
+    }
+
+    fn chart_dto(chart: ShortRunChart) -> ShortRunChartDto {
+        let in_control = chart.is_in_control();
+        ShortRunChartDto {
+            scale: match chart.scale {
+                ShortRunScale::Deviation => "deviation",
+                ShortRunScale::Standardized => "standardized",
+            },
+            groups: chart.groups,
+            i_cl: chart.limits.cl,
+            i_ucl: chart.limits.ucl,
+            i_lcl: chart.limits.lcl,
+            mr_cl: chart.mr_limits.cl,
+            mr_ucl: chart.mr_limits.ucl,
+            mr_lcl: chart.mr_limits.lcl,
+            sigma_hat: chart.sigma_hat,
+            group_spreads: chart.group_spreads,
+            i_points: point_dtos(&chart.points),
+            mr_points: point_dtos(&chart.mr_points),
+            in_control,
+        }
+    }
+
+    fn attribute_dto(chart: ShortRunAttributeChart) -> ShortRunAttributeChartDto {
+        let in_control = chart.is_in_control();
+        ShortRunAttributeChartDto {
+            groups: chart.groups,
+            group_centers: chart.group_centers,
+            points: attribute_point_dtos(&chart.points),
+            in_control,
+        }
+    }
+
+    fn non_empty(items: &[f64], parameter: &'static str) -> Result<(), WireError> {
+        if items.is_empty() {
+            Err(WireError::empty_input(parameter))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Variable-aim chart: `x - target` on one I-MR chart centred at 0.
+    pub(crate) fn deviation_dto(
+        values: &[f64],
+        groups: &[usize],
+        targets: &[f64],
+        rules: RuleSet,
+        sigma: Option<f64>,
+    ) -> Result<ShortRunChartDto, WireError> {
+        non_empty(targets, "targets")?;
+        deviation_chart(values, groups, targets, rules, sigma)
+            .map(chart_dto)
+            .map_err(|e| refusal(e, "values", "spreads"))
+    }
+
+    /// Standardized (Z-MR) chart: `(x - target) / spread` on one I-MR chart
+    /// centred at 0 with sigma 1. `spreads` known per group, or estimated.
+    pub(crate) fn standardized_dto(
+        values: &[f64],
+        groups: &[usize],
+        targets: &[f64],
+        spreads: Option<&[f64]>,
+        rules: RuleSet,
+    ) -> Result<ShortRunChartDto, WireError> {
+        non_empty(targets, "targets")?;
+        let spreads = spreads.map_or(GroupStandard::Estimated, GroupStandard::Known);
+        standardized_chart(values, groups, targets, spreads, rules)
+            .map(chart_dto)
+            .map_err(|e| refusal(e, "values", "spreads"))
+    }
+
+    /// Standardized P chart: each `[defectives, sample_size]` sample against
+    /// the proportion of its own group.
+    pub(crate) fn standardized_p_dto(
+        samples: &[(u64, u64)],
+        groups: &[usize],
+        centers: Option<&[f64]>,
+    ) -> Result<ShortRunAttributeChartDto, WireError> {
+        if let Some(centers) = centers {
+            non_empty(centers, "centers")?;
+        }
+        let (defectives, sizes): (Vec<u64>, Vec<u64>) = samples.iter().copied().unzip();
+        let centers = centers.map_or(GroupStandard::Estimated, GroupStandard::Known);
+        standardized_p_chart(&defectives, &sizes, groups, centers)
+            .map(attribute_dto)
+            .map_err(|e| refusal(e, "samples", "centers"))
+    }
+
+    /// Standardized U chart: each `[defects, units]` sample against the rate of
+    /// its own group.
+    pub(crate) fn standardized_u_dto(
+        samples: &[(u64, f64)],
+        groups: &[usize],
+        centers: Option<&[f64]>,
+    ) -> Result<ShortRunAttributeChartDto, WireError> {
+        if let Some(centers) = centers {
+            non_empty(centers, "centers")?;
+        }
+        let (defects, units): (Vec<u64>, Vec<f64>) = samples.iter().copied().unzip();
+        let centers = centers.map_or(GroupStandard::Estimated, GroupStandard::Known);
+        standardized_u_chart(&defects, &units, groups, centers)
+            .map(attribute_dto)
+            .map_err(|e| refusal(e, "samples", "centers"))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use serde_json::json;
+
+        fn rules() -> RuleSet {
+            RuleSet::default()
+        }
+
+        fn site(e: &WireError) -> (&'static str, Option<&str>, Option<usize>) {
+            (e.code, e.parameter.as_deref(), e.index)
+        }
+
+        #[test]
+        fn deviation_reports_the_crate_chart() {
+            let values = [10.2, 20.1, 9.9, 19.8, 10.1, 20.2];
+            let groups = [0, 1, 0, 1, 0, 1];
+            let dto = deviation_dto(&values, &groups, &[10.0, 20.0], rules(), None).unwrap();
+            let core = deviation_chart(&values, &groups, &[10.0, 20.0], rules(), None).unwrap();
+            assert_eq!(dto.scale, "deviation");
+            assert_eq!(dto.groups, groups);
+            assert_eq!(
+                (dto.i_cl, dto.i_ucl, dto.i_lcl),
+                (0.0, core.limits.ucl, core.limits.lcl)
+            );
+            assert_eq!(dto.sigma_hat, core.sigma_hat);
+            assert!(dto.group_spreads.is_empty());
+            assert_eq!(dto.i_points.len(), 6);
+            assert_eq!(dto.mr_points.len(), 5);
+            assert_eq!(dto.mr_points[0].index, 1);
+            assert!(dto.in_control);
+        }
+
+        #[test]
+        fn standardized_known_and_estimated() {
+            let values = [10.2, 20.1, 10.0, 19.9, 10.1, 20.1];
+            let groups = [0, 1, 0, 1, 0, 1];
+            let known =
+                standardized_dto(&values, &groups, &[10.0, 20.0], Some(&[0.2, 0.1]), rules())
+                    .unwrap();
+            assert_eq!(known.scale, "standardized");
+            assert_eq!((known.i_ucl, known.i_cl, known.i_lcl), (3.0, 0.0, -3.0));
+            assert_eq!(known.sigma_hat, 1.0);
+            assert_eq!(known.group_spreads, vec![Some(0.2), Some(0.1)]);
+            assert!((known.i_points[0].value - 1.0).abs() < 1e-12);
+
+            let estimated = standardized_dto(
+                &[10.0, 20.0, 10.2, 20.4, 10.1, 20.2],
+                &groups,
+                &[10.0, 20.0],
+                None,
+                rules(),
+            )
+            .unwrap();
+            assert!(estimated.group_spreads.iter().all(Option::is_some));
+        }
+
+        #[test]
+        fn attributes_report_the_group_centres() {
+            let p = standardized_p_dto(
+                &[(10, 100), (25, 50), (20, 100)],
+                &[0, 1, 0],
+                Some(&[0.1, 0.5]),
+            )
+            .unwrap();
+            assert_eq!(p.group_centers, vec![Some(0.1), Some(0.5)]);
+            assert_eq!(p.points[0].z, Some(0.0));
+            assert!(p.points[2].out_of_control);
+            assert!(!p.in_control);
+
+            let u =
+                standardized_u_dto(&[(4, 2.0), (30, 3.0)], &[0, 1], Some(&[2.0, 10.0])).unwrap();
+            assert_eq!(u.points[1].z, Some(0.0));
+            assert!(u.in_control);
+        }
+
+        #[test]
+        fn each_refusal_names_its_reason_parameter_and_index() {
+            let r = rules();
+            let t = [0.0, 1.0];
+            let e = deviation_dto(&[1.0, 2.0], &[0], &t, r, None).unwrap_err();
+            assert_eq!(site(&e), ("dimension_mismatch", Some("groups"), None));
+            let e = deviation_dto(&[1.0, 2.0], &[0, 2], &t, r, None).unwrap_err();
+            assert_eq!(
+                site(&e),
+                ("parameter_out_of_range", Some("groups"), Some(1))
+            );
+            let e = deviation_dto(&[1.0, 2.0], &[0, 1], &[], r, None).unwrap_err();
+            assert_eq!(site(&e), ("empty_input", Some("targets"), None));
+            let e = deviation_dto(&[1.0], &[0], &t, r, None).unwrap_err();
+            assert_eq!(site(&e), ("insufficient_data", Some("values"), None));
+            let e = deviation_dto(&[1.0, 2.0], &[0, 1], &t, r, Some(0.0)).unwrap_err();
+            assert_eq!(site(&e), ("parameter_out_of_range", Some("sigma"), None));
+            let e = standardized_dto(&[1.0, 2.0], &[0, 1], &t, Some(&[1.0, 0.0]), r).unwrap_err();
+            assert_eq!(
+                site(&e),
+                ("parameter_out_of_range", Some("spreads"), Some(1))
+            );
+            let e = standardized_dto(&[1.0, 2.0, 3.0], &[0, 1, 1], &t, None, r).unwrap_err();
+            assert_eq!(site(&e), ("insufficient_data", Some("values"), Some(0)));
+            let e = standardized_dto(
+                &[1.0, 1.0, 1.0, 5.0, 6.0, 5.5],
+                &[0, 0, 0, 1, 1, 1],
+                &t,
+                None,
+                r,
+            )
+            .unwrap_err();
+            assert_eq!(site(&e), ("degenerate_data", Some("values"), Some(0)));
+            let e = standardized_p_dto(&[(1, 10)], &[0], Some(&[1.0])).unwrap_err();
+            assert_eq!(
+                site(&e),
+                ("parameter_out_of_range", Some("centers"), Some(0))
+            );
+            let e = standardized_p_dto(&[(11, 10), (1, 10)], &[0, 0], None).unwrap_err();
+            assert_eq!(site(&e), ("defectives_exceed_sample", None, Some(0)));
+            let e = standardized_u_dto(&[(1, 0.0)], &[0], Some(&[1.0])).unwrap_err();
+            assert_eq!(site(&e), ("units_not_positive", None, Some(0)));
+            let e = standardized_u_dto(&[(0, 1.0), (0, 1.0)], &[0, 0], None).unwrap_err();
+            assert_eq!(site(&e), ("degenerate_data", Some("samples"), Some(0)));
+        }
+
+        #[cfg(feature = "wasm")]
+        #[test]
+        fn options_take_only_their_own_keys() {
+            let o = variables_options(Some(json!({ "sigma": 0.5, "rules": "nelson" })), "sigma")
+                .unwrap();
+            assert_eq!(o.sigma, Some(0.5));
+            assert_eq!(o.spreads, None);
+            assert_eq!(o.rules, RuleSet::nelson());
+            let o = variables_options(Some(json!({ "spreads": [0.2, 0.1] })), "spreads").unwrap();
+            assert_eq!(o.spreads, Some(vec![0.2, 0.1]));
+            assert_eq!(o.sigma, None);
+            let none = variables_options(None, "sigma").unwrap();
+            assert_eq!((none.sigma, none.spreads), (None, None));
+            // A key the function does not take is refused, not ignored.
+            let e = variables_options(Some(json!({ "spreads": [1.0] })), "sigma")
+                .err()
+                .unwrap();
+            assert_eq!(site(&e), ("unknown_option", Some("options"), None));
+            let e = variables_options(Some(json!({ "sigma": 1.0 })), "spreads")
+                .err()
+                .unwrap();
+            assert_eq!(site(&e), ("unknown_option", Some("options"), None));
+            let e = variables_options(Some(json!([1])), "sigma").err().unwrap();
+            assert_eq!(site(&e), ("malformed_input", Some("options"), None));
+            assert_eq!(
+                attributes_options(Some(json!({ "centers": [0.1] }))).unwrap(),
+                Some(vec![0.1])
+            );
+            assert_eq!(attributes_options(Some(json!(null))).unwrap(), None);
+            let e = attributes_options(Some(json!({ "rules": "nelson" })))
+                .err()
+                .unwrap();
+            assert_eq!(site(&e), ("unknown_option", Some("options"), None));
+        }
+
+        #[test]
+        fn groups_and_option_arrays_are_read_as_given() {
+            assert_eq!(
+                group_rows(&json!([0, 1, 2]), "groups").unwrap(),
+                vec![0, 1, 2]
+            );
+            for bad in [json!([0, -1]), json!([0, 1.5]), json!([0, "a"]), json!("x")] {
+                assert!(group_rows(&bad, "groups").is_err());
+            }
+            let e = group_rows(&json!([0, -1]), "groups").unwrap_err();
+            assert_eq!(site(&e), ("count_not_whole", Some("groups"), Some(1)));
+            assert_eq!(numbers_option(None, "spreads").unwrap(), None);
+            assert_eq!(
+                numbers_option(Some(&json!({ "spreads": null })), "spreads").unwrap(),
+                None
+            );
+            assert_eq!(
+                numbers_option(Some(&json!({ "spreads": [1, 2.5] })), "spreads").unwrap(),
+                Some(vec![1.0, 2.5])
+            );
+            let e = numbers_option(Some(&json!({ "spreads": [1, "x"] })), "spreads").unwrap_err();
+            assert_eq!(site(&e), ("malformed_input", Some("spreads"), Some(1)));
+            let e = numbers_option(Some(&json!({ "spreads": 3 })), "spreads").unwrap_err();
+            assert_eq!(site(&e), ("malformed_input", Some("spreads"), None));
+        }
+    }
+}
+
 /// Increments of a cumulative counter (`crate::counter`).
 pub(crate) mod counter {
     use super::*;

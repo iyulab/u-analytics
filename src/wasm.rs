@@ -47,6 +47,10 @@ use crate::wire::{
     SpectralResidualInputDto, StlInputDto, WireError,
 };
 use crate::wire::{
+    short_run::{
+        attributes_options, deviation_dto, group_rows, standardized_dto, standardized_p_dto,
+        standardized_u_dto, variables_options, VariablesOptions,
+    },
     tolerance::{tolerance_factor_value, tolerance_interval_dto},
     type1_gage::type1_gage_study_dto,
     Whole,
@@ -480,6 +484,207 @@ pub fn imr_chart(
     to_js(&imr_dto(values, rules, sigma).map_err(js_err)?)
 }
 
+/// Compute a variable-aim ("deviation from nominal") short-run chart.
+///
+/// A process that runs in groups -- a part number, a recipe -- has an aim of
+/// its own for each. Each observation is put on a scale common to all groups,
+/// `x - target`, and the deviations are charted on one I-MR chart centred at 0.
+/// The groups are assumed to vary alike; use [`short_run_standardized_chart`]
+/// when they do not.
+///
+/// # Input
+///
+/// - `values`: the observations in time order (need >= 2)
+/// - `groups`: one whole number per observation, the group it belongs to --
+///   an index into `targets`
+/// - `targets`: the aim of each group
+///
+/// # Options (optional fourth argument)
+///
+/// `{ rules?: RuleSetName | RunRule[], sigma?: number }` -- the run tests, and
+/// the sigma of the deviations fixed by an earlier study (otherwise estimated
+/// from their moving ranges).
+///
+/// # Errors
+///
+/// Throws an `Error` with `code`, `parameter` and `index`: `dimension_mismatch`
+/// (`groups`), `parameter_out_of_range` for a group beyond `targets` (`groups`,
+/// with the row as `index`) or a `sigma` that is not positive,
+/// `count_not_whole` (`groups`), `empty_input` (`targets`),
+/// `insufficient_data` below two values, `unknown_option`.
+///
+/// # Output JSON
+///
+/// `scale` (`"deviation"`), `groups`, `i_cl` (0), `i_ucl`, `i_lcl`, `mr_cl`,
+/// `mr_ucl`, `mr_lcl`, `sigma_hat`, `group_spreads` (empty), `i_points`,
+/// `mr_points` (starts at index 1), `in_control`. Mixed units cannot be
+/// detected: `values` and `targets` must be in one.
+#[wasm_bindgen(unchecked_return_type = "ShortRunChartDto")]
+pub fn short_run_deviation_chart(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] values: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[]")] groups: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] targets: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "ShortRunDeviationOptions | null")]
+    options: Option<JsValue>,
+) -> Result<JsValue, JsValue> {
+    let values = read_numbers(&values, "values").map_err(js_err)?;
+    let groups = read_groups(groups)?;
+    let targets = read_numbers(&targets, "targets").map_err(js_err)?;
+    let o = short_run_variables_options(options, "sigma")?;
+    to_js(&deviation_dto(&values, &groups, &targets, o.rules, o.sigma).map_err(js_err)?)
+}
+
+/// Compute a standardized (Z-MR) short-run chart.
+///
+/// Each observation is put on a scale common to all groups,
+/// `(x - target) / spread`, and charted on one I-MR chart centred at 0 with
+/// sigma 1, so the individuals limits are +/-3. The spread of a group is given
+/// (`options.spreads`) or estimated from the moving ranges of that group's own
+/// successive observations -- a range across two groups is never used; the
+/// group then needs at least 3 observations.
+///
+/// # Input
+///
+/// As [`short_run_deviation_chart`].
+///
+/// # Options (optional fourth argument)
+///
+/// `{ rules?: RuleSetName | RunRule[], spreads?: number[] }` -- `spreads`: the
+/// known spread (> 0) of each group, indexed like `targets`.
+///
+/// # Errors
+///
+/// As [`short_run_deviation_chart`], and `parameter_out_of_range` for a spread
+/// that is not positive (`spreads`, the group as `index`), `dimension_mismatch`
+/// (`spreads`), `insufficient_data` for a group with too few observations to
+/// estimate a spread (the group as `index`), `degenerate_data` for a group
+/// whose successive values are all equal (the group as `index`).
+///
+/// # Output JSON
+///
+/// As [`short_run_deviation_chart`], with `scale` `"standardized"`, `sigma_hat`
+/// 1 and `group_spreads` the spread used for each group (`null` for a group no
+/// observation names).
+#[wasm_bindgen(unchecked_return_type = "ShortRunChartDto")]
+pub fn short_run_standardized_chart(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] values: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[]")] groups: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] targets: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "ShortRunStandardizedOptions | null")]
+    options: Option<JsValue>,
+) -> Result<JsValue, JsValue> {
+    let values = read_numbers(&values, "values").map_err(js_err)?;
+    let groups = read_groups(groups)?;
+    let targets = read_numbers(&targets, "targets").map_err(js_err)?;
+    let o = short_run_variables_options(options, "spreads")?;
+    to_js(
+        &standardized_dto(&values, &groups, &targets, o.spreads.as_deref(), o.rules)
+            .map_err(js_err)?,
+    )
+}
+
+/// Compute a standardized P short-run chart: each sample's proportion against
+/// the proportion defective of its own group,
+/// `z = (p - p_g) / sqrt(p_g (1 - p_g) / n)`.
+///
+/// # Input
+///
+/// - `samples`: `[defectives, sample_size]` pairs, as for [`p_chart`]
+/// - `groups`: one whole number per sample, the group it belongs to
+///
+/// # Options (optional third argument)
+///
+/// `{ centers?: number[] }` -- the known proportion of each group, each
+/// strictly between 0 and 1, indexed by group. Omitted: estimated per group as
+/// its total defectives over its total inspected (at least 2 samples per
+/// group).
+///
+/// # Errors
+///
+/// As [`p_chart`], and `dimension_mismatch` (`groups`), `parameter_out_of_range`
+/// for a group beyond `centers` (`groups`) or a centre outside (0, 1)
+/// (`centers`, the group as `index`), `insufficient_data` for a group with one
+/// sample when centres are estimated, `degenerate_data` for an estimated centre
+/// of 0 or 1.
+///
+/// # Output JSON
+///
+/// `groups`, `group_centers`, `points` (as for [`p_chart`]: each with its own
+/// group's `cl`, limits and `z`), `in_control`.
+#[wasm_bindgen(unchecked_return_type = "ShortRunAttributeChartDto")]
+pub fn short_run_p_chart(
+    #[wasm_bindgen(unchecked_param_type = "[number, number][]")] samples: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[]")] groups: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "ShortRunAttributeOptions | null")]
+    options: Option<JsValue>,
+) -> Result<JsValue, JsValue> {
+    let json: serde_json::Value = from_js(samples, "samples")?;
+    let samples = count_pairs(&json, "samples").map_err(js_err)?;
+    let groups = read_groups(groups)?;
+    let centers = short_run_attributes_options(options)?;
+    to_js(&standardized_p_dto(&samples, &groups, centers.as_deref()).map_err(js_err)?)
+}
+
+/// Compute a standardized U short-run chart: each sample's defect rate against
+/// the rate of its own group, `z = (u - u_g) / sqrt(u_g / units)`.
+///
+/// # Input
+///
+/// - `samples`: `[defects, units]` pairs, as for [`u_chart`]
+/// - `groups`: one whole number per sample, the group it belongs to
+///
+/// # Options (optional third argument)
+///
+/// `{ centers?: number[] }` -- the known rate of each group (> 0), indexed by
+/// group. Omitted: estimated per group as its total defects over its total
+/// units (at least 2 samples per group).
+///
+/// # Errors
+///
+/// As [`short_run_p_chart`] and [`u_chart`].
+///
+/// # Output JSON
+///
+/// As [`short_run_p_chart`].
+#[wasm_bindgen(unchecked_return_type = "ShortRunAttributeChartDto")]
+pub fn short_run_u_chart(
+    #[wasm_bindgen(unchecked_param_type = "[number, number][]")] samples: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "number[]")] groups: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "ShortRunAttributeOptions | null")]
+    options: Option<JsValue>,
+) -> Result<JsValue, JsValue> {
+    let json: serde_json::Value = from_js(samples, "samples")?;
+    let samples = rate_pairs(&json, "samples").map_err(js_err)?;
+    let groups = read_groups(groups)?;
+    let centers = short_run_attributes_options(options)?;
+    to_js(&standardized_u_dto(&samples, &groups, centers.as_deref()).map_err(js_err)?)
+}
+
+/// The `groups` argument of the short-run charts.
+fn read_groups(groups: JsValue) -> Result<Vec<usize>, JsValue> {
+    let json: serde_json::Value = from_js(groups, "groups")?;
+    group_rows(&json, "groups").map_err(js_err)
+}
+
+fn short_run_variables_options(
+    options: Option<JsValue>,
+    takes: &'static str,
+) -> Result<VariablesOptions, JsValue> {
+    let value = match options {
+        Some(o) if !o.is_undefined() && !o.is_null() => Some(from_js(o, "options")?),
+        _ => None,
+    };
+    variables_options(value, takes).map_err(js_err)
+}
+
+fn short_run_attributes_options(options: Option<JsValue>) -> Result<Option<Vec<f64>>, JsValue> {
+    let value = match options {
+        Some(o) if !o.is_undefined() && !o.is_null() => Some(from_js(o, "options")?),
+        _ => None,
+    };
+    attributes_options(value).map_err(js_err)
+}
+
 /// Apply run tests to a series against control limits the caller supplies.
 ///
 /// The same engine the charts use, reachable on its own: for a statistic the
@@ -544,6 +749,18 @@ export interface UChartOptions {
 export interface LaneyUChartOptions {
     u_bar?: number | null;
     phi?: number | null;
+}
+/** The options of `short_run_deviation_chart`: the run tests, and the sigma of the deviations fixed by an earlier study — greater than 0. */
+export interface ShortRunDeviationOptions extends RuleOptions {
+    sigma?: number | null;
+}
+/** The options of `short_run_standardized_chart`: the run tests, and the known spread (> 0) of each group, indexed like `targets`. Omitted or `null`: estimated per group. */
+export interface ShortRunStandardizedOptions extends RuleOptions {
+    spreads?: number[] | null;
+}
+/** The options of `short_run_p_chart` and `short_run_u_chart`: the known centre line of each group (a proportion strictly between 0 and 1, a rate above 0), indexed by group. Omitted or `null`: estimated per group. */
+export interface ShortRunAttributeOptions {
+    centers?: number[] | null;
 }
 "#;
 
@@ -3995,6 +4212,30 @@ mod card_schema {
         }))
     }
 
+    /// `{ rules?, <field>? }`: the run tests and one per-group array (or number)
+    /// option of a short-run chart.
+    pub(super) fn rules_and(field: &str, value: serde_json::Value, description: &str) -> Schema {
+        let rules = rule_options().to_value()["properties"]["rules"].clone();
+        schema(json!({
+            "description": description,
+            "type": ["object", "null"],
+            "properties": { "rules": rules, field: value },
+            "additionalProperties": false
+        }))
+    }
+
+    /// `{ centers? }`: the known centre line of each group.
+    pub(super) fn centers_option(description: &str) -> Schema {
+        schema(json!({
+            "description": description,
+            "type": ["object", "null"],
+            "properties": {
+                "centers": { "anyOf": [{ "type": "array", "items": { "type": "number" } }, { "type": "null" }] }
+            },
+            "additionalProperties": false
+        }))
+    }
+
     /// A Phase I standard: the named fields, each a number or null.
     pub(super) fn standard(fields: &[&str], description: &str) -> Schema {
         let properties: serde_json::Map<String, serde_json::Value> = fields
@@ -4018,7 +4259,7 @@ mod engine_card_tests {
     use super::*;
     use crate::engine_card::{arg, optional, string_enum, Schemas};
     use crate::wire::{
-        counter, hypothesis, point_process, reliability, tolerance, type1_gage, AcfDto,
+        counter, hypothesis, point_process, reliability, short_run, tolerance, type1_gage, AcfDto,
         CapabilityDto, ChartPointDto, CorrelationMatrixDto, CusumDto, DistributionFitDto, EwmaDto,
         FixedLimitChartDto, GChartDto, GageRRAnovaResultDto, GageRRResultDto,
         GoodnessOfFitResultDto, ImrChartDto, KdeDto, LaneyPChartDto, LaneyUChartDto, PChartDto,
@@ -4050,6 +4291,58 @@ mod engine_card_tests {
             vec![arg("values", numbers()), rules()],
             s.of::<ImrChartDto>(),
         );
+        let groups = || arg("groups", s.of::<Vec<u64>>());
+        let per_group = serde_json::json!({ "anyOf": [{ "type": "array", "items": { "type": "number" } }, { "type": "null" }] });
+        s.op(
+            "short_run_deviation_chart",
+            vec![
+                arg("values", numbers()),
+                groups(),
+                arg("targets", numbers()),
+                optional(
+                    "options",
+                    card_schema::rules_and(
+                        "sigma",
+                        serde_json::json!({ "type": ["number", "null"] }),
+                        "The run tests, and the sigma of the deviations fixed by an earlier study.",
+                    ),
+                ),
+            ],
+            s.of::<short_run::ShortRunChartDto>(),
+        );
+        s.op(
+            "short_run_standardized_chart",
+            vec![
+                arg("values", numbers()),
+                groups(),
+                arg("targets", numbers()),
+                optional(
+                    "options",
+                    card_schema::rules_and(
+                        "spreads",
+                        per_group.clone(),
+                        "The run tests, and the known spread of each group; omitted, estimated per group.",
+                    ),
+                ),
+            ],
+            s.of::<short_run::ShortRunChartDto>(),
+        );
+        for name in ["short_run_p_chart", "short_run_u_chart"] {
+            s.op(
+                name,
+                vec![
+                    arg("samples", pairs()),
+                    groups(),
+                    optional(
+                        "options",
+                        card_schema::centers_option(
+                            "The known centre line of each group; omitted, estimated per group.",
+                        ),
+                    ),
+                ],
+                s.of::<short_run::ShortRunAttributeChartDto>(),
+            );
+        }
         s.op(
             "run_rules",
             vec![

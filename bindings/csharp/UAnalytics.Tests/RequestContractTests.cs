@@ -53,6 +53,8 @@ public class RequestContractTests
         return parts;
     }
 
+    private static int[] Alternating(int n) => [.. Enumerable.Range(0, n).Select(i => i % 2)];
+
     private static double[] Step() => [.. Enumerable.Range(0, 40).Select(i => (i < 20 ? 0.0 : 5.0) + 0.1 * ((i * 7) % 5 - 2))];
 
     private static double[] Walk()
@@ -76,6 +78,16 @@ public class RequestContractTests
         ["XbarRChart"] = c => c.XbarRChart(Subgroups, AllRules, sigma: 0.5),
         ["XbarSChart"] = c => c.XbarSChart(Subgroups, AllRules, sigma: 0.5),
         ["ImrChart"] = c => c.ImrChart(Series, AllRules, sigma: 0.5),
+        ["ShortRunDeviationChart"] = c => c.ShortRunDeviationChart(Series, Alternating(Series.Length), [10, 10], AllRules, sigma: 0.3),
+        ["ShortRunDeviationChart(Nelson)"] = c => c.ShortRunDeviationChart(Series, Alternating(Series.Length), [10, 10], RunRuleSet.Nelson),
+        ["ShortRunDeviationChart(Shewhart)"] = c => c.ShortRunDeviationChart(Series, Alternating(Series.Length), [10, 10], RunRuleSet.Shewhart),
+        ["ShortRunDeviationChart(WesternElectric)"] = c => c.ShortRunDeviationChart(Series, Alternating(Series.Length), [10, 10], RunRuleSet.WesternElectric),
+        ["ShortRunStandardizedChart"] = c => c.ShortRunStandardizedChart(Series, Alternating(Series.Length), [10, 10], AllRules, spreads: [0.3, 0.2]),
+        ["ShortRunStandardizedChart(Nelson)"] = c => c.ShortRunStandardizedChart(Series, Alternating(Series.Length), [10, 10], RunRuleSet.Nelson),
+        ["ShortRunStandardizedChart(Shewhart)"] = c => c.ShortRunStandardizedChart(Series, Alternating(Series.Length), [10, 10], RunRuleSet.Shewhart),
+        ["ShortRunStandardizedChart(WesternElectric)"] = c => c.ShortRunStandardizedChart(Series, Alternating(Series.Length), [10, 10], RunRuleSet.WesternElectric),
+        ["ShortRunPChart"] = c => c.ShortRunPChart([[3, 50], [5, 50], [2, 40], [4, 50]], [0, 1, 0, 1], centers: [0.08, 0.1]),
+        ["ShortRunUChart"] = c => c.ShortRunUChart([[3, 1.5], [5, 2], [2, 1], [6, 2.5]], [0, 1, 0, 1], centers: [2, 3]),
         ["RunRules"] = c => c.RunRules([0, 1, 4, 0.5, -0.2, 3.5], 3, 0, -3, AllRules),
         ["XbarRChart(Shewhart)"] = c => c.XbarRChart(Subgroups, RunRuleSet.Shewhart),
         ["XbarSChart(WesternElectric)"] = c => c.XbarSChart(Subgroups, RunRuleSet.WesternElectric),

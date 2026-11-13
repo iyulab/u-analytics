@@ -310,6 +310,208 @@ pub unsafe extern "C" fn uanalytics_imr_chart(
     })
 }
 
+/// `{ "values", "groups", "targets", "rules"?, "sigma"? }` for the variable-aim
+/// short-run chart. `groups` is one whole number per value, an index into
+/// `targets`; read as JSON numbers so a group that is not a whole number is
+/// refused with its row.
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ShortRunDeviationRequest {
+    values: Vec<f64>,
+    groups: serde_json::Value,
+    targets: Vec<f64>,
+    #[serde(default)]
+    rules: Option<serde_json::Value>,
+    /// The sigma of the deviations fixed by an earlier study.
+    #[serde(default)]
+    sigma: Option<f64>,
+}
+
+/// `{ "values", "groups", "targets", "rules"?, "spreads"? }` for the
+/// standardized short-run chart; `spreads` is the known spread of each group.
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ShortRunStandardizedRequest {
+    values: Vec<f64>,
+    groups: serde_json::Value,
+    targets: Vec<f64>,
+    #[serde(default)]
+    rules: Option<serde_json::Value>,
+    #[serde(default)]
+    spreads: Option<Vec<f64>>,
+}
+
+/// `{ "samples", "groups", "centers"? }` for the standardized P and U
+/// short-run charts; `samples` as for the P and U charts, `centers` the known
+/// centre line of each group.
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ShortRunAttributeRequest {
+    samples: serde_json::Value,
+    groups: serde_json::Value,
+    #[serde(default)]
+    centers: Option<Vec<f64>>,
+}
+
+/// Short-run variable-aim chart: `x - target` of each value on one I-MR chart
+/// centred at 0, for a process that runs in groups. Exactly the WASM
+/// `short_run_deviation_chart`.
+///
+/// # Safety
+///
+/// `request_json` must be null or point to a NUL-terminated string, and
+/// `result_ptr` must be null or valid for writing one pointer. A string written
+/// there is owned by the caller and must be released with
+/// [`uanalytics_free_string`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn uanalytics_short_run_deviation_chart(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+) -> i32 {
+    ffi_catch(result_ptr, || {
+        let json = match unsafe { read_json(request_json) } {
+            Ok(j) => j,
+            Err(e) => return e,
+        };
+        let req: ShortRunDeviationRequest = match parse_request(&json, result_ptr) {
+            Ok(r) => r,
+            Err(status) => return status,
+        };
+        let rules = match rules_of(req.rules) {
+            Ok(r) => r,
+            Err(e) => return write_error(result_ptr, ERR_COMPUTE, &e),
+        };
+        match crate::wire::short_run::group_rows(&req.groups, "groups").and_then(|groups| {
+            crate::wire::short_run::deviation_dto(
+                &req.values,
+                &groups,
+                &req.targets,
+                rules,
+                req.sigma,
+            )
+        }) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
+        }
+    })
+}
+
+/// Short-run standardized (Z-MR) chart: `(x - target) / spread` of each value
+/// on one I-MR chart centred at 0 with sigma 1. Exactly the WASM
+/// `short_run_standardized_chart`.
+///
+/// # Safety
+///
+/// `request_json` must be null or point to a NUL-terminated string, and
+/// `result_ptr` must be null or valid for writing one pointer. A string written
+/// there is owned by the caller and must be released with
+/// [`uanalytics_free_string`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn uanalytics_short_run_standardized_chart(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+) -> i32 {
+    ffi_catch(result_ptr, || {
+        let json = match unsafe { read_json(request_json) } {
+            Ok(j) => j,
+            Err(e) => return e,
+        };
+        let req: ShortRunStandardizedRequest = match parse_request(&json, result_ptr) {
+            Ok(r) => r,
+            Err(status) => return status,
+        };
+        let rules = match rules_of(req.rules) {
+            Ok(r) => r,
+            Err(e) => return write_error(result_ptr, ERR_COMPUTE, &e),
+        };
+        match crate::wire::short_run::group_rows(&req.groups, "groups").and_then(|groups| {
+            crate::wire::short_run::standardized_dto(
+                &req.values,
+                &groups,
+                &req.targets,
+                req.spreads.as_deref(),
+                rules,
+            )
+        }) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
+        }
+    })
+}
+
+/// Short-run standardized P chart: each `[defectives, sample_size]` sample
+/// against the proportion of its own group. Exactly the WASM `short_run_p_chart`.
+///
+/// # Safety
+///
+/// `request_json` must be null or point to a NUL-terminated string, and
+/// `result_ptr` must be null or valid for writing one pointer. A string written
+/// there is owned by the caller and must be released with
+/// [`uanalytics_free_string`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn uanalytics_short_run_p_chart(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+) -> i32 {
+    ffi_catch(result_ptr, || {
+        let json = match unsafe { read_json(request_json) } {
+            Ok(j) => j,
+            Err(e) => return e,
+        };
+        let req: ShortRunAttributeRequest = match parse_request(&json, result_ptr) {
+            Ok(r) => r,
+            Err(status) => return status,
+        };
+        match crate::wire::count_pairs(&req.samples, "samples").and_then(|samples| {
+            let groups = crate::wire::short_run::group_rows(&req.groups, "groups")?;
+            crate::wire::short_run::standardized_p_dto(&samples, &groups, req.centers.as_deref())
+        }) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
+        }
+    })
+}
+
+/// Short-run standardized U chart: each `[defects, units]` sample against the
+/// rate of its own group. Exactly the WASM `short_run_u_chart`.
+///
+/// # Safety
+///
+/// `request_json` must be null or point to a NUL-terminated string, and
+/// `result_ptr` must be null or valid for writing one pointer. A string written
+/// there is owned by the caller and must be released with
+/// [`uanalytics_free_string`].
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn uanalytics_short_run_u_chart(
+    request_json: *const libc::c_char,
+    result_ptr: *mut *mut libc::c_char,
+) -> i32 {
+    ffi_catch(result_ptr, || {
+        let json = match unsafe { read_json(request_json) } {
+            Ok(j) => j,
+            Err(e) => return e,
+        };
+        let req: ShortRunAttributeRequest = match parse_request(&json, result_ptr) {
+            Ok(r) => r,
+            Err(status) => return status,
+        };
+        match crate::wire::rate_pairs(&req.samples, "samples").and_then(|samples| {
+            let groups = crate::wire::short_run::group_rows(&req.groups, "groups")?;
+            crate::wire::short_run::standardized_u_dto(&samples, &groups, req.centers.as_deref())
+        }) {
+            Ok(dto) => write_json(result_ptr, &dto),
+            Err(e) => write_error(result_ptr, ERR_COMPUTE, &e),
+        }
+    })
+}
+
 /// Applies the run tests to a series against one set of limits -- the engine
 /// the charts use, callable on its own. One point per value, in order.
 ///
@@ -3395,6 +3597,94 @@ mod tests {
             r#"{"subgroups": [[1.0, 2.0, 3.0], [1.0, 1e400, 2.0]]}"#,
         );
         assert_ne!(code, 0);
+    }
+
+    // -- Short-run charts ---------------------------------------------------
+
+    #[test]
+    fn short_run_charts_answer_like_the_wire() {
+        let (code, body) = call(
+            uanalytics_short_run_standardized_chart,
+            r#"{"values": [10.2, 20.1, 10.0, 19.9, 10.1, 20.1], "groups": [0, 1, 0, 1, 0, 1],
+                "targets": [10, 20], "spreads": [0.2, 0.1]}"#,
+        );
+        assert_eq!(code, 0, "{body}");
+        assert_eq!(body["scale"], "standardized");
+        assert_eq!(body["i_ucl"].as_f64(), Some(3.0));
+        assert_eq!(body["group_spreads"], serde_json::json!([0.2, 0.1]));
+        let (code, body) = call(
+            uanalytics_short_run_deviation_chart,
+            r#"{"values": [10.2, 20.1, 9.9, 19.8], "groups": [0, 1, 0, 1], "targets": [10, 20],
+                "sigma": 0.1}"#,
+        );
+        assert_eq!(code, 0, "{body}");
+        assert_eq!(body["scale"], "deviation");
+        assert_eq!(body["i_cl"].as_f64(), Some(0.0));
+        let (code, body) = call(
+            uanalytics_short_run_p_chart,
+            r#"{"samples": [[10, 100], [25, 50], [19, 100]], "groups": [0, 1, 0],
+                "centers": [0.1, 0.5]}"#,
+        );
+        assert_eq!(code, 0, "{body}");
+        assert_eq!(body["group_centers"], serde_json::json!([0.1, 0.5]));
+        let (code, body) = call(
+            uanalytics_short_run_u_chart,
+            r#"{"samples": [[4, 2.0], [8, 2.0]], "groups": [0, 0]}"#,
+        );
+        assert_eq!(code, 0, "{body}");
+        assert_eq!(body["group_centers"][0].as_f64(), Some(3.0));
+    }
+
+    #[test]
+    fn short_run_refusals_carry_the_vocabulary() {
+        let refused = |entry: Entry, request: &str| {
+            let (code, body) = call(entry, request);
+            assert_eq!(code, -3, "{request}: {body}");
+            body
+        };
+        // A group beyond the targets names the row.
+        let body = refused(
+            uanalytics_short_run_deviation_chart,
+            r#"{"values": [1, 2], "groups": [0, 2], "targets": [0, 1]}"#,
+        );
+        assert_eq!(body["code"], "parameter_out_of_range", "{body}");
+        assert_eq!(
+            (body["parameter"].as_str(), body["index"].as_u64()),
+            (Some("groups"), Some(1))
+        );
+        // A fractional or negative group is not a whole number.
+        let body = refused(
+            uanalytics_short_run_deviation_chart,
+            r#"{"values": [1, 2], "groups": [0, -1], "targets": [0, 1]}"#,
+        );
+        assert_eq!(body["code"], "count_not_whole", "{body}");
+        // A group too small to estimate a spread names the group.
+        let body = refused(
+            uanalytics_short_run_standardized_chart,
+            r#"{"values": [1, 2, 3], "groups": [0, 1, 1], "targets": [0, 1]}"#,
+        );
+        assert_eq!(body["code"], "insufficient_data", "{body}");
+        assert_eq!(body["index"].as_u64(), Some(0));
+        // A key the request does not have is refused when it is read: the
+        // deviation chart has no `spreads`, the standardized chart no `sigma`.
+        for (entry, request) in [
+            (
+                uanalytics_short_run_deviation_chart as Entry,
+                r#"{"values": [1, 2], "groups": [0, 0], "targets": [0], "spreads": [1]}"#,
+            ),
+            (
+                uanalytics_short_run_standardized_chart,
+                r#"{"values": [1, 2], "groups": [0, 0], "targets": [0], "sigma": 1}"#,
+            ),
+            (
+                uanalytics_short_run_p_chart,
+                r#"{"samples": [[1, 10]], "groups": [0], "phi": 1}"#,
+            ),
+        ] {
+            let (code, body) = call(entry, request);
+            assert_eq!(code, -2, "{request}: {body}");
+            assert_eq!(body["code"], "malformed_input", "{body}");
+        }
     }
 
     // -- P chart ----------------------------------------------------------

@@ -39,6 +39,8 @@ public class ContractTests
         return parts;
     }
 
+    private static int[] Alternating(int n) => [.. Enumerable.Range(0, n).Select(i => i % 2)];
+
     private static double[] Step()
     {
         var x = new double[40];
@@ -75,6 +77,11 @@ public class ContractTests
         ["XbarRChart(rules)"] = c => Out(c.XbarRChart(Subgroups, [RunRule.BeyondLimits, RunRule.SixTrend]), AnalyticsJson.Default.XbarRChartResult),
         ["XbarSChart"] = c => Out(c.XbarSChart(Subgroups), AnalyticsJson.Default.XbarSChartResult),
         ["ImrChart"] = c => Out(c.ImrChart(Series), AnalyticsJson.Default.ImrChartResult),
+        ["ShortRunDeviationChart"] = c => Out(c.ShortRunDeviationChart(Series, Alternating(Series.Length), [10, 10]), AnalyticsJson.Default.ShortRunChartResult),
+        ["ShortRunStandardizedChart"] = c => Out(c.ShortRunStandardizedChart(Series, Alternating(Series.Length), [10, 10]), AnalyticsJson.Default.ShortRunChartResult),
+        ["ShortRunStandardizedChart(spreads)"] = c => Out(c.ShortRunStandardizedChart(Series, Alternating(Series.Length), [10, 10], spreads: [0.3, 0.2]), AnalyticsJson.Default.ShortRunChartResult),
+        ["ShortRunPChart"] = c => Out(c.ShortRunPChart([[3, 50], [5, 50], [2, 40], [4, 50]], [0, 1, 0, 1]), AnalyticsJson.Default.ShortRunAttributeChartResult),
+        ["ShortRunUChart"] = c => Out(c.ShortRunUChart([[3, 1.5], [5, 2], [2, 1], [6, 2.5]], [0, 1, 0, 1], [2, 3]), AnalyticsJson.Default.ShortRunAttributeChartResult),
         ["RunRules"] = c => Out(c.RunRules([0, 1, 4, 0.5, -0.2, 3.5], 3, 0, -3), AnalyticsJson.Default.IReadOnlyListChartPoint),
         ["PChart"] = c => Out(c.PChart([[3, 50], [5, 50], [2, 40], [4, 50], [6, 60]]), AnalyticsJson.Default.PChartResult),
         ["PChart(pBar)"] = c => Out(c.PChart([[3, 50], [5, 50]], pBar: 0.08), AnalyticsJson.Default.PChartResult),

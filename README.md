@@ -40,6 +40,7 @@ Control charts for monitoring process stability:
 - **Attributes charts**: P, NP, C, U
 - **Overdispersion-adjusted**: Laney P' and U' (φ coefficient corrects for between-subgroup variation)
 - **Rare events**: G chart (geometric distribution) and T chart (exponential) for low-defect processes
+- **Short runs**: one chart for a process that runs in groups (a part number, a recipe) — deviation from the group's aim, standardized Z-MR, and standardized P and U against each group's own centre
 - **Run rules**: Nelson (8 rules), Western Electric (4 rules — its run rule is eight points on one side, Nelson's nine); the 3-sigma test alone by default
 
 ```rust
@@ -67,6 +68,28 @@ println!("p̄ = {:.4}, φ = {:.4}", chart.p_bar, chart.phi);
 // G chart for rare events (e.g., days between nonconformances)
 let inter_event_counts = vec![12.0, 8.0, 25.0, 5.0, 18.0];
 let gchart = g_chart(&inter_event_counts).unwrap();
+```
+
+A process that makes several kinds of item in short runs has a target and a spread of its
+own for each kind; on one raw chart the limits widen to cover the distance between the targets
+and a shift inside one kind hides among the others. The short-run charts put every observation
+on a scale common to all groups first:
+
+```rust
+use u_analytics::spc::{standardized_chart, GroupStandard, RuleSet};
+
+// Two kinds of item on one process: aimed at 10 and 20, varying by about 0.2 and 0.1.
+let values = [10.2, 20.1, 10.0, 19.9, 10.1, 20.1];
+let groups = [0, 1, 0, 1, 0, 1]; // an index into the targets
+let chart = standardized_chart(
+    &values,
+    &groups,
+    &[10.0, 20.0],
+    GroupStandard::Known(&[0.2, 0.1]), // or GroupStandard::Estimated
+    RuleSet::default(),
+)
+.unwrap();
+assert_eq!(chart.limits.ucl, 3.0); // (x − target) / spread: the limits are ±3
 ```
 
 ### Process Capability
@@ -656,6 +679,63 @@ defectives than the sample size, a sample size of zero, `units` that are not
 positive -- is rejected with its `code` and `index` (see **Errors** above). The
 charts would otherwise drop it, and every later point would carry the index of
 the wrong row.
+
+### Short-run charts — a process that runs in groups
+
+```ts
+// groups[i]: the group of values[i] — a whole number, an index into targets (and spreads, centers)
+short_run_deviation_chart(values: number[], groups: number[], targets: number[],
+                          options?: { rules?: RuleSetName | RuleName[], sigma?: number }): ShortRunChart
+short_run_standardized_chart(values: number[], groups: number[], targets: number[],
+                             options?: { rules?: RuleSetName | RuleName[], spreads?: number[] }): ShortRunChart
+short_run_p_chart(samples: [defectives: number, size: number][], groups: number[],
+                  options?: { centers?: number[] }): ShortRunAttributeChart
+short_run_u_chart(samples: [defects: number, units: number][], groups: number[],
+                  options?: { centers?: number[] }): ShortRunAttributeChart
+
+type ShortRunChart = {
+  scale: "deviation" | "standardized", groups: number[],
+  i_cl: number, i_ucl: number, i_lcl: number,          // the individuals chart is centred at 0
+  mr_cl: number, mr_ucl: number, mr_lcl: number,
+  sigma_hat: number,                                    // 1 when standardized
+  group_spreads: (number | null)[],                     // the spread used per group; [] when "deviation"
+  i_points: ChartPoint[], mr_points: ChartPoint[],      // a point's group is groups[point.index]
+  in_control: boolean }
+type ShortRunAttributeChart = {
+  groups: number[], group_centers: (number | null)[],   // null: a group no sample names
+  points: AttrPoint[],                                  // each against its own group's cl and limits; z as above
+  in_control: boolean }
+```
+
+`short_run_deviation_chart` plots `x − target` on one I-MR chart centred at 0 and assumes
+the groups vary alike; `short_run_standardized_chart` plots `(x − target) / spread` on an I-MR
+chart centred at 0 with sigma 1, so the individuals limits are ±3. A group's spread is given
+(`spreads`) or estimated from the moving ranges of **that group's own** successive values — a
+range across two groups measures the distance between targets, never a spread — which needs at
+least 3 observations in the group and values that are not all equal. An estimated spread makes
+the limits approximate; fix it from an earlier study when there is one. The attributes charts
+plot each sample against the centre of its own group: a given `centers` entry (a proportion
+strictly between 0 and 1, a rate above 0) or the group's total events over its total exposure
+(at least 2 samples per group). `values` and `targets` must be in one unit — the library cannot
+tell.
+
+A refusal that is about one group rather than one row — `insufficient_data` for a group too small
+to estimate, `degenerate_data` for one that never moves, `parameter_out_of_range` for a bad
+`spreads` or `centers` entry — carries the **group** as `index`; a group beyond `targets` is
+`parameter_out_of_range` on `groups` with the row as `index`. A key an options object does not
+take (`sigma` on the standardized chart, `spreads` on the deviation chart) is refused as
+`unknown_option`.
+
+```js
+const { short_run_standardized_chart } = require("@iyulab/u-analytics");
+
+// Part 0 is aimed at 10 and varies by about 0.2; part 1 is aimed at 20 and varies by about 0.1.
+const values = [10.2, 20.1, 10.0, 19.9, 10.1, 20.1];
+const groups = [0, 1, 0, 1, 0, 1];
+const chart = short_run_standardized_chart(values, groups, [10, 20], { spreads: [0.2, 0.1] });
+console.log(chart.i_points.map(p => p.value));  // ≈ [1, 1, 0, -1, 0.5, 1]
+console.log(chart.i_ucl, chart.i_lcl);          // 3, -3
+```
 
 ### CUSUM and EWMA — sequential shift detection
 
@@ -1294,6 +1374,10 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_xbar_r_chart` | `xbar_r_chart(subgroups, { rules?, sigma? })` | `{ subgroups, rules?, sigma? }` |
 | `uanalytics_xbar_s_chart` | `xbar_s_chart(subgroups, { rules?, sigma? })` | `{ subgroups, rules?, sigma? }` |
 | `uanalytics_imr_chart` | `imr_chart(values, { rules?, sigma? })` | `{ values, rules?, sigma? }` |
+| `uanalytics_short_run_deviation_chart` | `short_run_deviation_chart(values, groups, targets, { rules?, sigma? })` | `{ values, groups, targets, rules?, sigma? }` |
+| `uanalytics_short_run_standardized_chart` | `short_run_standardized_chart(values, groups, targets, { rules?, spreads? })` | `{ values, groups, targets, rules?, spreads? }` |
+| `uanalytics_short_run_p_chart` | `short_run_p_chart(samples, groups, { centers? })` | `{ samples: [[defectives, sample_size], …], groups, centers? }` |
+| `uanalytics_short_run_u_chart` | `short_run_u_chart(samples, groups, { centers? })` | `{ samples: [[defects, units], …], groups, centers? }` |
 | `uanalytics_run_rules` | `run_rules(values, limits, { rules? })` | `{ values, limits: { ucl, cl, lcl }, rules? }` |
 | `uanalytics_p_chart` | `p_chart(samples, { p_bar? })` | `{ samples: [[defectives, sample_size], …], p_bar? }` |
 | `uanalytics_laney_p_chart` | `laney_p_chart(samples, { p_bar?, phi? })` | `{ samples: [[defectives, sample_size], …], p_bar?, phi? }` |
@@ -1369,6 +1453,7 @@ results — `uanalytics_one_sample_t_test` `{data, mu0}`, `uanalytics_two_sample
 
 The .NET client (`bindings/csharp/UAnalytics`, package `UAnalytics`) wraps each
 entry point as a method on `AnalyticsClient` — `XbarRChart`, `ImrChart`, `PChart(samples, pBar)`, `LaneyPChart(samples, pBar, phi)`,
+`ShortRunDeviationChart`, `ShortRunStandardizedChart`, `ShortRunPChart`, `ShortRunUChart`,
 `ProcessCapability`, `DetectChangepoints`, … — serialising the arguments to the
 request above and returning the response as a typed record. A non-zero status
 surfaces as `AnalyticsException` carrying the native status (`Status`), the `error`

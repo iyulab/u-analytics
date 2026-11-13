@@ -299,6 +299,11 @@ fn series() -> Value {
     ])
 }
 
+/// `n` group indices, 0 and 1 in turn.
+fn alternating(n: usize) -> Value {
+    (0..n).map(|i| json!(i % 2)).collect()
+}
+
 fn positive() -> Value {
     json!([
         12.0, 25.0, 33.0, 47.0, 58.0, 71.0, 90.0, 18.0, 29.0, 41.0, 64.0, 83.0, 22.0, 37.0, 52.0,
@@ -379,6 +384,26 @@ pub(super) fn entry_points() -> Vec<(&'static str, Entry, Value)> {
             "uanalytics_imr_chart",
             uanalytics_imr_chart,
             json!({ "values": series() }),
+        ),
+        ep(
+            "uanalytics_short_run_deviation_chart",
+            uanalytics_short_run_deviation_chart,
+            json!({ "values": series(), "groups": alternating(20), "targets": [10, 10] }),
+        ),
+        ep(
+            "uanalytics_short_run_standardized_chart",
+            uanalytics_short_run_standardized_chart,
+            json!({ "values": series(), "groups": alternating(20), "targets": [10, 10] }),
+        ),
+        ep(
+            "uanalytics_short_run_p_chart",
+            uanalytics_short_run_p_chart,
+            json!({ "samples": [[3, 50], [5, 50], [2, 40], [4, 50]], "groups": alternating(4) }),
+        ),
+        ep(
+            "uanalytics_short_run_u_chart",
+            uanalytics_short_run_u_chart,
+            json!({ "samples": [[3, 1.5], [5, 2], [2, 1], [6, 2.5]], "groups": alternating(4) }),
         ),
         ep(
             "uanalytics_run_rules",

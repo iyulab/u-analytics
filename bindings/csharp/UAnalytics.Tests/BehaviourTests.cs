@@ -389,4 +389,50 @@ public class BehaviourTests
         Assert.Equal("parameter_out_of_range", e.ErrorCode);
         Assert.Equal("sigma", e.Parameter);
     }
+    [Fact]
+    public void Short_run_charts_put_every_group_on_one_scale()
+    {
+        // Part 0 is aimed at 10 and varies by about 0.2, part 1 at 20 and by about 0.1.
+        double[] values = [10.2, 20.1, 10.0, 19.9, 10.1, 20.1];
+        int[] groups = [0, 1, 0, 1, 0, 1];
+        var z = _client.ShortRunStandardizedChart(values, groups, [10, 20], spreads: [0.2, 0.1]);
+        Assert.Equal(ShortRunScale.Standardized, z.Scale);
+        Assert.Equal(3.0, z.IUcl);
+        Assert.Equal(0.0, z.ICl);
+        Assert.Equal(1.0, z.SigmaHat);
+        Assert.Equal(1.0, z.IPoints[0].Value, 12);
+        Assert.Equal(groups, z.Groups);
+        Assert.Equal([0.2, 0.1], z.GroupSpreads);
+
+        var d = _client.ShortRunDeviationChart(values, groups, [10, 20]);
+        Assert.Equal(ShortRunScale.Deviation, d.Scale);
+        Assert.Empty(d.GroupSpreads);
+        Assert.Equal(0.0, d.ICl);
+
+        var p = _client.ShortRunPChart([[10, 100], [25, 50], [20, 100]], [0, 1, 0], [0.1, 0.5]);
+        Assert.Equal(0.0, p.Points[0].Z);
+        Assert.True(p.Points[2].OutOfControl);
+        Assert.False(p.InControl);
+        Assert.Equal([0.1, 0.5], p.GroupCenters);
+    }
+
+    [Fact]
+    public void Short_run_refusals_carry_the_vocabulary()
+    {
+        double[] values = [1.0, 2.0, 3.0];
+        var beyond = Assert.Throws<AnalyticsException>(
+            () => _client.ShortRunDeviationChart(values, [0, 1, 2], [0, 1]));
+        Assert.Equal("parameter_out_of_range", beyond.ErrorCode);
+        Assert.Equal("groups", beyond.Parameter);
+        Assert.Equal(2, beyond.Index);
+
+        var few = Assert.Throws<AnalyticsException>(
+            () => _client.ShortRunStandardizedChart(values, [0, 1, 1], [0, 1]));
+        Assert.Equal("insufficient_data", few.ErrorCode);
+        Assert.Equal(0, few.Index);
+
+        var negative = Assert.Throws<AnalyticsException>(
+            () => _client.ShortRunDeviationChart(values, [0, -1, 0], [0, 1]));
+        Assert.Equal("count_not_whole", negative.ErrorCode);
+    }
 }

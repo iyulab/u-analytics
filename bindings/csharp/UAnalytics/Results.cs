@@ -94,6 +94,34 @@ public sealed record ImrChartResult(
     IReadOnlyList<ChartPoint> MrPoints,
     bool InControl);
 
+/// <summary>The scale a short-run variables chart plots.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<ShortRunScale>))]
+public enum ShortRunScale
+{
+    /// <summary><c>x − target</c>, in the units of the measurement.</summary>
+    [JsonStringEnumMemberName("deviation")] Deviation,
+    /// <summary><c>(x − target) / spread</c>, a pure number: the individuals limits are ±3.</summary>
+    [JsonStringEnumMemberName("standardized")] Standardized,
+}
+
+/// <summary>
+/// Short-run variables chart: an individuals and moving-range chart of the transformed values,
+/// centred at 0. <see cref="Groups"/> holds the group of each observation; a point's group is
+/// <c>Groups[point.Index]</c>. <see cref="SigmaHat"/> is 1 on the standardized scale.
+/// <see cref="GroupSpreads"/> is the spread used for each group (<c>null</c> for a group no
+/// observation names) and empty on the deviation scale. The moving-range points start at index 1.
+/// </summary>
+public sealed record ShortRunChartResult(
+    ShortRunScale Scale,
+    IReadOnlyList<int> Groups,
+    double ICl, double IUcl, double ILcl,
+    double MrCl, double MrUcl, double MrLcl,
+    double SigmaHat,
+    IReadOnlyList<double?> GroupSpreads,
+    IReadOnlyList<ChartPoint> IPoints,
+    IReadOnlyList<ChartPoint> MrPoints,
+    bool InControl);
+
 // ── Attributes charts ──
 
 /// <summary>
@@ -106,6 +134,18 @@ public sealed record AttributeChartPoint(
 
 /// <summary>P chart. <see cref="PBar"/> is the centre line used.</summary>
 public sealed record PChartResult(double PBar, IReadOnlyList<AttributeChartPoint> Points, bool InControl);
+
+/// <summary>
+/// Short-run attributes chart (standardized P or U): each point against the centre of its own
+/// group. <see cref="Groups"/> holds the group of each sample; <see cref="GroupCenters"/> the centre
+/// line used for each group (<c>null</c> for a group no sample names). Every point carries its
+/// own group's <c>Cl</c> and limits, and <c>Z</c> on the scale where every limit is ±3.
+/// </summary>
+public sealed record ShortRunAttributeChartResult(
+    IReadOnlyList<int> Groups,
+    IReadOnlyList<double?> GroupCenters,
+    IReadOnlyList<AttributeChartPoint> Points,
+    bool InControl);
 
 /// <summary>Laney P′ chart. <see cref="PBar"/> and <see cref="Phi"/> are the values used.</summary>
 public sealed record LaneyPChartResult(double PBar, double Phi, IReadOnlyList<AttributeChartPoint> Points);

@@ -8,6 +8,27 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- `spc::short_run`: charts for a process that runs in groups (a part number, a recipe), each group with a target and a spread of its
+  own. `deviation_chart` (variable aim: `x − target`) and `standardized_chart` (Z-MR: `(x − target) / spread`) chart the
+  transformed values on an individuals and moving-range chart centred at 0 — with sigma 1 for the standardized one, so its
+  limits are ±3 — and `standardized_p_chart` / `standardized_u_chart` plot each sample against the centre of its own group
+  (`z = (p − p̄ᵍ) / √(p̄ᵍ(1 − p̄ᵍ)/n)` and the U analogue; each point keeps its own group's centre and limits). A spread or a
+  centre is `GroupStandard::Known` per group or `Estimated`: a spread from the moving ranges of the group's *own* successive
+  values (a range across two groups is never used; at least 3 observations per group), a centre as the group's total events over
+  its total exposure (at least 2 samples per group). A group is an index into the targets; a group no observation names is
+  ignored. Refusals use the existing vocabulary — `dimension_mismatch`, `parameter_out_of_range` (a group beyond the targets, a
+  non-positive spread, a centre outside its domain), `insufficient_data` and `degenerate_data` (a group too small, or whose
+  successive values are all equal; the group as `index`), `count_not_whole` — and a key an options object does not take is
+  `unknown_option`. Through the WebAssembly binding as `short_run_deviation_chart`, `short_run_standardized_chart`,
+  `short_run_p_chart` and `short_run_u_chart`, the C ABI as `uanalytics_short_run_*`, and the .NET client as
+  `ShortRunDeviationChart`, `ShortRunStandardizedChart`, `ShortRunPChart` and `ShortRunUChart`; each is an engine-card
+  operation. The tests check hand-computed examples, that a single group equals the ordinary I-MR and P charts, and the refusals.
+- `IndividualMRChart::with_center`: fixes the individuals chart's centre line at an aim or an earlier study's mean instead of the
+  mean of the observations (the moving-range chart is unchanged), the counterpart of `with_sigma`. A shift from a known centre
+  then stays visible rather than pulling the centre toward itself.
+
 ## [0.35.0] - 2026-11-10
 
 Depends on u-numflow 0.16.3. The .NET client is `UAnalytics` 0.29.0.

@@ -3024,6 +3024,139 @@
       ],
       "type": "object"
     },
+    "ShortRunAttributeChartDto": {
+      "description": "An attributes short-run chart: each sample against the centre of its\nown group.",
+      "properties": {
+        "group_centers": {
+          "description": "The centre line used for each group; `null` for a group no sample\nnames.",
+          "items": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "type": "array"
+        },
+        "groups": {
+          "description": "The group of each sample, in the order given.",
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "in_control": {
+          "type": "boolean"
+        },
+        "points": {
+          "description": "Each with its own group's centre and limits, and `z`, the point on\nthe scale where every limit is +/-3.",
+          "items": {
+            "$ref": "#/$defs/AttributeChartPointDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "groups",
+        "group_centers",
+        "points",
+        "in_control"
+      ],
+      "type": "object"
+    },
+    "ShortRunChartDto": {
+      "description": "A variables short-run chart: an individuals-and-moving-range chart of\nthe transformed values, centred at 0.",
+      "properties": {
+        "group_spreads": {
+          "description": "The spread used for each group; `null` for a group no observation\nnames. Empty for a deviation chart, whose spread is shared.",
+          "items": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "type": "array"
+        },
+        "groups": {
+          "description": "The group of each observation, in the order given.",
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "i_cl": {
+          "format": "double",
+          "type": "number"
+        },
+        "i_lcl": {
+          "format": "double",
+          "type": "number"
+        },
+        "i_points": {
+          "description": "The plotted values with their run-test violations.",
+          "items": {
+            "$ref": "#/$defs/ChartPointDto"
+          },
+          "type": "array"
+        },
+        "i_ucl": {
+          "format": "double",
+          "type": "number"
+        },
+        "in_control": {
+          "type": "boolean"
+        },
+        "mr_cl": {
+          "format": "double",
+          "type": "number"
+        },
+        "mr_lcl": {
+          "format": "double",
+          "type": "number"
+        },
+        "mr_points": {
+          "description": "Starts at index 1: the first value has no moving range.",
+          "items": {
+            "$ref": "#/$defs/ChartPointDto"
+          },
+          "type": "array"
+        },
+        "mr_ucl": {
+          "format": "double",
+          "type": "number"
+        },
+        "scale": {
+          "description": "`\"deviation\"` (`x - target`) or `\"standardized\"`\n(`(x - target) / spread`).",
+          "type": "string"
+        },
+        "sigma_hat": {
+          "description": "Sigma of the plotted values: 1 for a standardized chart, the given\nor moving-range estimate for a deviation chart.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "scale",
+        "groups",
+        "i_cl",
+        "i_ucl",
+        "i_lcl",
+        "mr_cl",
+        "mr_ucl",
+        "mr_lcl",
+        "sigma_hat",
+        "group_spreads",
+        "i_points",
+        "mr_points",
+        "in_control"
+      ],
+      "type": "object"
+    },
     "SmoothingComponentsDto": {
       "description": "The smoothed components, one value per observation.",
       "properties": {
@@ -5563,6 +5696,309 @@
     },
     "shapiro_wilk_test.output": {
       "$ref": "#/$defs/ShapiroWilkDto"
+    },
+    "short_run_deviation_chart.input": {
+      "additionalProperties": false,
+      "description": "The arguments of short_run_deviation_chart(values, groups, targets, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "groups": {
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "options": {
+          "additionalProperties": false,
+          "description": "The run tests, and the sigma of the deviations fixed by an earlier study.",
+          "properties": {
+            "rules": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "shewhart",
+                    "western_electric",
+                    "nelson"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "items": {
+                    "enum": [
+                      "BeyondLimits",
+                      "NineOneSide",
+                      "SixTrend",
+                      "FourteenAlternating",
+                      "TwoOfThreeBeyond2Sigma",
+                      "FourOfFiveBeyond1Sigma",
+                      "FifteenWithin1Sigma",
+                      "EightBeyond1Sigma",
+                      "EightOneSide"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sigma": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "targets": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "values": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "values",
+        "groups",
+        "targets"
+      ],
+      "type": "object"
+    },
+    "short_run_deviation_chart.output": {
+      "$ref": "#/$defs/ShortRunChartDto"
+    },
+    "short_run_p_chart.input": {
+      "additionalProperties": false,
+      "description": "The arguments of short_run_p_chart(samples, groups, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "groups": {
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "options": {
+          "additionalProperties": false,
+          "description": "The known centre line of each group; omitted, estimated per group.",
+          "properties": {
+            "centers": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "samples": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "format": "double",
+                "type": "number"
+              },
+              {
+                "format": "double",
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "samples",
+        "groups"
+      ],
+      "type": "object"
+    },
+    "short_run_p_chart.output": {
+      "$ref": "#/$defs/ShortRunAttributeChartDto"
+    },
+    "short_run_standardized_chart.input": {
+      "additionalProperties": false,
+      "description": "The arguments of short_run_standardized_chart(values, groups, targets, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "groups": {
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "options": {
+          "additionalProperties": false,
+          "description": "The run tests, and the known spread of each group; omitted, estimated per group.",
+          "properties": {
+            "rules": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "shewhart",
+                    "western_electric",
+                    "nelson"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "items": {
+                    "enum": [
+                      "BeyondLimits",
+                      "NineOneSide",
+                      "SixTrend",
+                      "FourteenAlternating",
+                      "TwoOfThreeBeyond2Sigma",
+                      "FourOfFiveBeyond1Sigma",
+                      "FifteenWithin1Sigma",
+                      "EightBeyond1Sigma",
+                      "EightOneSide"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "spreads": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "targets": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "values": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "values",
+        "groups",
+        "targets"
+      ],
+      "type": "object"
+    },
+    "short_run_standardized_chart.output": {
+      "$ref": "#/$defs/ShortRunChartDto"
+    },
+    "short_run_u_chart.input": {
+      "additionalProperties": false,
+      "description": "The arguments of short_run_u_chart(samples, groups, options), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "groups": {
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "options": {
+          "additionalProperties": false,
+          "description": "The known centre line of each group; omitted, estimated per group.",
+          "properties": {
+            "centers": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "samples": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "format": "double",
+                "type": "number"
+              },
+              {
+                "format": "double",
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "samples",
+        "groups"
+      ],
+      "type": "object"
+    },
+    "short_run_u_chart.output": {
+      "$ref": "#/$defs/ShortRunAttributeChartDto"
     },
     "sigma_to_ppm.input": {
       "additionalProperties": false,

@@ -40,6 +40,19 @@ internal static class Request
         return array;
     }
 
+    /// <summary>An optional array of numbers; <c>null</c> is left out of the request.</summary>
+    internal static JsonArray? OptionalNums(string parameter, IReadOnlyList<double>? values)
+        => values is null ? null : Nums(parameter, values);
+
+    /// <summary>Whole numbers as given; the engine refuses one that is not a group.</summary>
+    internal static JsonArray Whole(IReadOnlyList<int> values)
+    {
+        var array = new JsonArray();
+        foreach (var v in values)
+            array.Add((JsonNode)JsonValue.Create(v));
+        return array;
+    }
+
     /// <summary>Rows of numbers; a bad value is at <c>parameter[row]</c>, <c>index</c> its column.</summary>
     internal static JsonArray Rows(string parameter, IReadOnlyList<IReadOnlyList<double>> rows)
     {

@@ -107,7 +107,7 @@ const D4: [f64; 24] = [
 ///
 /// Montgomery, D.C. (2020). *Introduction to Statistical Quality Control*, 8th ed.,
 /// Appendix Table VI.
-const D2: [f64; 24] = [
+pub(super) const D2: [f64; 24] = [
     // d2(2) is exactly 2/sqrt(pi): the range of two standard normals is
     // |N(0, 2)|, whose mean is sqrt(2) * sqrt(2/pi).
     std::f64::consts::FRAC_2_SQRT_PI,
@@ -895,6 +895,8 @@ pub struct IndividualMRChart {
     rules: RuleSet,
     /// A sigma fixed by an earlier study (`with_sigma`).
     sigma_standard: Option<f64>,
+    /// A centre line fixed by an aim or an earlier study (`with_center`).
+    center_standard: Option<f64>,
 }
 
 impl IndividualMRChart {
@@ -948,6 +950,41 @@ impl IndividualMRChart {
         self.recompute();
         Ok(self)
     }
+    /// Fix the centre line of the individuals chart at a `center` known in
+    /// advance -- the aim a process is run to, or the mean of an earlier
+    /// (Phase I) study -- instead of the mean of the observations given.
+    ///
+    /// The limits become `center ± E2 · MR-bar` (or `center ± 3 sigma` with
+    /// [`with_sigma`](Self::with_sigma)). Judging later observations against
+    /// the mean of the observations themselves would let a shift pull the
+    /// centre toward it and hide it; a fixed centre keeps the shift visible.
+    /// The moving-range chart does not use the centre line and is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// [`ControlChartError::NonFiniteValue`] unless `center` is finite.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use u_analytics::spc::{ControlChart, IndividualMRChart};
+    ///
+    /// let mut chart = IndividualMRChart::new().with_center(10.0).unwrap();
+    /// for x in [10.5, 10.7, 10.4, 10.6] {
+    ///     chart.add_sample(&[x]).unwrap();
+    /// }
+    /// // The chart is centred on the aim, not on the observations' mean.
+    /// assert_eq!(chart.control_limits().unwrap().cl, 10.0);
+    /// ```
+    pub fn with_center(mut self, center: f64) -> Result<Self, ControlChartError> {
+        if !center.is_finite() {
+            return Err(ControlChartError::NonFiniteValue);
+        }
+        self.center_standard = Some(center);
+        self.recompute();
+        Ok(self)
+    }
+
     /// Create a new Individual-MR chart.
     pub fn new() -> Self {
         Self {
@@ -958,6 +995,7 @@ impl IndividualMRChart {
             mr_limits: None,
             rules: RuleSet::default(),
             sigma_standard: None,
+            center_standard: None,
         }
     }
 
@@ -1034,9 +1072,12 @@ impl IndividualMRChart {
             .map(|w| (w[1] - w[0]).abs())
             .collect();
 
-        // X-bar and MR-bar
-        let x_bar = u_numflow::stats::mean(&self.observations)
-            .expect("observations should be non-empty with finite values");
+        // X-bar and MR-bar; a fixed centre stands in for the mean (`with_center`).
+        let x_bar = match self.center_standard {
+            Some(center) => center,
+            None => u_numflow::stats::mean(&self.observations)
+                .expect("observations should be non-empty with finite values"),
+        };
         // A fixed sigma stands in for the moving ranges' own mean (`with_sigma`).
         let mr_bar = match self.sigma_standard {
             Some(sigma) => sigma * D2[0],

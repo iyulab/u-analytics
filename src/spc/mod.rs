@@ -15,6 +15,13 @@
 //! - [`CChart`] — Count of defects per unit (constant area of opportunity)
 //! - [`UChart`] — Defects per unit (variable area of opportunity)
 //!
+//! # Short-Run Charts
+//!
+//! - [`deviation_chart`], [`standardized_chart`] — I-MR charts of `x − target`
+//!   and `(x − target) / spread` for a process that runs in groups
+//! - [`standardized_p_chart`], [`standardized_u_chart`] — P and U points against
+//!   the centre of each point's own group
+//!
 //! # Run Rules
 //!
 //! - [`RuleSet`] — any subset of the tests; [`RuleSet::shewhart`] (the 3-sigma
@@ -32,6 +39,7 @@
 mod attributes;
 mod chart;
 mod rules;
+mod short_run;
 mod variables;
 
 pub use attributes::{
@@ -44,4 +52,9 @@ pub use chart::{
     ViolationType, MAX_SUBGROUP_SIZE, MIN_SUBGROUP_SIZE,
 };
 pub use rules::{NelsonRules, RuleSet, RunRule, WesternElectricRules};
+pub use short_run::{
+    deviation_chart, standardized_chart, standardized_p_chart, standardized_u_chart, GroupStandard,
+    ShortRunAttributeChart, ShortRunChart, ShortRunError, ShortRunScale, MIN_GROUP_OBSERVATIONS,
+    MIN_GROUP_SAMPLES,
+};
 pub use variables::{range_chart_factors, IndividualMRChart, XBarRChart, XBarSChart};

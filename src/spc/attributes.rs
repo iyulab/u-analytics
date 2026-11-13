@@ -26,7 +26,7 @@ use super::chart::{ChartInputError, ControlChartError};
 const LANEY_MIN_SAMPLES: usize = 3;
 
 /// A sample with a proportion: at least one item, at most that many defectives.
-fn check_proportion(defectives: u64, sample_size: u64) -> Result<(), ControlChartError> {
+pub(super) fn check_proportion(defectives: u64, sample_size: u64) -> Result<(), ControlChartError> {
     if sample_size == 0 {
         return Err(ControlChartError::ZeroSampleSize);
     }
@@ -40,7 +40,7 @@ fn check_proportion(defectives: u64, sample_size: u64) -> Result<(), ControlChar
 }
 
 /// An area of opportunity: a positive, finite number of units.
-fn check_units(units: f64) -> Result<(), ControlChartError> {
+pub(super) fn check_units(units: f64) -> Result<(), ControlChartError> {
     if units.is_finite() && units > 0.0 {
         Ok(())
     } else {
@@ -79,7 +79,12 @@ pub struct AttributeChartPoint {
 }
 
 /// A point whose limits are `cl ± 3·sigma` (lower one clamped at 0).
-fn attribute_point(index: usize, value: f64, cl: f64, sigma: f64) -> AttributeChartPoint {
+pub(super) fn attribute_point(
+    index: usize,
+    value: f64,
+    cl: f64,
+    sigma: f64,
+) -> AttributeChartPoint {
     let ucl = cl + 3.0 * sigma;
     let lcl = (cl - 3.0 * sigma).max(0.0);
     AttributeChartPoint {
@@ -98,7 +103,10 @@ fn standardized(value: f64, cl: f64, sigma: f64) -> Option<f64> {
 }
 
 /// A known proportion: finite and strictly inside (0, 1).
-fn check_proportion_standard(p: f64, parameter: &'static str) -> Result<f64, ControlChartError> {
+pub(super) fn check_proportion_standard(
+    p: f64,
+    parameter: &'static str,
+) -> Result<f64, ControlChartError> {
     if p.is_finite() && p > 0.0 && p < 1.0 {
         Ok(p)
     } else {
@@ -107,7 +115,10 @@ fn check_proportion_standard(p: f64, parameter: &'static str) -> Result<f64, Con
 }
 
 /// A known rate: finite and strictly positive.
-fn check_rate_standard(u: f64, parameter: &'static str) -> Result<f64, ControlChartError> {
+pub(super) fn check_rate_standard(
+    u: f64,
+    parameter: &'static str,
+) -> Result<f64, ControlChartError> {
     if u.is_finite() && u > 0.0 {
         Ok(u)
     } else {

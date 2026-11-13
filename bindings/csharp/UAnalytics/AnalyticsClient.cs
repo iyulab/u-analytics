@@ -217,6 +217,97 @@ public sealed class AnalyticsClient : IDisposable
             ("values", Request.Nums("values", values)), ("rules", Request.Rules(rules)),
             ("sigma", Request.Num("sigma", sigma)));
 
+    // ── SPC: short-run charts (a process that runs in groups) ──
+
+    /// <summary>
+    /// Variable-aim ("deviation from nominal") short-run chart. A process that runs in groups --
+    /// a part number, a recipe -- has an aim of its own for each; every observation is put on a
+    /// scale common to all of them, <c>x − target</c>, and the deviations are charted on one
+    /// individuals and moving-range chart centred at 0. The groups are assumed to vary alike
+    /// (use <see cref="ShortRunStandardizedChart(double[], int[], double[], IReadOnlyList{RunRule}?, double[])"/>
+    /// when they do not). <paramref name="values"/> and <paramref name="targets"/> must be in one
+    /// unit: the engine cannot tell.
+    /// </summary>
+    /// <param name="values">Observations in time order (at least two).</param>
+    /// <param name="groups">The group of each observation: an index into <paramref name="targets"/>.</param>
+    /// <param name="targets">The aim of each group.</param>
+    /// <param name="rules">The run tests to apply; <c>null</c>: <see cref="RunRuleSet.Shewhart"/>.</param>
+    /// <param name="sigma">The sigma of the deviations fixed by an earlier study (greater than 0);
+    /// <c>null</c>: estimated from their moving ranges.</param>
+    public ShortRunChartResult ShortRunDeviationChart(double[] values, int[] groups, double[] targets,
+        IReadOnlyList<RunRule>? rules = null, double? sigma = null)
+        => Call(NativeInterop.uanalytics_short_run_deviation_chart, AnalyticsJson.Default.ShortRunChartResult,
+            ("values", Request.Nums("values", values)), ("groups", Request.Whole(groups)),
+            ("targets", Request.Nums("targets", targets)), ("rules", Request.Rules(rules)),
+            ("sigma", Request.Num("sigma", sigma)));
+
+    /// <summary>Variable-aim short-run chart applying a named set of run tests.</summary>
+    public ShortRunChartResult ShortRunDeviationChart(double[] values, int[] groups, double[] targets,
+        RunRuleSet rules, double? sigma = null)
+        => Call(NativeInterop.uanalytics_short_run_deviation_chart, AnalyticsJson.Default.ShortRunChartResult,
+            ("values", Request.Nums("values", values)), ("groups", Request.Whole(groups)),
+            ("targets", Request.Nums("targets", targets)), ("rules", Request.Rules(rules)),
+            ("sigma", Request.Num("sigma", sigma)));
+
+    /// <summary>
+    /// Standardized (Z-MR) short-run chart: <c>(x − target) / spread</c> of each observation, on one
+    /// individuals and moving-range chart centred at 0 with sigma 1 (the limits are ±3). A group's
+    /// spread is given in <paramref name="spreads"/> or estimated from the moving ranges of that
+    /// group's own successive observations -- a range across two groups is never used -- which needs
+    /// at least 3 observations in the group (<c>insufficient_data</c>, the group as
+    /// <see cref="AnalyticsException.Index"/>) and a group whose values are not all equal
+    /// (<c>degenerate_data</c>).
+    /// </summary>
+    /// <param name="values">Observations in time order (at least two).</param>
+    /// <param name="groups">The group of each observation: an index into <paramref name="targets"/>.</param>
+    /// <param name="targets">The aim of each group.</param>
+    /// <param name="rules">The run tests to apply; <c>null</c>: <see cref="RunRuleSet.Shewhart"/>.</param>
+    /// <param name="spreads">The known spread (greater than 0) of each group, indexed like
+    /// <paramref name="targets"/>; <c>null</c>: estimated per group.</param>
+    public ShortRunChartResult ShortRunStandardizedChart(double[] values, int[] groups, double[] targets,
+        IReadOnlyList<RunRule>? rules = null, double[]? spreads = null)
+        => Call(NativeInterop.uanalytics_short_run_standardized_chart, AnalyticsJson.Default.ShortRunChartResult,
+            ("values", Request.Nums("values", values)), ("groups", Request.Whole(groups)),
+            ("targets", Request.Nums("targets", targets)), ("rules", Request.Rules(rules)),
+            ("spreads", Request.OptionalNums("spreads", spreads)));
+
+    /// <summary>Standardized short-run chart applying a named set of run tests.</summary>
+    public ShortRunChartResult ShortRunStandardizedChart(double[] values, int[] groups, double[] targets,
+        RunRuleSet rules, double[]? spreads = null)
+        => Call(NativeInterop.uanalytics_short_run_standardized_chart, AnalyticsJson.Default.ShortRunChartResult,
+            ("values", Request.Nums("values", values)), ("groups", Request.Whole(groups)),
+            ("targets", Request.Nums("targets", targets)), ("rules", Request.Rules(rules)),
+            ("spreads", Request.OptionalNums("spreads", spreads)));
+
+    /// <summary>
+    /// Standardized P short-run chart: each sample's proportion against the proportion defective of
+    /// its own group, <c>z = (p − p̄ᵍ) / √(p̄ᵍ(1 − p̄ᵍ)/n)</c>. A centre is given in
+    /// <paramref name="centers"/> or estimated as the group's total defectives over its total
+    /// inspected (at least 2 samples per group).
+    /// </summary>
+    /// <param name="samples"><c>[defectives, sampleSize]</c> pairs, as for <see cref="PChart"/>.</param>
+    /// <param name="groups">The group of each sample, an index into <paramref name="centers"/> when given.</param>
+    /// <param name="centers">The known proportion of each group, strictly between 0 and 1, indexed by
+    /// group; <c>null</c>: estimated per group.</param>
+    public ShortRunAttributeChartResult ShortRunPChart(ulong[][] samples, int[] groups, double[]? centers = null)
+        => Call(NativeInterop.uanalytics_short_run_p_chart, AnalyticsJson.Default.ShortRunAttributeChartResult,
+            ("samples", Request.Counts(samples)), ("groups", Request.Whole(groups)),
+            ("centers", Request.OptionalNums("centers", centers)));
+
+    /// <summary>
+    /// Standardized U short-run chart: each sample's defect rate against the rate of its own group,
+    /// <c>z = (u − ūᵍ) / √(ūᵍ/units)</c>. A centre is given in <paramref name="centers"/> or
+    /// estimated as the group's total defects over its total units (at least 2 samples per group).
+    /// </summary>
+    /// <param name="samples"><c>[defects, units]</c> pairs, as for <see cref="UChart"/>.</param>
+    /// <param name="groups">The group of each sample, an index into <paramref name="centers"/> when given.</param>
+    /// <param name="centers">The known rate of each group (greater than 0), indexed by group;
+    /// <c>null</c>: estimated per group.</param>
+    public ShortRunAttributeChartResult ShortRunUChart(double[][] samples, int[] groups, double[]? centers = null)
+        => Call(NativeInterop.uanalytics_short_run_u_chart, AnalyticsJson.Default.ShortRunAttributeChartResult,
+            ("samples", Request.Rows("samples", samples)), ("groups", Request.Whole(groups)),
+            ("centers", Request.OptionalNums("centers", centers)));
+
     /// <summary>
     /// Applies the run tests to a series against one set of limits -- the engine the charts
     /// use, callable on its own. One point per value, in order, each with its
