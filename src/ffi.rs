@@ -1317,14 +1317,16 @@ wire_export!(
     /// Bonferroni-adjusted p-values, input order: → `{values}`, the WebAssembly binding's result.
     uanalytics_bonferroni_correction,
     PValuesReq,
-    |r| crate::wire::hypothesis::p_adjust_dto("bonferroni_correction", &r.p_values).map(|v| serde_json::json!({ "values": v }))
+    |r| crate::wire::hypothesis::p_adjust_dto("bonferroni_correction", &r.p_values)
+        .map(|v| serde_json::json!({ "values": v }))
 );
 
 wire_export!(
     /// Benjamini-Hochberg (FDR) adjusted p-values, input order: → `{values}`, the WebAssembly binding's result.
     uanalytics_benjamini_hochberg,
     PValuesReq,
-    |r| crate::wire::hypothesis::p_adjust_dto("benjamini_hochberg", &r.p_values).map(|v| serde_json::json!({ "values": v }))
+    |r| crate::wire::hypothesis::p_adjust_dto("benjamini_hochberg", &r.p_values)
+        .map(|v| serde_json::json!({ "values": v }))
 );
 
 // ── Point processes (event-time trend) ─────────────────────
