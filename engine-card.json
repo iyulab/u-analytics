@@ -481,12 +481,20 @@
             "method": "counts signals over seeded normal samples and checks a planted off-correlation point",
             "tolerance": "signal rate within sampling error of alpha",
             "test": "src/spc/hotelling.rs::tests::in_control_normal_data_signals_about_alpha_of_the_time"
+          },
+          {
+            "claim": "T-squared of every row, the sample mean and covariance, and the Phase I limit agree with an independent computation (NumPy's LU solve of the covariance system on np.cov with ddof 1, and SciPy's Beta quantile with the textbook scaling) for five shapes from 6 rows of 2 variables to 400 rows, at alpha 0.0027, 0.01 and 0.05.",
+            "reference_kind": "reference_implementation",
+            "reference": "NumPy 2.4.6 (numpy.cov, numpy.linalg.solve) and SciPy 1.17.1 (scipy.stats.beta.ppf), with the limit scaling of Tracy, Young and Mason (1992)",
+            "method": "compares every statistic, estimate and limit of the result with the reference table for each case",
+            "tolerance": "relative 1e-8 for T-squared, 1e-9 for the limit, 1e-12 for the mean and 1e-10 for the covariance",
+            "test": "tests/hotelling_reference.rs::phase_i_matches_numpy_and_scipy"
           }
         ],
         "limits": [
           "Individual observations only: subgrouped data (n > 1) and the multivariate EWMA are not computed.",
           "The limits assume independent, multivariate normal observations; they are exact only then.",
-          "The statistic is checked against its definition and the limits against their own distributions, not against another software implementation or a published dataset."
+          "The statistic and the limits are checked against its definition, its distributions and a NumPy/SciPy computation of the same formulas; no published dataset or control-chart package (R qcc, Minitab) is compared yet, and the scaling formulas themselves are the textbook ones, not re-derived."
         ]
       },
       "performance": {
@@ -547,12 +555,20 @@
             "method": "evaluates the F CDF at the returned limit and checks the signals of new points against estimates from a Phase I sample",
             "tolerance": "1e-9 absolute on the probability",
             "test": "src/spc/hotelling.rs::tests::phase_ii_judges_new_points_against_the_estimates"
+          },
+          {
+            "claim": "T-squared of new observations against given estimates and the Phase II limit agree with an independent computation (NumPy's LU solve; SciPy's F quantile with the textbook scaling) for the same five shapes and three alpha levels.",
+            "reference_kind": "reference_implementation",
+            "reference": "NumPy 2.4.6 (numpy.linalg.solve) and SciPy 1.17.1 (scipy.stats.f.ppf), with the limit scaling of Tracy, Young and Mason (1992) and Montgomery, ch. 11",
+            "method": "compares every statistic and limit of the result with the reference table for each case",
+            "tolerance": "relative 1e-8 for T-squared, 1e-9 for the limit",
+            "test": "tests/hotelling_reference.rs::phase_ii_matches_numpy_and_scipy"
           }
         ],
         "limits": [
           "Individual observations only: subgrouped data (n > 1) and the multivariate EWMA are not computed.",
           "The limit assumes the estimates come from m independent, multivariate normal in-control observations and that the new observations are independent of them.",
-          "The statistic is checked against its definition and the limit against its own distribution, not against another software implementation or a published dataset."
+          "The statistic and the limits are checked against its definition, its distributions and a NumPy/SciPy computation of the same formulas; no published dataset or control-chart package (R qcc, Minitab) is compared yet, and the scaling formulas themselves are the textbook ones, not re-derived."
         ]
       },
       "performance": {
