@@ -1133,4 +1133,117 @@ mod tests {
             Some(ControlChartError::NonFiniteValue)
         );
     }
+
+    // Independent oracle vectors: ten synthetic points of two interleaved groups,
+    // derived by hand from the textbook definitions by the person who asked for
+    // these charts (no library, no tabulated value reproduced). Six decimals as
+    // given there.
+    const ORACLE_VALUES: [f64; 10] = [10.2, 50.5, 9.8, 49.6, 10.1, 50.2, 10.3, 49.9, 9.9, 50.4];
+    const ORACLE_GROUPS: [usize; 10] = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1];
+    const ORACLE_TARGETS: [f64; 2] = [10.0, 50.0];
+
+    fn close6(a: f64, b: f64) {
+        assert!((a - b).abs() < 5e-7, "{a} != {b}");
+    }
+
+    /// The oracle takes `3 / 1.128` and `MR-bar / 1.128` (d2 to four digits);
+    /// the crate's individuals chart uses the textbook `E2 = 2.660` (decision
+    /// D940-01) and its sigma uses the exact `d2 = 2 / sqrt(pi)`. The two
+    /// agree to within the rounding of those constants, 3.4e-4 relative at the
+    /// worst: what a constant choice may move, and nothing a convention error
+    /// (a within-group moving range moves MR-bar by a factor of several) could
+    /// hide behind.
+    fn near_oracle(ours: f64, oracle: f64) {
+        assert!(
+            (ours - oracle).abs() <= 4e-4 * oracle.abs(),
+            "{ours} is not within the constant rounding of the oracle {oracle}"
+        );
+    }
+
+    #[test]
+    fn oracle_deviation_chart_takes_moving_ranges_across_group_boundaries() {
+        let c = deviation_chart(
+            &ORACLE_VALUES,
+            &ORACLE_GROUPS,
+            &ORACLE_TARGETS,
+            RuleSet::default(),
+            None,
+        )
+        .expect("chart");
+        let devs = [0.2, 0.5, -0.2, -0.4, 0.1, 0.2, 0.3, -0.1, -0.1, 0.4];
+        for (p, d) in c.points.iter().zip(devs) {
+            close6(p.value, d);
+        }
+        // Moving ranges over consecutive points of the whole sequence, the group
+        // boundary included: 0.3 0.7 0.2 0.5 0.1 0.1 0.4 0.0 0.5, mean 2.8 / 9.
+        assert_eq!(c.mr_points.len(), 9);
+        let mrs = [0.3, 0.7, 0.2, 0.5, 0.1, 0.1, 0.4, 0.0, 0.5];
+        for (p, m) in c.mr_points.iter().zip(mrs) {
+            close6(p.value, m);
+        }
+        close6(c.mr_limits.cl, 0.311111);
+        close6(c.limits.cl, 0.0);
+        // Oracle: 3 * MR-bar / 1.128 = 0.827423. Crate: E2 * MR-bar, E2 = 2.660.
+        near_oracle(c.limits.ucl, 0.827423);
+        near_oracle(c.limits.lcl, -0.827423);
+        close(c.limits.ucl, 2.660 * c.mr_limits.cl);
+        close6(c.mr_limits.ucl, 1.0164);
+        close6(c.mr_limits.lcl, 0.0);
+        assert!(c.is_in_control());
+    }
+
+    #[test]
+    fn oracle_standardized_chart_with_known_spreads() {
+        let c = standardized_chart(
+            &ORACLE_VALUES,
+            &ORACLE_GROUPS,
+            &ORACLE_TARGETS,
+            GroupStandard::Known(&[0.2, 0.5]),
+            RuleSet::default(),
+        )
+        .expect("chart");
+        let z = [1.0, 1.0, -1.0, -0.8, 0.5, 0.4, 1.5, -0.2, -0.5, 0.8];
+        for (p, z) in c.points.iter().zip(z) {
+            close6(p.value, z);
+        }
+        let mrs = [0.0, 2.0, 0.2, 1.3, 0.1, 1.1, 1.7, 0.3, 1.3];
+        for (p, m) in c.mr_points.iter().zip(mrs) {
+            close6(p.value, m);
+        }
+        // Centred at 0 with limits ±3 and sigma 1 whatever the moving ranges
+        // say; the moving-range chart is the one that follows them.
+        close6(c.limits.cl, 0.0);
+        close6(c.limits.ucl, 3.0);
+        close6(c.limits.lcl, -3.0);
+        close6(c.sigma_hat, 1.0);
+        close6(c.mr_limits.cl, D2[0]);
+        close6(c.mr_limits.ucl, 3.267 * D2[0]);
+        assert!(c.is_in_control());
+
+        // The number that tells the estimated-spread path from the known-spread
+        // path: a sigma taken from these moving ranges alone is MR-bar / d2.
+        let from_ranges = deviation_chart(&z, &[0; 10], &[0.0], RuleSet::default(), None)
+            .expect("chart of the standardized values");
+        close6(from_ranges.mr_limits.cl, 0.888889);
+        near_oracle(from_ranges.sigma_hat, 0.788022);
+        close6(from_ranges.sigma_hat, 0.888889 / D2[0]);
+        // And the MR chart the oracle states is that mean range, 3.267 times.
+        close6(from_ranges.mr_limits.ucl, 2.904);
+    }
+
+    #[test]
+    fn oracle_standardized_p_chart_with_known_centres() {
+        let c = standardized_p_chart(
+            &[8, 22, 9, 12],
+            &[100, 200, 150, 100],
+            &[0, 1, 0, 1],
+            GroupStandard::Known(&[0.05, 0.10]),
+        )
+        .expect("chart");
+        let z = [1.376494, 0.471405, 0.561951, 0.666667];
+        for (p, z) in c.points.iter().zip(z) {
+            close6(p.z.expect("every sample has a z"), z);
+        }
+        assert!(c.is_in_control());
+    }
 }

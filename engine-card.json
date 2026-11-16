@@ -230,10 +230,18 @@
             "reference": "Bothe (1989), 'A powerful new control chart for job shop manufacturers'; Wheeler (1991), Short Run SPC",
             "method": "compares the result with values computed by hand from the cited transformation",
             "test": "src/spc/short_run.rs::tests::a_single_group_matches_the_ordinary_individuals_chart"
+          },
+          {
+            "claim": "Moving ranges are taken over consecutive plotted points of the whole sequence, group boundaries included; the individuals limits are E2 times the mean moving range and the moving-range limit D4 times it.",
+            "reference_kind": "literature",
+            "reference": "Independent hand derivation from the textbook definitions, supplied by an independent party; no library, no tabulated value reproduced",
+            "method": "compares the result with the independently derived vectors, to the six decimals given",
+            "tolerance": "1e-6 absolute; limits that carry a table constant (E2 = 2.660, d2 to four digits in the vectors) within 4e-4 relative",
+            "test": "src/spc/short_run.rs::tests::oracle_deviation_chart_takes_moving_ranges_across_group_boundaries"
           }
         ],
         "limits": [
-          "Checked against hand-computed worked examples and against the ordinary chart for a single group; no independent implementation or published dataset is compared yet."
+          "Checked against hand-computed worked examples, against the ordinary chart for a single group, and against vectors an independent party derived by hand from the same definitions; no independent software implementation or published dataset is compared yet."
         ]
       },
       "performance": {
@@ -284,10 +292,18 @@
             "reference": "Bothe (1989), 'A powerful new control chart for job shop manufacturers'; Wheeler (1991), Short Run SPC",
             "method": "compares the result with values computed by hand from the cited transformation",
             "test": "src/spc/short_run.rs::tests::standardized_estimated_spreads_use_each_groups_own_ranges"
+          },
+          {
+            "claim": "With known spreads each z is (x - target) / spread, the individuals chart is centred at 0 with limits +/-3 and sigma 1, and the moving-range chart follows the moving ranges of the z values.",
+            "reference_kind": "literature",
+            "reference": "Independent hand derivation from the textbook definitions, supplied by an independent party; no library, no tabulated value reproduced",
+            "method": "compares the result with the independently derived vectors, to the six decimals given",
+            "tolerance": "1e-6 absolute; limits that carry a table constant (E2 = 2.660, d2 to four digits in the vectors) within 4e-4 relative",
+            "test": "src/spc/short_run.rs::tests::oracle_standardized_chart_with_known_spreads"
           }
         ],
         "limits": [
-          "Checked against hand-computed worked examples and against the ordinary chart for a single group; no independent implementation or published dataset is compared yet."
+          "Checked against hand-computed worked examples, against the ordinary chart for a single group, and against vectors an independent party derived by hand from the same definitions; no independent software implementation or published dataset is compared yet."
         ]
       },
       "performance": {
@@ -338,10 +354,18 @@
             "reference": "Bothe (1989), 'A powerful new control chart for job shop manufacturers'; Wheeler (1991), Short Run SPC",
             "method": "compares the result with values computed by hand from the cited transformation",
             "test": "src/spc/short_run.rs::tests::a_single_group_matches_the_ordinary_charts"
+          },
+          {
+            "claim": "With known group centres each z is (p - p0) / sqrt(p0 (1 - p0) / n) against limits +/-3.",
+            "reference_kind": "literature",
+            "reference": "Independent hand derivation from the textbook definitions, supplied by an independent party; no library, no tabulated value reproduced",
+            "method": "compares the result with the independently derived vectors, to the six decimals given",
+            "tolerance": "1e-6 absolute; limits that carry a table constant (E2 = 2.660, d2 to four digits in the vectors) within 4e-4 relative",
+            "test": "src/spc/short_run.rs::tests::oracle_standardized_p_chart_with_known_centres"
           }
         ],
         "limits": [
-          "Checked against hand-computed worked examples and against the ordinary chart for a single group; no independent implementation or published dataset is compared yet."
+          "Checked against hand-computed worked examples, against the ordinary chart for a single group, and against vectors an independent party derived by hand from the same definitions; no independent software implementation or published dataset is compared yet."
         ]
       },
       "performance": {
