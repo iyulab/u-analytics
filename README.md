@@ -41,6 +41,7 @@ Control charts for monitoring process stability:
 - **Overdispersion-adjusted**: Laney P' and U' (φ coefficient corrects for between-subgroup variation)
 - **Rare events**: G chart (geometric distribution) and T chart (exponential) for low-defect processes
 - **Short runs**: one chart for a process that runs in groups (a part number, a recipe) — deviation from the group's aim, standardized Z-MR, and standardized P and U against each group's own centre
+- **Multivariate**: Hotelling T² for individual observations of correlated variables — Phase I and Phase II against exact small-sample limits
 - **Run rules**: Nelson (8 rules), Western Electric (4 rules — its run rule is eight points on one side, Nelson's nine); the 3-sigma test alone by default
 
 ```rust
@@ -90,6 +91,28 @@ let chart = standardized_chart(
 )
 .unwrap();
 assert_eq!(chart.limits.ucl, 3.0); // (x − target) / spread: the limits are ±3
+```
+
+Two variables that must keep their correlation can each look fine on their own chart while the pair
+is out of control. Hotelling's T² charts the distance of every observation from the mean in the
+metric of the covariance, against an exact limit (a Beta quantile for the history itself, an F
+quantile for new observations):
+
+```rust
+use u_analytics::spc::hotelling::{phase_i, phase_ii};
+
+let history = vec![
+    vec![1.0, 1.1], vec![2.0, 1.9], vec![3.0, 3.2], vec![4.0, 3.9],
+    vec![5.0, 5.1], vec![6.0, 5.8], vec![7.0, 7.2], vec![8.0, 7.9],
+    vec![4.5, 1.5], // inside both ranges, off the line the others follow
+];
+let chart = phase_i(&history, 0.0027).unwrap();
+assert_eq!(chart.out_of_control, vec![8]);
+
+// Remove the signal's cause, then watch new observations against the cleaned estimates.
+let cleaned = phase_i(&history[..8], 0.0027).unwrap();
+let next = phase_ii(&[vec![4.5, 4.4], vec![4.5, 1.5]], &cleaned.estimates, 0.0027).unwrap();
+assert_eq!(next.out_of_control, vec![1]);
 ```
 
 ### Process Capability
@@ -737,6 +760,50 @@ console.log(chart.i_points.map(p => p.value));  // ≈ [1, 1, 0, -1, 0.5, 1]
 console.log(chart.i_ucl, chart.i_lcl);          // 3, -3
 ```
 
+### Hotelling T² — correlated variables, one chart
+
+```ts
+// data / observations: one row per observation, one column per variable
+hotelling_phase_i(data: number[][], alpha?: number | null): HotellingChart
+hotelling_phase_ii(observations: number[][], reference: HotellingReference, alpha?: number | null): HotellingChart
+
+type HotellingReference = { mean: number[], covariance: number[][], m: number }  // m: observations behind them, whole
+type HotellingChart = {
+  t2: number[],                    // T² of each row, in the order given
+  ucl: number,                     // the upper limit (the lower is 0)
+  out_of_control: number[],        // positions whose T² exceeds it
+  in_control: boolean,
+  estimates: HotellingReference }  // the reference Phase II takes
+```
+
+`alpha` is the false-alarm probability per point (default 0.0027, the 3-sigma rate). Phase I
+charts the history against its own mean and covariance with the exact limit
+`(m − 1)²/m · B⁻¹(1 − α; p/2, (m − p − 1)/2)` (Tracy, Young and Mason 1992), so it holds for small `m`;
+it needs `m ≥ p + 2` rows. A row that signals is a candidate for removal — take out the ones with a
+known cause, run it again, and hand the `estimates` of the cleaned chart to Phase II, whose limit is
+`p(m + 1)(m − 1)/(m(m − p)) · F⁻¹(1 − α; p, m − p)` (`m ≥ p + 1`; `observations` may be empty: the limit
+alone). The limits assume independent, multivariate normal observations; subgrouped data and the
+multivariate EWMA are not computed.
+
+Refusals: `insufficient_data` (`data`, or `reference.m`, with `min` and `got`), `dimension_mismatch`
+(`data` or `observations` with the row as `index`; `reference.mean`; `reference.covariance` with
+the row), `value_not_finite`, `parameter_out_of_range` (`alpha`, open bounds 0 and 1),
+`malformed_input` (`reference.m` not a whole number), and `degenerate_data` when the covariance
+cannot be inverted — a constant variable, or one that is a linear combination of the others.
+
+```js
+const { hotelling_phase_i, hotelling_phase_ii } = require("@iyulab/u-analytics");
+
+// Two variables that follow one line; the last row is inside both ranges but off the line.
+const history = [[1, 1.1], [2, 1.9], [3, 3.2], [4, 3.9], [5, 5.1], [6, 5.8], [7, 7.2], [8, 7.9], [4.5, 1.5]];
+const one = hotelling_phase_i(history);
+console.log(one.out_of_control);                    // [8]
+
+const cleaned = hotelling_phase_i(history.slice(0, 8));   // the cause of row 8 is known: drop it
+const next = hotelling_phase_ii([[4.5, 4.4], [4.5, 1.5]], cleaned.estimates);
+console.log(next.out_of_control, next.ucl > one.ucl);     // [1] true
+```
+
 ### CUSUM and EWMA — sequential shift detection
 
 The Shewhart charts above judge each point on its own, which makes them slow to
@@ -1378,6 +1445,8 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_short_run_standardized_chart` | `short_run_standardized_chart(values, groups, targets, { rules?, spreads? })` | `{ values, groups, targets, rules?, spreads? }` |
 | `uanalytics_short_run_p_chart` | `short_run_p_chart(samples, groups, { centers? })` | `{ samples: [[defectives, sample_size], …], groups, centers? }` |
 | `uanalytics_short_run_u_chart` | `short_run_u_chart(samples, groups, { centers? })` | `{ samples: [[defects, units], …], groups, centers? }` |
+| `uanalytics_hotelling_phase_i` | `hotelling_phase_i(data, alpha?)` | `{ data, alpha? }` |
+| `uanalytics_hotelling_phase_ii` | `hotelling_phase_ii(observations, reference, alpha?)` | `{ observations, reference: { mean, covariance, m }, alpha? }` |
 | `uanalytics_run_rules` | `run_rules(values, limits, { rules? })` | `{ values, limits: { ucl, cl, lcl }, rules? }` |
 | `uanalytics_p_chart` | `p_chart(samples, { p_bar? })` | `{ samples: [[defectives, sample_size], …], p_bar? }` |
 | `uanalytics_laney_p_chart` | `laney_p_chart(samples, { p_bar?, phi? })` | `{ samples: [[defectives, sample_size], …], p_bar?, phi? }` |
@@ -1454,6 +1523,7 @@ results — `uanalytics_one_sample_t_test` `{data, mu0}`, `uanalytics_two_sample
 The .NET client (`bindings/csharp/UAnalytics`, package `UAnalytics`) wraps each
 entry point as a method on `AnalyticsClient` — `XbarRChart`, `ImrChart`, `PChart(samples, pBar)`, `LaneyPChart(samples, pBar, phi)`,
 `ShortRunDeviationChart`, `ShortRunStandardizedChart`, `ShortRunPChart`, `ShortRunUChart`,
+`HotellingPhaseI`, `HotellingPhaseII`,
 `ProcessCapability`, `DetectChangepoints`, … — serialising the arguments to the
 request above and returning the response as a typed record. A non-zero status
 surfaces as `AnalyticsException` carrying the native status (`Status`), the `error`

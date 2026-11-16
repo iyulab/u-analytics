@@ -6702,6 +6702,200 @@ pub(crate) mod type1_gage {
     }
 }
 
+/// Hotelling T² charts for individual observations (`crate::spc::hotelling`).
+///
+/// Phase I (`data` → statistics, exact limit, estimates) and Phase II
+/// (`observations` against a `reference` — the `estimates` Phase I returned, or
+/// any mean, covariance and number of observations behind them).
+pub(crate) mod hotelling {
+    use super::*;
+    use crate::spc::hotelling::{
+        phase_i, phase_ii, HotellingChart, HotellingError, HotellingEstimates,
+    };
+
+    /// What a Phase II chart monitors against: the mean and covariance of the
+    /// in-control process and the number of observations they were estimated
+    /// from (which sets the limit). It is the `estimates` of a Phase I result.
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    #[serde(deny_unknown_fields)]
+    pub(crate) struct HotellingReferenceDto {
+        /// The mean of each variable.
+        pub(crate) mean: Vec<f64>,
+        /// The sample covariance matrix (denominator `m - 1`), `p` rows of `p`.
+        pub(crate) covariance: Vec<Vec<f64>>,
+        /// The number of observations the mean and covariance come from, a
+        /// whole number.
+        #[serde(serialize_with = "whole_number")]
+        pub(crate) m: f64,
+    }
+
+    /// A whole count written as an integer (`9`, not `9.0`), as every other
+    /// count in a result is; the field is read as a double so a fraction is
+    /// refused with its value rather than by the parser.
+    fn whole_number<S: serde::Serializer>(value: &f64, serializer: S) -> Result<S::Ok, S::Error> {
+        if value.fract() == 0.0 && (0.0..=MAX_EXACT_COUNT).contains(value) {
+            serializer.serialize_u64(*value as u64)
+        } else {
+            serializer.serialize_f64(*value)
+        }
+    }
+
+    /// A Hotelling T² chart: one statistic per observation against one upper
+    /// limit (the lower limit is 0).
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct HotellingChartDto {
+        /// `T²` of each observation, in the order given.
+        pub(crate) t2: Vec<f64>,
+        /// The upper control limit: an exact Beta quantile in Phase I, an exact
+        /// F quantile in Phase II.
+        pub(crate) ucl: f64,
+        /// Positions (from 0) whose `T²` exceeds the limit.
+        pub(crate) out_of_control: Vec<usize>,
+        /// Whether every observation is within the limit.
+        pub(crate) in_control: bool,
+        /// The mean, covariance and count the statistics are measured against.
+        pub(crate) estimates: HotellingReferenceDto,
+    }
+
+    /// The false-alarm probability of a 3-sigma chart, two-sided normal: what
+    /// `alpha` is when none is given.
+    pub(crate) const DEFAULT_ALPHA: f64 = 0.0027;
+
+    fn chart_dto(chart: HotellingChart) -> HotellingChartDto {
+        let in_control = chart.is_in_control();
+        HotellingChartDto {
+            t2: chart.t2,
+            ucl: chart.ucl,
+            out_of_control: chart.out_of_control,
+            in_control,
+            estimates: HotellingReferenceDto {
+                mean: chart.estimates.mean,
+                covariance: chart.estimates.covariance,
+                m: chart.estimates.m as f64,
+            },
+        }
+    }
+
+    /// The refusal for a core error. `rows` is the table of observations the
+    /// call took (`data` or `observations`); the estimates of Phase II are
+    /// named by their place in `reference`.
+    fn refusal(error: HotellingError, rows: &'static str, count: &'static str) -> WireError {
+        let named = |parameter: &'static str| match parameter {
+            "mean" => "reference.mean",
+            "covariance" => "reference.covariance",
+            other if other == "data" || other == "observations" => rows,
+            other => other,
+        };
+        match error {
+            HotellingError::InvalidAlpha { got } => WireError::out_of_range(
+                "alpha",
+                Bound::Open(0.0),
+                Bound::Open(1.0),
+                got,
+                format!("alpha: must be between 0 and 1 (exclusive), got {got}"),
+            ),
+            HotellingError::TooFew { min, got } => WireError::too_few(
+                count,
+                min,
+                got,
+                format!("{count}: at least {min} observations are needed, got {got}"),
+            ),
+            HotellingError::DimensionMismatch {
+                parameter,
+                expected,
+                got,
+                index,
+            } => {
+                let parameter = named(parameter);
+                let mut e = WireError::new(
+                    code::DIMENSION_MISMATCH,
+                    index,
+                    format!("{parameter}: expected {expected} values, got {got}"),
+                )
+                .about(parameter)
+                .with("expected", Detail::Num(expected as f64))
+                .with("got", Detail::Num(got as f64));
+                e.index = index;
+                e
+            }
+            HotellingError::NonFinite { parameter, index } => {
+                let parameter = named(parameter);
+                WireError::new(
+                    code::VALUE_NOT_FINITE,
+                    index,
+                    format!("{parameter}: expected finite numbers"),
+                )
+                .about(parameter)
+            }
+            HotellingError::Degenerate => WireError::degenerate_data(
+                "the covariance matrix is singular: a variable is constant, or one is a \
+                 linear combination of the others, so the data hold no information in that \
+                 direction",
+            )
+            .about(rows),
+        }
+    }
+
+    /// The Phase I chart of `data` (rows of `p` variables): `T²` against the
+    /// exact Beta limit at significance `alpha` in `(0, 1)`. Needs `p + 2` rows
+    /// (`insufficient_data`); rows of different lengths are `dimension_mismatch`,
+    /// a covariance that cannot be inverted is `degenerate_data`.
+    pub(crate) fn phase_i_dto(
+        data: &[Vec<f64>],
+        alpha: Option<f64>,
+    ) -> Result<HotellingChartDto, WireError> {
+        phase_i(data, alpha.unwrap_or(DEFAULT_ALPHA))
+            .map(chart_dto)
+            .map_err(|e| refusal(e, "data", "data"))
+    }
+
+    /// The Phase II chart of `observations` against `reference`: `T²` against
+    /// the exact F limit at significance `alpha`. `reference.m` must be a whole
+    /// number (`malformed_input`) and at least `p + 1` (`insufficient_data`).
+    pub(crate) fn phase_ii_dto(
+        observations: &[Vec<f64>],
+        reference: HotellingReferenceDto,
+        alpha: Option<f64>,
+    ) -> Result<HotellingChartDto, WireError> {
+        let HotellingReferenceDto {
+            mean,
+            covariance,
+            m,
+        } = reference;
+        if !(m.is_finite() && m.fract() == 0.0) {
+            return Err(WireError::new(
+                code::MALFORMED_INPUT,
+                None,
+                format!("reference.m: must be a whole number of observations, got {m}"),
+            )
+            .about("reference.m"));
+        }
+        if !(0.0..=MAX_EXACT_COUNT).contains(&m) {
+            return Err(WireError::out_of_range(
+                "reference.m",
+                Bound::Closed(0.0),
+                Bound::Closed(MAX_EXACT_COUNT),
+                m,
+                format!("reference.m: must be a whole number of at least 0, got {m}"),
+            ));
+        }
+        let estimates = HotellingEstimates {
+            mean,
+            covariance,
+            m: m as usize,
+        };
+        phase_ii(observations, &estimates, alpha.unwrap_or(DEFAULT_ALPHA))
+            .map(chart_dto)
+            .map_err(|e| refusal(e, "observations", "reference.m"))
+    }
+}
+
 /// Short-run charts (`crate::spc::short_run`): a process that runs in groups,
 /// charted on a scale common to all of them.
 ///
@@ -8526,6 +8720,146 @@ mod kde_refusals {
                 .x
                 .len(),
             512
+        );
+    }
+}
+
+#[cfg(test)]
+mod hotelling_wire {
+    use super::hotelling::{phase_i_dto, phase_ii_dto, HotellingReferenceDto};
+    use super::*;
+
+    fn rows() -> Vec<Vec<f64>> {
+        vec![
+            vec![1.0, 1.1],
+            vec![2.0, 1.9],
+            vec![3.0, 3.2],
+            vec![4.0, 3.9],
+            vec![5.0, 5.1],
+            vec![6.0, 5.8],
+            vec![7.0, 7.2],
+            vec![8.0, 7.9],
+            vec![4.5, 1.5],
+        ]
+    }
+
+    fn refused(
+        e: Result<impl std::fmt::Debug, WireError>,
+    ) -> (&'static str, Option<String>, Option<usize>) {
+        let e = e.expect_err("a refusal");
+        (e.code, e.parameter.as_deref().map(str::to_owned), e.index)
+    }
+
+    #[test]
+    fn phase_ii_takes_the_estimates_phase_i_returns_as_json() {
+        let one = phase_i_dto(&rows(), Some(0.0027)).expect("chart");
+        assert_eq!(one.out_of_control, vec![8]);
+        assert!(!one.in_control);
+        assert_eq!(one.estimates.m, 9.0);
+        // The estimates survive a trip through JSON and are what Phase II reads.
+        let json = serde_json::to_value(&one.estimates).expect("serialises");
+        let reference: HotellingReferenceDto = serde_json::from_value(json).expect("reads back");
+        let two = phase_ii_dto(&rows(), reference, Some(0.0027)).expect("chart");
+        assert_eq!(two.t2.len(), 9);
+        // The same estimates and observations, a different limit: Phase II's F
+        // limit is larger than Phase I's Beta limit for the same m and p.
+        assert_eq!(two.t2, one.t2);
+        assert!(two.ucl > one.ucl);
+    }
+
+    #[test]
+    fn refusals_name_their_reason_and_argument() {
+        let (data, a) = (rows(), Some(0.0027));
+        assert_eq!(
+            refused(phase_i_dto(&data, Some(0.0))),
+            ("parameter_out_of_range", Some("alpha".into()), None)
+        );
+        assert_eq!(
+            refused(phase_i_dto(&data[..3], a)),
+            ("insufficient_data", Some("data".into()), None)
+        );
+        let mut ragged = data.clone();
+        ragged[4].pop();
+        assert_eq!(
+            refused(phase_i_dto(&ragged, a)),
+            ("dimension_mismatch", Some("data".into()), Some(4))
+        );
+        let mut nan = data.clone();
+        nan[2][1] = f64::NAN;
+        assert_eq!(
+            refused(phase_i_dto(&nan, a)),
+            ("value_not_finite", Some("data".into()), Some(2))
+        );
+        let constant: Vec<Vec<f64>> = (0..8).map(|i| vec![i as f64, 5.0]).collect();
+        assert_eq!(
+            refused(phase_i_dto(&constant, a)),
+            ("degenerate_data", Some("data".into()), None)
+        );
+    }
+
+    #[test]
+    fn the_reference_is_checked_where_it_is_read() {
+        let reference = |mean: Vec<f64>, covariance: Vec<Vec<f64>>, m: f64| HotellingReferenceDto {
+            mean,
+            covariance,
+            m,
+        };
+        let good = || reference(vec![0.0, 0.0], vec![vec![1.0, 0.0], vec![0.0, 1.0]], 30.0);
+        let a = Some(0.0027);
+        let obs = vec![vec![0.5, 0.5]];
+        assert!(phase_ii_dto(&obs, good(), a).is_ok());
+        let mut r = good();
+        r.m = 30.5;
+        assert_eq!(
+            refused(phase_ii_dto(&obs, r, a)),
+            ("malformed_input", Some("reference.m".into()), None)
+        );
+        let mut r = good();
+        r.m = 2.0;
+        assert_eq!(
+            refused(phase_ii_dto(&obs, r, a)),
+            ("insufficient_data", Some("reference.m".into()), None)
+        );
+        let mut r = good();
+        r.m = -3.0;
+        assert_eq!(
+            refused(phase_ii_dto(&obs, r, a)),
+            ("parameter_out_of_range", Some("reference.m".into()), None)
+        );
+        let r = reference(
+            vec![0.0, 0.0, 0.0],
+            vec![vec![1.0, 0.0], vec![0.0, 1.0]],
+            30.0,
+        );
+        assert_eq!(
+            refused(phase_ii_dto(&obs, r, a)),
+            (
+                "dimension_mismatch",
+                Some("reference.covariance".into()),
+                None
+            )
+        );
+        let r = reference(
+            vec![0.0, 0.0],
+            vec![vec![1.0, 0.0], vec![0.0, f64::NAN]],
+            30.0,
+        );
+        assert_eq!(
+            refused(phase_ii_dto(&obs, r, a)),
+            (
+                "value_not_finite",
+                Some("reference.covariance".into()),
+                Some(1)
+            )
+        );
+        assert_eq!(
+            refused(phase_ii_dto(&[vec![1.0, 2.0, 3.0]], good(), a)),
+            ("dimension_mismatch", Some("observations".into()), Some(0))
+        );
+        let singular = reference(vec![0.0, 0.0], vec![vec![1.0, 1.0], vec![1.0, 1.0]], 30.0);
+        assert_eq!(
+            refused(phase_ii_dto(&obs, singular, a)),
+            ("degenerate_data", Some("observations".into()), None)
         );
     }
 }

@@ -47,6 +47,7 @@ use crate::wire::{
     SpectralResidualInputDto, StlInputDto, WireError,
 };
 use crate::wire::{
+    hotelling::{phase_i_dto, phase_ii_dto, HotellingReferenceDto},
     short_run::{
         attributes_options, deviation_dto, group_rows, standardized_dto, standardized_p_dto,
         standardized_u_dto, variables_options, VariablesOptions,
@@ -664,6 +665,73 @@ pub fn short_run_u_chart(
 fn read_groups(groups: JsValue) -> Result<Vec<usize>, JsValue> {
     let json: serde_json::Value = from_js(groups, "groups")?;
     group_rows(&json, "groups").map_err(js_err)
+}
+
+/// Hotelling T² chart, Phase I, for individual observations of `p` correlated
+/// variables: `T²` of every row of `data` (one row per observation, `p` columns)
+/// against the exact upper control limit `(m − 1)² / m · B⁻¹(1 − α; p/2, (m − p − 1)/2)`
+/// (Tracy, Young and Mason 1992 — the mean and covariance are estimated from the same
+/// `m` rows, so the limit is a scaled Beta quantile, not a chi-squared or F one). A row
+/// that signals is a candidate for removal: remove the ones with a known cause and run
+/// it again.
+///
+/// # Input
+///
+/// - `data`: `m` rows of `p` numbers, `m >= p + 2`
+/// - `alpha` (optional): the false-alarm probability per point, in (0, 1); default
+///   0.0027, the 3-sigma rate
+///
+/// # Errors
+///
+/// `insufficient_data` (`data`, fewer than `p + 2` rows), `dimension_mismatch` (`data`,
+/// the row that is not as long as the first), `value_not_finite` (`data`, the row),
+/// `parameter_out_of_range` (`alpha`, open bounds 0 and 1), `degenerate_data` (`data` —
+/// a constant variable, or one that is a linear combination of the others).
+///
+/// # Output JSON
+///
+/// `t2` (one per row), `ucl`, `out_of_control` (positions from 0), `in_control`,
+/// `estimates` (`mean`, `covariance`, `m`) — the `reference` a Phase II chart takes.
+#[wasm_bindgen(unchecked_return_type = "HotellingChartDto")]
+pub fn hotelling_phase_i(
+    #[wasm_bindgen(unchecked_param_type = "number[][]")] data: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "number | null")] alpha: Option<f64>,
+) -> Result<JsValue, JsValue> {
+    let data = read_number_rows(&data, "data").map_err(js_err)?;
+    to_js(&phase_i_dto(&data, alpha).map_err(js_err)?)
+}
+
+/// Hotelling T² chart, Phase II: `T²` of new observations against the mean and
+/// covariance of the in-control process, with the exact limit
+/// `p (m + 1)(m − 1) / (m (m − p)) · F⁻¹(1 − α; p, m − p)`.
+///
+/// # Input
+///
+/// - `observations`: rows of `p` numbers (may be empty: the limit alone)
+/// - `reference`: `{ mean, covariance, m }` — the `estimates` of a [`hotelling_phase_i`]
+///   result, after the signals with a known cause were removed; `m >= p + 1` whole
+/// - `alpha` (optional): as for [`hotelling_phase_i`]
+///
+/// # Errors
+///
+/// As [`hotelling_phase_i`], and `malformed_input` (`reference.m`, not a whole number),
+/// `insufficient_data` (`reference.m`, fewer than `p + 1`), `dimension_mismatch`
+/// (`reference.mean`, `reference.covariance` row, `observations` row — the `p` the
+/// reference sets), `degenerate_data` (`observations`, a covariance that cannot be
+/// inverted).
+///
+/// # Output JSON
+///
+/// As [`hotelling_phase_i`]; `estimates` is `reference` as read.
+#[wasm_bindgen(unchecked_return_type = "HotellingChartDto")]
+pub fn hotelling_phase_ii(
+    #[wasm_bindgen(unchecked_param_type = "number[][]")] observations: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "HotellingReferenceDto")] reference: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "number | null")] alpha: Option<f64>,
+) -> Result<JsValue, JsValue> {
+    let observations = read_number_rows(&observations, "observations").map_err(js_err)?;
+    let reference: HotellingReferenceDto = from_js(reference, "reference")?;
+    to_js(&phase_ii_dto(&observations, reference, alpha).map_err(js_err)?)
 }
 
 fn short_run_variables_options(
@@ -4259,12 +4327,13 @@ mod engine_card_tests {
     use super::*;
     use crate::engine_card::{arg, optional, string_enum, Schemas};
     use crate::wire::{
-        counter, hypothesis, point_process, reliability, short_run, tolerance, type1_gage, AcfDto,
-        CapabilityDto, ChartPointDto, CorrelationMatrixDto, CusumDto, DistributionFitDto, EwmaDto,
-        FixedLimitChartDto, GChartDto, GageRRAnovaResultDto, GageRRResultDto,
-        GoodnessOfFitResultDto, ImrChartDto, KdeDto, LaneyPChartDto, LaneyUChartDto, PChartDto,
-        PacfDto, PeltResultDto, PercentileCapabilityDto, RegressionDto, SeasonalityDto,
-        SpectralResidualDto, StlDto, TChartDto, UChartDto, XbarRChartDto, XbarSChartDto,
+        counter, hotelling, hypothesis, point_process, reliability, short_run, tolerance,
+        type1_gage, AcfDto, CapabilityDto, ChartPointDto, CorrelationMatrixDto, CusumDto,
+        DistributionFitDto, EwmaDto, FixedLimitChartDto, GChartDto, GageRRAnovaResultDto,
+        GageRRResultDto, GoodnessOfFitResultDto, ImrChartDto, KdeDto, LaneyPChartDto,
+        LaneyUChartDto, PChartDto, PacfDto, PeltResultDto, PercentileCapabilityDto, RegressionDto,
+        SeasonalityDto, SpectralResidualDto, StlDto, TChartDto, UChartDto, XbarRChartDto,
+        XbarSChartDto,
     };
 
     fn schemas() -> Schemas {
@@ -4343,6 +4412,23 @@ mod engine_card_tests {
                 s.of::<short_run::ShortRunAttributeChartDto>(),
             );
         }
+        s.op(
+            "hotelling_phase_i",
+            vec![
+                arg("data", rows()),
+                optional("alpha", s.of::<Option<f64>>()),
+            ],
+            s.of::<hotelling::HotellingChartDto>(),
+        );
+        s.op(
+            "hotelling_phase_ii",
+            vec![
+                arg("observations", rows()),
+                arg("reference", s.of::<hotelling::HotellingReferenceDto>()),
+                optional("alpha", s.of::<Option<f64>>()),
+            ],
+            s.of::<hotelling::HotellingChartDto>(),
+        );
         s.op(
             "run_rules",
             vec![

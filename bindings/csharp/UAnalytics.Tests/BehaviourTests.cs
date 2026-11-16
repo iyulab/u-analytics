@@ -263,6 +263,47 @@ public class BehaviourTests
     }
 
     [Fact]
+    public void A_hotelling_chart_flags_the_point_that_breaks_the_correlation_and_refuses_with_the_engines_codes()
+    {
+        double[][] rows =
+        [
+            [1.0, 1.1], [2.0, 1.9], [3.0, 3.2], [4.0, 3.9], [5.0, 5.1],
+            [6.0, 5.8], [7.0, 7.2], [8.0, 7.9], [4.5, 1.5],
+        ];
+        var one = _client.HotellingPhaseI(rows);
+        // Neither variable leaves its range, the pair leaves the correlation: the last row.
+        Assert.Equal([8], one.OutOfControl);
+        Assert.False(one.InControl);
+        Assert.Equal(9, one.T2.Count);
+        Assert.Equal(9, one.Estimates.M);
+        Assert.Equal(2, one.Estimates.Mean.Count);
+        // The estimates are the reference of Phase II, whose limit (an F quantile) is the larger.
+        var two = _client.HotellingPhaseII(rows[..2], one.Estimates);
+        Assert.Equal(one.T2.Take(2), two.T2);
+        Assert.True(two.Ucl > one.Ucl);
+        Assert.Empty(_client.HotellingPhaseII([], one.Estimates).T2);
+
+        var alpha = Assert.Throws<AnalyticsException>(() => _client.HotellingPhaseI(rows, 0));
+        Assert.Equal(("parameter_out_of_range", "alpha"), (alpha.ErrorCode, alpha.Parameter));
+        Assert.Equal(0.0, alpha.Details!.Value.GetProperty("exclusive_min").GetDouble());
+        Assert.Equal(1.0, alpha.Details!.Value.GetProperty("exclusive_max").GetDouble());
+        var few = Assert.Throws<AnalyticsException>(() => _client.HotellingPhaseI(rows[..3]));
+        Assert.Equal(("insufficient_data", "data"), (few.ErrorCode, few.Parameter));
+        var ragged = Assert.Throws<AnalyticsException>(() => _client.HotellingPhaseI([[1, 2], [3, 4], [5], [7, 8], [9, 10]]));
+        Assert.Equal(("dimension_mismatch", "data", 2), (ragged.ErrorCode, ragged.Parameter, ragged.Index));
+        var flat = Assert.Throws<AnalyticsException>(() => _client.HotellingPhaseI([[1, 5], [2, 5], [3, 5], [4, 5], [5, 5]]));
+        Assert.Equal(("degenerate_data", "data"), (flat.ErrorCode, flat.Parameter));
+        var nan = Assert.Throws<AnalyticsException>(() => _client.HotellingPhaseI([[1, 2], [3, double.NaN], [5, 6], [7, 9]]));
+        Assert.Equal("value_not_finite", nan.ErrorCode);
+        var small = Assert.Throws<AnalyticsException>(() =>
+            _client.HotellingPhaseII(rows[..2], one.Estimates with { M = 2 }));
+        Assert.Equal(("insufficient_data", "reference.m"), (small.ErrorCode, small.Parameter));
+        var wide = Assert.Throws<AnalyticsException>(() =>
+            _client.HotellingPhaseII([[1, 2, 3]], one.Estimates));
+        Assert.Equal(("dimension_mismatch", "observations"), (wide.ErrorCode, wide.Parameter));
+    }
+
+    [Fact]
     public void A_type1_gage_study_reads_its_settings_and_refuses_with_the_engines_codes()
     {
         double[] readings = [10.02, 9.98, 10.05, 10.01, 9.97, 10.03, 10.0, 10.04];

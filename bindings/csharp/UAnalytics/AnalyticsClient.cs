@@ -579,6 +579,42 @@ public sealed class AnalyticsClient : IDisposable
             ("sided", Request.Option(sided, AnalyticsJson.Default.Sided)));
 
     /// <summary>
+    /// Hotelling T² chart for individual observations of correlated variables, Phase I: <c>T²</c> of
+    /// every row of <paramref name="data"/> (one row per observation, <c>p</c> columns) against its
+    /// own mean and covariance, with the exact upper control limit
+    /// <c>(m − 1)²/m · B⁻¹(1 − α; p/2, (m − p − 1)/2)</c> (Tracy, Young and Mason 1992 — the estimates
+    /// come from the same <c>m</c> rows, so the limit is a scaled Beta quantile, valid for small
+    /// samples). A row that signals is a candidate for removal: remove the ones with a known cause and
+    /// run it again, then take <see cref="HotellingChartResult.Estimates"/> to
+    /// <see cref="HotellingPhaseII"/>. At least <c>p + 2</c> rows; <paramref name="alpha"/> is the
+    /// false-alarm probability per point in (0, 1), <c>null</c>: 0.0027 (the 3-sigma rate). Assumes
+    /// independent, multivariate normal observations.
+    /// </summary>
+    public HotellingChartResult HotellingPhaseI(double[][] data, double? alpha = null)
+        => Call(NativeInterop.uanalytics_hotelling_phase_i, AnalyticsJson.Default.HotellingChartResult,
+            ("data", Request.Rows("data", data)), ("alpha", Request.Num("alpha", alpha)));
+
+    /// <summary>
+    /// Hotelling T² chart, Phase II: <c>T²</c> of new <paramref name="observations"/> against the mean
+    /// and covariance of the in-control process (<paramref name="reference"/> — the
+    /// <see cref="HotellingChartResult.Estimates"/> of a Phase I chart after the signals with a known
+    /// cause were removed) with the exact upper control limit
+    /// <c>p(m + 1)(m − 1)/(m(m − p)) · F⁻¹(1 − α; p, m − p)</c>. <c>reference.M</c> is at least
+    /// <c>p + 1</c>. The observations may be empty: the limit alone.
+    /// </summary>
+    public HotellingChartResult HotellingPhaseII(double[][] observations, HotellingEstimates reference,
+        double? alpha = null)
+        => Call(NativeInterop.uanalytics_hotelling_phase_ii, AnalyticsJson.Default.HotellingChartResult,
+            ("observations", Request.Rows("observations", observations)),
+            ("reference", new JsonObject
+            {
+                ["mean"] = Request.Nums("reference.mean", reference.Mean),
+                ["covariance"] = Request.Rows("reference.covariance", reference.Covariance),
+                ["m"] = JsonValue.Create(reference.M),
+            }),
+            ("alpha", Request.Num("alpha", alpha)));
+
+    /// <summary>
     /// Type 1 gage study: the capability of a measurement device from repeated
     /// <paramref name="measurements"/> of one reference part whose true value is
     /// <paramref name="reference"/>, against the specification limits <paramref name="lsl"/> and

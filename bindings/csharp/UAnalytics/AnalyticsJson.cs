@@ -19,6 +19,7 @@ namespace UAnalytics;
 [JsonSerializable(typeof(ShortRunChartResult))]
 [JsonSerializable(typeof(ShortRunAttributeChartResult))]
 [JsonSerializable(typeof(ShortRunScale))]
+[JsonSerializable(typeof(HotellingChartResult))]
 [JsonSerializable(typeof(IReadOnlyList<ChartPoint>))]
 [JsonSerializable(typeof(IReadOnlyList<CounterIncrement>))]
 [JsonSerializable(typeof(IReadOnlyList<CounterTotal>))]

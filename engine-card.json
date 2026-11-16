@@ -420,6 +420,146 @@
       }
     },
     {
+      "id": "hotelling_phase_i",
+      "summary": "A Hotelling T-squared chart for individual observations of correlated variables, Phase I: T-squared of every row of the data against its mean and covariance, the exact upper control limit (a scaled Beta quantile, valid for small samples) at the false-alarm probability alpha, the rows that signal, and the estimates a Phase II chart monitors against.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/hotelling_phase_i.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/hotelling_phase_i.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Each T-squared is the squared Mahalanobis distance of the observation from the mean under the sample covariance, equal to the same quantity computed by Gaussian elimination from the definition.",
+            "reference_kind": "literature",
+            "reference": "Tracy, Young and Mason (1992), 'Multivariate control charts for individual observations', Journal of Quality Technology 24(2); Montgomery, Introduction to Statistical Quality Control, ch. 11",
+            "method": "solves the covariance system for each observation by elimination and compares with the Cholesky-based statistic",
+            "tolerance": "relative 1e-9",
+            "test": "src/spc/hotelling.rs::tests::t_squared_is_the_squared_mahalanobis_distance_of_the_definition"
+          },
+          {
+            "claim": "With one variable T-squared is the squared standardised value, and it is unchanged by an affine map of the variables.",
+            "reference_kind": "literature",
+            "reference": "The definitions: for p = 1 the statistic is ((x - mean) / s)^2, and the Mahalanobis distance is affine invariant",
+            "method": "compares the statistic with the squared z value and with the statistic of an affinely mapped copy of the data",
+            "tolerance": "relative 1e-9",
+            "test": "src/spc/hotelling.rs::tests::one_variable_is_the_squared_standardised_value"
+          },
+          {
+            "claim": "The Phase I limit is the 1 - alpha quantile of its distribution: the scaled Beta CDF evaluated at the limit returns 1 - alpha, and for three points of one variable the limit is the closed-form arcsine quantile.",
+            "reference_kind": "literature",
+            "reference": "Tracy, Young and Mason (1992), 'Multivariate control charts for individual observations', Journal of Quality Technology 24(2); Montgomery, Introduction to Statistical Quality Control, ch. 11",
+            "method": "evaluates the CDF at the returned limit and compares the closed form for m = 3, p = 1",
+            "tolerance": "1e-9 absolute on the probability",
+            "test": "src/spc/hotelling.rs::tests::the_limits_are_the_one_minus_alpha_quantiles_of_their_distributions"
+          },
+          {
+            "claim": "On in-control normal data about alpha of the points signal, and a point that breaks the correlation without leaving either variable's range is the one flagged.",
+            "reference_kind": "literature",
+            "reference": "Tracy, Young and Mason (1992), 'Multivariate control charts for individual observations', Journal of Quality Technology 24(2); Montgomery, Introduction to Statistical Quality Control, ch. 11",
+            "method": "counts signals over seeded normal samples and checks a planted off-correlation point",
+            "tolerance": "signal rate within sampling error of alpha",
+            "test": "src/spc/hotelling.rs::tests::in_control_normal_data_signals_about_alpha_of_the_time"
+          }
+        ],
+        "limits": [
+          "Individual observations only: subgrouped data (n > 1) and the multivariate EWMA are not computed.",
+          "The limits assume independent, multivariate normal observations; they are exact only then.",
+          "The statistic is checked against its definition and the limits against their own distributions, not against another software implementation or a published dataset."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "hotelling_phase_ii",
+      "summary": "A Hotelling T-squared chart for individual observations of correlated variables, Phase II: T-squared of new observations against the mean and covariance of the in-control process (the estimates of a Phase I chart) with the exact upper control limit (a scaled F quantile) at the false-alarm probability alpha, and the observations that signal.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/hotelling_phase_ii.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/hotelling_phase_ii.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Each T-squared is the squared Mahalanobis distance of the observation from the mean under the sample covariance, equal to the same quantity computed by Gaussian elimination from the definition.",
+            "reference_kind": "literature",
+            "reference": "Tracy, Young and Mason (1992), 'Multivariate control charts for individual observations', Journal of Quality Technology 24(2); Montgomery, Introduction to Statistical Quality Control, ch. 11",
+            "method": "solves the covariance system for each observation by elimination and compares with the Cholesky-based statistic",
+            "tolerance": "relative 1e-9",
+            "test": "src/spc/hotelling.rs::tests::t_squared_is_the_squared_mahalanobis_distance_of_the_definition"
+          },
+          {
+            "claim": "With one variable T-squared is the squared standardised value, and it is unchanged by an affine map of the variables.",
+            "reference_kind": "literature",
+            "reference": "The definitions: for p = 1 the statistic is ((x - mean) / s)^2, and the Mahalanobis distance is affine invariant",
+            "method": "compares the statistic with the squared z value and with the statistic of an affinely mapped copy of the data",
+            "tolerance": "relative 1e-9",
+            "test": "src/spc/hotelling.rs::tests::one_variable_is_the_squared_standardised_value"
+          },
+          {
+            "claim": "The Phase II limit is the 1 - alpha quantile of its F-based distribution, and new points are judged against the supplied estimates.",
+            "reference_kind": "literature",
+            "reference": "Tracy, Young and Mason (1992), 'Multivariate control charts for individual observations', Journal of Quality Technology 24(2); Montgomery, Introduction to Statistical Quality Control, ch. 11",
+            "method": "evaluates the F CDF at the returned limit and checks the signals of new points against estimates from a Phase I sample",
+            "tolerance": "1e-9 absolute on the probability",
+            "test": "src/spc/hotelling.rs::tests::phase_ii_judges_new_points_against_the_estimates"
+          }
+        ],
+        "limits": [
+          "Individual observations only: subgrouped data (n > 1) and the multivariate EWMA are not computed.",
+          "The limit assumes the estimates come from m independent, multivariate normal in-control observations and that the new observations are independent of them.",
+          "The statistic is checked against its definition and the limit against its own distribution, not against another software implementation or a published dataset."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
       "id": "run_rules",
       "summary": "The run tests a series breaks against control limits the caller supplies, point by point. Run tests: the 3-sigma test alone unless options.rules names a set (western_electric, nelson) or lists tests.",
       "input": {

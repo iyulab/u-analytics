@@ -236,4 +236,35 @@ const nanRef = refusal(() => m.type1_gage_study(readings, Number.NaN, 9, 11))
 ok(nanRef && nanRef.code === 'value_not_finite' && nanRef.parameter === 'reference',
   `NaN reference: ${nanRef ? nanRef.code + ' ' + nanRef.parameter : 'no error'}`)
 
+// Hotelling T²: a plain JS array of rows crosses the boundary, the pair that leaves the
+// correlation (inside both ranges) is the one flagged, and the `estimates` of a Phase I
+// result go back in as the `reference` of Phase II (`m` stays a whole number on the way).
+const line = [[1, 1.1], [2, 1.9], [3, 3.2], [4, 3.9], [5, 5.1], [6, 5.8], [7, 7.2], [8, 7.9], [4.5, 1.5]]
+const h1 = m.hotelling_phase_i(line)
+ok(JSON.stringify(h1.out_of_control) === '[8]' && h1.in_control === false && h1.t2.length === 9 &&
+  h1.estimates.m === 9 && h1.estimates.mean.length === 2, `hotelling_phase_i ${JSON.stringify(h1)}`)
+for (const absent of [undefined, null]) {
+  ok(JSON.stringify(m.hotelling_phase_i(line, absent)) === JSON.stringify(h1),
+    `hotelling_phase_i alpha=${absent} differs from the default 0.0027`)
+}
+ok(m.hotelling_phase_i(line, 0.05).ucl < h1.ucl, 'a larger alpha lowers the limit')
+const h2 = m.hotelling_phase_ii([[4.5, 4.4], [4.5, 1.5]], m.hotelling_phase_i(line.slice(0, 8)).estimates)
+ok(JSON.stringify(h2.out_of_control) === '[1]' && h2.estimates.m === 8, `hotelling_phase_ii ${JSON.stringify(h2)}`)
+ok(m.hotelling_phase_ii([], h1.estimates).t2.length === 0, 'no observations: the limit alone')
+const badAlpha = refusal(() => m.hotelling_phase_i(line, 1))
+ok(badAlpha && badAlpha.code === 'parameter_out_of_range' && badAlpha.parameter === 'alpha' &&
+  badAlpha.exclusive_min === 0 && badAlpha.exclusive_max === 1 && badAlpha.got === 1,
+  `alpha 1: ${badAlpha ? badAlpha.code + ' ' + badAlpha.parameter : 'no error'}`)
+const fewRows = refusal(() => m.hotelling_phase_i(line.slice(0, 3)))
+ok(fewRows && fewRows.code === 'insufficient_data' && fewRows.parameter === 'data' && fewRows.min === 4 && fewRows.got === 3,
+  `three rows of two: ${fewRows ? fewRows.code + ' ' + fewRows.parameter : 'no error'}`)
+const nullCell = refusal(() => m.hotelling_phase_i([[1, 2], [3, null], [5, 6], [7, 9]]))
+ok(nullCell && nullCell.code === 'malformed_input' && nullCell.index === 1 && nullCell.parameter === 'data[1]',
+  `null cell: ${nullCell ? nullCell.code + ' ' + nullCell.parameter + ' ' + nullCell.index : 'no error'}`)
+const fractionM = refusal(() => m.hotelling_phase_ii([[1, 2]], { ...h1.estimates, m: 9.5 }))
+ok(fractionM && fractionM.code === 'malformed_input' && fractionM.parameter === 'reference.m',
+  `fractional m: ${fractionM ? fractionM.code + ' ' + fractionM.parameter : 'no error'}`)
+const flatColumn = refusal(() => m.hotelling_phase_i([[1, 5], [2, 5], [3, 5], [4, 5], [5, 5]]))
+ok(flatColumn && flatColumn.code === 'degenerate_data', `constant column: ${flatColumn ? flatColumn.code : 'no error'}`)
+
 console.log(`binding behaviour gate: ok (${checks} checks)`)

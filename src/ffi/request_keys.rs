@@ -551,6 +551,16 @@ pub(super) fn entry_points() -> Vec<(&'static str, Entry, Value)> {
             json!({ "data": series(), "coverage": 0.95, "confidence": 0.9, "sided": "one_sided" }),
         ),
         ep(
+            "uanalytics_hotelling_phase_i",
+            uanalytics_hotelling_phase_i,
+            json!({ "data": [[1.0, 1.1], [2.0, 1.9], [3.0, 3.2], [4.0, 3.9], [5.0, 5.1], [6.0, 5.8], [7.0, 7.2], [8.0, 7.9]] }),
+        ),
+        ep(
+            "uanalytics_hotelling_phase_ii",
+            uanalytics_hotelling_phase_ii,
+            json!({ "observations": [[1.5, 1.4], [5.0, 5.2]], "reference": { "mean": [4.5, 4.5], "covariance": [[6.0, 5.8], [5.8, 5.7]], "m": 8 } }),
+        ),
+        ep(
             "uanalytics_type1_gage_study",
             uanalytics_type1_gage_study,
             json!({ "measurements": series(), "reference": 10, "lsl": 8, "usl": 12 }),

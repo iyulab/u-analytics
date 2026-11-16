@@ -247,6 +247,25 @@
         "seed": {}
       }
     },
+    "uanalytics_hotelling_phase_i": {
+      "properties": {
+        "alpha": {},
+        "data": {}
+      }
+    },
+    "uanalytics_hotelling_phase_ii": {
+      "properties": {
+        "alpha": {},
+        "observations": {},
+        "reference": {
+          "properties": {
+            "covariance": {},
+            "m": {},
+            "mean": {}
+          }
+        }
+      }
+    },
     "uanalytics_imr_chart": {
       "properties": {
         "rules": {

@@ -1313,6 +1313,45 @@ struct Type1GageStudyReq {
     sigma_multiple: Option<f64>,
 }
 
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HotellingPhaseIReq {
+    data: Vec<Vec<f64>>,
+    #[serde(default)]
+    alpha: Option<f64>,
+}
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HotellingPhaseIIReq {
+    observations: Vec<Vec<f64>>,
+    reference: crate::wire::hotelling::HotellingReferenceDto,
+    #[serde(default)]
+    alpha: Option<f64>,
+}
+
+wire_export!(
+    /// Hotelling T² chart for individual observations, Phase I: `{data, alpha?}` → `{t2, ucl,
+    /// out_of_control, in_control, estimates: {mean, covariance, m}}`, the WebAssembly binding's
+    /// result. `data` is one row per observation, at least `p + 2` rows; `alpha` in (0, 1),
+    /// default 0.0027. `estimates` is the `reference` of Phase II.
+    uanalytics_hotelling_phase_i,
+    HotellingPhaseIReq,
+    |r| crate::wire::hotelling::phase_i_dto(&r.data, r.alpha)
+);
+
+wire_export!(
+    /// Hotelling T² chart for individual observations, Phase II: `{observations, reference:
+    /// {mean, covariance, m}, alpha?}` → `{t2, ucl, out_of_control, in_control, estimates}`, the
+    /// WebAssembly binding's result. `reference.m` is a whole number of at least `p + 1`;
+    /// `alpha` in (0, 1), default 0.0027.
+    uanalytics_hotelling_phase_ii,
+    HotellingPhaseIIReq,
+    |r| crate::wire::hotelling::phase_ii_dto(&r.observations, r.reference, r.alpha)
+);
+
 wire_export!(
     /// One-sample t test of `data` against `mu0`: → `{statistic, df, p_value}`, the WebAssembly binding's result.
     uanalytics_one_sample_t_test,
@@ -3633,6 +3672,65 @@ mod tests {
         );
         assert_eq!(code, 0, "{body}");
         assert_eq!(body["group_centers"][0].as_f64(), Some(3.0));
+    }
+
+    #[test]
+    fn hotelling_round_trips_with_the_wasm_codes() {
+        let rows = r#"[[1.0, 1.1], [2.0, 1.9], [3.0, 3.2], [4.0, 3.9], [5.0, 5.1],
+                        [6.0, 5.8], [7.0, 7.2], [8.0, 7.9], [4.5, 1.5]]"#;
+        let (code, one) = call(
+            uanalytics_hotelling_phase_i,
+            &format!(r#"{{"data": {rows}, "alpha": 0.0027}}"#),
+        );
+        assert_eq!(code, 0, "{one}");
+        assert_eq!(one["out_of_control"], serde_json::json!([8]), "{one}");
+        assert_eq!(one["in_control"], false);
+        assert_eq!(one["estimates"]["m"].as_u64(), Some(9));
+        // The estimates are what Phase II takes, and alpha is optional.
+        let (code, two) = call(
+            uanalytics_hotelling_phase_ii,
+            &format!(
+                r#"{{"observations": {rows}, "reference": {}}}"#,
+                one["estimates"]
+            ),
+        );
+        assert_eq!(code, 0, "{two}");
+        assert_eq!(two["t2"], one["t2"]);
+        assert!(two["ucl"].as_f64() > one["ucl"].as_f64(), "{two}");
+        // Refusals carry the WebAssembly codes.
+        let refuse = |entry: Entry, request: &str| {
+            let (code, b) = call(entry, request);
+            assert_eq!(code, -3, "{b}");
+            b
+        };
+        let b = refuse(
+            uanalytics_hotelling_phase_i,
+            &format!(r#"{{"data": {rows}, "alpha": 1.0}}"#),
+        );
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("parameter_out_of_range"), Some("alpha")),
+            "{b}"
+        );
+        let b = refuse(
+            uanalytics_hotelling_phase_ii,
+            r#"{"observations": [[1, 2]], "reference":
+                {"mean": [0, 0], "covariance": [[1, 0], [0, 1]], "m": 30.5}}"#,
+        );
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("malformed_input"), Some("reference.m")),
+            "{b}"
+        );
+        let b = refuse(
+            uanalytics_hotelling_phase_i,
+            r#"{"data": [[1, 2], [3, 4], [5, 6]]}"#,
+        );
+        assert_eq!(
+            (b["code"].as_str(), b["min"].as_f64(), b["got"].as_f64()),
+            (Some("insufficient_data"), Some(4.0), Some(3.0)),
+            "{b}"
+        );
     }
 
     #[test]

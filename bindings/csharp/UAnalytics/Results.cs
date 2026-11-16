@@ -122,6 +122,31 @@ public sealed record ShortRunChartResult(
     IReadOnlyList<ChartPoint> MrPoints,
     bool InControl);
 
+// ── Multivariate charts ──
+
+/// <summary>
+/// What a Hotelling T² Phase II chart monitors against: the mean of each variable, the sample
+/// covariance matrix (denominator <c>M − 1</c>, <c>p</c> rows of <c>p</c>) and the number
+/// <see cref="M"/> of observations they were estimated from, which sets the limit. It is the
+/// <see cref="HotellingChartResult.Estimates"/> of a Phase I chart.
+/// </summary>
+public sealed record HotellingEstimates(
+    IReadOnlyList<double> Mean,
+    IReadOnlyList<IReadOnlyList<double>> Covariance,
+    int M);
+
+/// <summary>
+/// A Hotelling T² chart for individual observations: <c>T²</c> of each observation (in the order
+/// given) against one upper limit <see cref="Ucl"/> (the lower limit is 0), the positions that
+/// exceed it, and the <see cref="Estimates"/> the statistics are measured against.
+/// </summary>
+public sealed record HotellingChartResult(
+    IReadOnlyList<double> T2,
+    double Ucl,
+    IReadOnlyList<int> OutOfControl,
+    bool InControl,
+    HotellingEstimates Estimates);
+
 // ── Attributes charts ──
 
 /// <summary>

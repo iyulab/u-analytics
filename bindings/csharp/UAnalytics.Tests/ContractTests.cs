@@ -26,6 +26,15 @@ public class ContractTests
 
     private static readonly double[] Events = [5, 12, 20, 26, 31, 35, 38, 40];
 
+    private static readonly double[][] Correlated =
+    [
+        [1.0, 1.1], [2.0, 1.9], [3.0, 3.2], [4.0, 3.9], [5.0, 5.1],
+        [6.0, 5.8], [7.0, 7.2], [8.0, 7.9], [4.5, 1.5],
+    ];
+
+    private static readonly HotellingEstimates Reference =
+        new([4.5, 4.5], [[6.0, 5.8], [5.8, 5.7]], 8);
+
     private static double[][][] Gage()
     {
         // 10 parts × 3 operators × 2 trials, deterministic.
@@ -118,6 +127,11 @@ public class ContractTests
         ["ToleranceFactor(one-sided)"] = c => Out(new ValueBody(c.ToleranceFactor(10, 0.95, 0.9, Sided.OneSided)), AnalyticsJson.Default.ValueBody),
         ["ToleranceInterval"] = c => Out(c.ToleranceInterval(Series, 0.95, 0.9, Sided.TwoSided), AnalyticsJson.Default.ToleranceIntervalResult),
         ["ToleranceInterval(one-sided)"] = c => Out(c.ToleranceInterval(Series, 0.95, 0.9, Sided.OneSided), AnalyticsJson.Default.ToleranceIntervalResult),
+        ["HotellingPhaseI"] = c => Out(c.HotellingPhaseI(Correlated, 0.01), AnalyticsJson.Default.HotellingChartResult),
+        ["HotellingPhaseI(default alpha)"] = c => Out(c.HotellingPhaseI(Correlated), AnalyticsJson.Default.HotellingChartResult),
+        ["HotellingPhaseII"] = c => Out(
+            c.HotellingPhaseII(Correlated[..3], Reference, 0.01),
+            AnalyticsJson.Default.HotellingChartResult),
         ["Type1GageStudy"] = c => Out(c.Type1GageStudy(Series, 10, 8, 12), AnalyticsJson.Default.Type1GageResult),
         ["Type1GageStudy(options)"] = c => Out(c.Type1GageStudy(Series, 10, 8, 12, 0.15, 4), AnalyticsJson.Default.Type1GageResult),
         ["Type1GageStudy(bias fills the band)"] = c => Out(c.Type1GageStudy(Series, 14, 8, 12), AnalyticsJson.Default.Type1GageResult),

@@ -10,8 +10,13 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Added
 
-- `spc::hotelling`: Hotelling's T² control chart for individual observations of correlated variables, in the Rust API (the
-  WebAssembly, C ABI and .NET surfaces follow). `phase_i(data, alpha)` charts `m` historical rows against their own mean and
+- `spc::hotelling`: Hotelling's T² control chart for individual observations of correlated variables, in the Rust API and on every
+  surface: WebAssembly `hotelling_phase_i(data, alpha?)` / `hotelling_phase_ii(observations, reference, alpha?)` (the result's
+  `estimates` is the `reference` Phase II takes, so a cleaned Phase I chart feeds it directly), C ABI `uanalytics_hotelling_phase_i` /
+  `uanalytics_hotelling_phase_ii`, and .NET `HotellingPhaseI` / `HotellingPhaseII` returning `HotellingChartResult`. Refusals use the
+  shared vocabulary (`insufficient_data`, `dimension_mismatch`, `value_not_finite`, `parameter_out_of_range` on `alpha`,
+  `degenerate_data` for a covariance that cannot be inverted, `malformed_input` for a `reference.m` that is not whole) and the engine
+  card lists both operations. `phase_i(data, alpha)` charts `m` historical rows against their own mean and
   covariance with the exact Beta limit `(m − 1)²/m · B⁻¹(1 − α; p/2, (m − p − 1)/2)` (Tracy, Young & Mason 1992; needs
   `m > p + 1`); `phase_ii(observations, estimates, alpha)` charts new rows against estimates from `m` earlier ones with the exact F limit
   `p(m + 1)(m − 1)/(m(m − p)) · F⁻¹(1 − α; p, m − p)` (needs `m > p`); `estimate_from` takes the estimates of a cleaned Phase I data set,

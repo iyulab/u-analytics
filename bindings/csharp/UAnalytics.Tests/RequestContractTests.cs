@@ -39,6 +39,15 @@ public class RequestContractTests
 
     private static readonly double[] Events = [5, 12, 20, 26, 31, 35, 38, 40];
 
+    private static readonly double[][] Correlated =
+    [
+        [1.0, 1.1], [2.0, 1.9], [3.0, 3.2], [4.0, 3.9], [5.0, 5.1],
+        [6.0, 5.8], [7.0, 7.2], [8.0, 7.9], [4.5, 1.5],
+    ];
+
+    private static readonly HotellingEstimates Reference =
+        new([4.5, 4.5], [[6.0, 5.8], [5.8, 5.7]], 8);
+
     private static readonly RunRule[] AllRules = Enum.GetValues<RunRule>();
 
     private static double[][][] Gage()
@@ -139,6 +148,8 @@ public class RequestContractTests
         ["ToleranceFactor(OneSided)"] = c => c.ToleranceFactor(10, 0.95, 0.9, Sided.OneSided),
         ["ToleranceInterval"] = c => c.ToleranceInterval(Series, 0.95, 0.9, Sided.TwoSided),
         ["ToleranceInterval(OneSided)"] = c => c.ToleranceInterval(Series, 0.95, 0.9, Sided.OneSided),
+        ["HotellingPhaseI"] = c => c.HotellingPhaseI(Correlated, 0.01),
+        ["HotellingPhaseII"] = c => c.HotellingPhaseII(Correlated[..3], Reference, 0.01),
         ["Type1GageStudy"] = c => c.Type1GageStudy(Series, 10, 8, 12, 0.15, 4),
         ["JarqueBeraTest"] = c => c.JarqueBeraTest(Series),
         ["ShapiroWilkTest"] = c => c.ShapiroWilkTest(Series),
