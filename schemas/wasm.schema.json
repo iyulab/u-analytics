@@ -1776,6 +1776,91 @@
       ],
       "type": "object"
     },
+    "HotellingSubgroupChartDto": {
+      "description": "A Hotelling T² chart of subgroups: one statistic per subgroup mean against one upper\nlimit (the lower limit is 0).",
+      "properties": {
+        "estimates": {
+          "$ref": "#/$defs/HotellingSubgroupReferenceDto",
+          "description": "The grand mean, pooled covariance and counts the statistics are measured against."
+        },
+        "in_control": {
+          "description": "Whether every subgroup is within the limit.",
+          "type": "boolean"
+        },
+        "out_of_control": {
+          "description": "Positions (from 0) of the subgroups whose `T²` exceeds the limit.",
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "t2": {
+          "description": "`T² = n (x̄ − μ)ᵀ S⁻¹ (x̄ − μ)` of each subgroup, in the order given.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "ucl": {
+          "description": "The upper control limit: an F quantile scaled by the subgroup counts.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "t2",
+        "ucl",
+        "out_of_control",
+        "in_control",
+        "estimates"
+      ],
+      "type": "object"
+    },
+    "HotellingSubgroupReferenceDto": {
+      "additionalProperties": false,
+      "description": "What a subgroup Phase II chart monitors against: the grand mean, the covariance pooled\nwithin the subgroups, and the number `m` of subgroups and their size `n`. It is the\n`estimates` of a subgroup Phase I result.",
+      "properties": {
+        "covariance": {
+          "description": "The average of the within-subgroup sample covariance matrices, `p` rows of `p`.",
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "m": {
+          "description": "The number of subgroups the estimates come from, a whole number.",
+          "format": "double",
+          "type": "number"
+        },
+        "mean": {
+          "description": "The mean of each variable.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "n": {
+          "description": "The number of observations in each subgroup, a whole number of at least 2.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "mean",
+        "covariance",
+        "m",
+        "n"
+      ],
+      "type": "object"
+    },
     "ImrChartDto": {
       "properties": {
         "i_cl": {
@@ -5118,6 +5203,76 @@
     },
     "hotelling_phase_ii.output": {
       "$ref": "#/$defs/HotellingChartDto"
+    },
+    "hotelling_subgroup_phase_i.input": {
+      "additionalProperties": false,
+      "description": "The arguments of hotelling_subgroup_phase_i(subgroups, alpha), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "alpha": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "subgroups": {
+          "items": {
+            "items": {
+              "items": {
+                "format": "double",
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "subgroups"
+      ],
+      "type": "object"
+    },
+    "hotelling_subgroup_phase_i.output": {
+      "$ref": "#/$defs/HotellingSubgroupChartDto"
+    },
+    "hotelling_subgroup_phase_ii.input": {
+      "additionalProperties": false,
+      "description": "The arguments of hotelling_subgroup_phase_ii(subgroups, reference, alpha), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "alpha": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "reference": {
+          "$ref": "#/$defs/HotellingSubgroupReferenceDto"
+        },
+        "subgroups": {
+          "items": {
+            "items": {
+              "items": {
+                "format": "double",
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "subgroups",
+        "reference"
+      ],
+      "type": "object"
+    },
+    "hotelling_subgroup_phase_ii.output": {
+      "$ref": "#/$defs/HotellingSubgroupChartDto"
     },
     "imr_chart.input": {
       "additionalProperties": false,

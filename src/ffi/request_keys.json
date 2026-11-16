@@ -266,6 +266,26 @@
         }
       }
     },
+    "uanalytics_hotelling_subgroup_phase_i": {
+      "properties": {
+        "alpha": {},
+        "subgroups": {}
+      }
+    },
+    "uanalytics_hotelling_subgroup_phase_ii": {
+      "properties": {
+        "alpha": {},
+        "reference": {
+          "properties": {
+            "covariance": {},
+            "m": {},
+            "mean": {},
+            "n": {}
+          }
+        },
+        "subgroups": {}
+      }
+    },
     "uanalytics_imr_chart": {
       "properties": {
         "rules": {

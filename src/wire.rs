@@ -6710,7 +6710,8 @@ pub(crate) mod type1_gage {
 pub(crate) mod hotelling {
     use super::*;
     use crate::spc::hotelling::{
-        phase_i, phase_ii, HotellingChart, HotellingError, HotellingEstimates,
+        phase_i, phase_ii, subgroup_phase_i, subgroup_phase_ii, HotellingChart, HotellingError,
+        HotellingEstimates, SubgroupEstimates, SubgroupHotellingChart,
     };
 
     /// What a Phase II chart monitors against: the mean and covariance of the
@@ -6842,6 +6843,30 @@ pub(crate) mod hotelling {
         }
     }
 
+    /// A count read as a double so that a fraction is refused with its value: a whole
+    /// number of at least 0 (`malformed_input` for a fraction or a non-finite value,
+    /// `parameter_out_of_range` below 0 or beyond the doubles that hold a whole number).
+    fn whole_field(parameter: &'static str, value: f64) -> Result<usize, WireError> {
+        if !(value.is_finite() && value.fract() == 0.0) {
+            return Err(WireError::new(
+                code::MALFORMED_INPUT,
+                None,
+                format!("{parameter}: must be a whole number, got {value}"),
+            )
+            .about(parameter));
+        }
+        if !(0.0..=MAX_EXACT_COUNT).contains(&value) {
+            return Err(WireError::out_of_range(
+                parameter,
+                Bound::Closed(0.0),
+                Bound::Closed(MAX_EXACT_COUNT),
+                value,
+                format!("{parameter}: must be a whole number of at least 0, got {value}"),
+            ));
+        }
+        Ok(value as usize)
+    }
+
     /// The Phase I chart of `data` (rows of `p` variables): `T²` against the
     /// exact Beta limit at significance `alpha` in `(0, 1)`. Needs `p + 2` rows
     /// (`insufficient_data`); rows of different lengths are `dimension_mismatch`,
@@ -6868,31 +6893,110 @@ pub(crate) mod hotelling {
             covariance,
             m,
         } = reference;
-        if !(m.is_finite() && m.fract() == 0.0) {
-            return Err(WireError::new(
-                code::MALFORMED_INPUT,
-                None,
-                format!("reference.m: must be a whole number of observations, got {m}"),
-            )
-            .about("reference.m"));
-        }
-        if !(0.0..=MAX_EXACT_COUNT).contains(&m) {
-            return Err(WireError::out_of_range(
-                "reference.m",
-                Bound::Closed(0.0),
-                Bound::Closed(MAX_EXACT_COUNT),
-                m,
-                format!("reference.m: must be a whole number of at least 0, got {m}"),
-            ));
-        }
+        let m = whole_field("reference.m", m)?;
         let estimates = HotellingEstimates {
             mean,
             covariance,
-            m: m as usize,
+            m,
         };
         phase_ii(observations, &estimates, alpha.unwrap_or(DEFAULT_ALPHA))
             .map(chart_dto)
             .map_err(|e| refusal(e, "observations", "reference.m"))
+    }
+
+    /// What a subgroup Phase II chart monitors against: the grand mean, the covariance pooled
+    /// within the subgroups, and the number `m` of subgroups and their size `n`. It is the
+    /// `estimates` of a subgroup Phase I result.
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    #[serde(deny_unknown_fields)]
+    pub(crate) struct HotellingSubgroupReferenceDto {
+        /// The mean of each variable.
+        pub(crate) mean: Vec<f64>,
+        /// The average of the within-subgroup sample covariance matrices, `p` rows of `p`.
+        pub(crate) covariance: Vec<Vec<f64>>,
+        /// The number of subgroups the estimates come from, a whole number.
+        #[serde(serialize_with = "whole_number")]
+        pub(crate) m: f64,
+        /// The number of observations in each subgroup, a whole number of at least 2.
+        #[serde(serialize_with = "whole_number")]
+        pub(crate) n: f64,
+    }
+
+    /// A Hotelling T² chart of subgroups: one statistic per subgroup mean against one upper
+    /// limit (the lower limit is 0).
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct HotellingSubgroupChartDto {
+        /// `T² = n (x̄ − μ)ᵀ S⁻¹ (x̄ − μ)` of each subgroup, in the order given.
+        pub(crate) t2: Vec<f64>,
+        /// The upper control limit: an F quantile scaled by the subgroup counts.
+        pub(crate) ucl: f64,
+        /// Positions (from 0) of the subgroups whose `T²` exceeds the limit.
+        pub(crate) out_of_control: Vec<usize>,
+        /// Whether every subgroup is within the limit.
+        pub(crate) in_control: bool,
+        /// The grand mean, pooled covariance and counts the statistics are measured against.
+        pub(crate) estimates: HotellingSubgroupReferenceDto,
+    }
+
+    fn subgroup_chart_dto(chart: SubgroupHotellingChart) -> HotellingSubgroupChartDto {
+        let in_control = chart.is_in_control();
+        HotellingSubgroupChartDto {
+            t2: chart.t2,
+            ucl: chart.ucl,
+            out_of_control: chart.out_of_control,
+            in_control,
+            estimates: HotellingSubgroupReferenceDto {
+                mean: chart.estimates.mean,
+                covariance: chart.estimates.covariance,
+                m: chart.estimates.m as f64,
+                n: chart.estimates.n as f64,
+            },
+        }
+    }
+
+    /// The Phase I chart of `subgroups` (each `n` rows of `p` variables, all the same `n >= 2`):
+    /// `T²` of each subgroup mean against the grand mean and the covariance pooled within the
+    /// subgroups, with the F limit of Alt (1985). Subgroups of another size or width are
+    /// `dimension_mismatch` (the subgroup as `index`); fewer than `m + p` observations in all, or
+    /// fewer than 2 per subgroup, is `insufficient_data`.
+    pub(crate) fn subgroup_phase_i_dto(
+        subgroups: &[Vec<Vec<f64>>],
+        alpha: Option<f64>,
+    ) -> Result<HotellingSubgroupChartDto, WireError> {
+        subgroup_phase_i(subgroups, alpha.unwrap_or(DEFAULT_ALPHA))
+            .map(subgroup_chart_dto)
+            .map_err(|e| refusal(e, "subgroups", "subgroups"))
+    }
+
+    /// The Phase II chart of new `subgroups` against `reference`: `T²` of each subgroup mean
+    /// with the F limit for new subgroups. `reference.m` and `reference.n` must be whole numbers
+    /// (`malformed_input`).
+    pub(crate) fn subgroup_phase_ii_dto(
+        subgroups: &[Vec<Vec<f64>>],
+        reference: HotellingSubgroupReferenceDto,
+        alpha: Option<f64>,
+    ) -> Result<HotellingSubgroupChartDto, WireError> {
+        let HotellingSubgroupReferenceDto {
+            mean,
+            covariance,
+            m,
+            n,
+        } = reference;
+        let estimates = SubgroupEstimates {
+            mean,
+            covariance,
+            m: whole_field("reference.m", m)?,
+            n: whole_field("reference.n", n)?,
+        };
+        subgroup_phase_ii(subgroups, &estimates, alpha.unwrap_or(DEFAULT_ALPHA))
+            .map(subgroup_chart_dto)
+            .map_err(|e| refusal(e, "subgroups", "reference"))
     }
 }
 
@@ -8860,6 +8964,77 @@ mod hotelling_wire {
         assert_eq!(
             refused(phase_ii_dto(&obs, singular, a)),
             ("degenerate_data", Some("observations".into()), None)
+        );
+    }
+
+    fn groups() -> Vec<Vec<Vec<f64>>> {
+        (0..6)
+            .map(|i| {
+                let b = i as f64 * 1.5;
+                vec![
+                    vec![b + 0.1, b + 0.3],
+                    vec![b - 0.2, b + 0.1],
+                    vec![b + 0.3, b - 0.1],
+                ]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_subgroup_phase_ii_takes_the_estimates_phase_i_returns() {
+        use super::hotelling::{subgroup_phase_i_dto, subgroup_phase_ii_dto};
+        let one = subgroup_phase_i_dto(&groups(), None).expect("chart");
+        assert_eq!((one.estimates.m, one.estimates.n), (6.0, 3.0));
+        let json = serde_json::to_value(&one.estimates).expect("serialises");
+        assert_eq!(json["m"], serde_json::json!(6));
+        let reference = serde_json::from_value(json).expect("reads back");
+        let two = subgroup_phase_ii_dto(&groups(), reference, None).expect("chart");
+        assert_eq!(two.t2, one.t2);
+        assert!(two.ucl > one.ucl);
+    }
+
+    #[test]
+    fn subgroup_refusals_name_their_reason_and_argument() {
+        use super::hotelling::{subgroup_phase_i_dto, subgroup_phase_ii_dto};
+        let a = Some(0.0027);
+        let mut odd = groups();
+        odd[3].pop();
+        assert_eq!(
+            refused(subgroup_phase_i_dto(&odd, a)),
+            ("dimension_mismatch", Some("subgroups".into()), Some(3))
+        );
+        let mut nan = groups();
+        nan[2][1][0] = f64::NAN;
+        assert_eq!(
+            refused(subgroup_phase_i_dto(&nan, a)),
+            ("value_not_finite", Some("subgroups".into()), Some(2))
+        );
+        let single: Vec<Vec<Vec<f64>>> = groups().iter().map(|g| vec![g[0].clone()]).collect();
+        assert_eq!(
+            refused(subgroup_phase_i_dto(&single, a)),
+            ("insufficient_data", Some("subgroups".into()), None)
+        );
+        assert_eq!(
+            refused(subgroup_phase_i_dto(&groups(), Some(1.5))),
+            ("parameter_out_of_range", Some("alpha".into()), None)
+        );
+        let reference = |m: f64, n: f64| super::hotelling::HotellingSubgroupReferenceDto {
+            mean: vec![0.0, 0.0],
+            covariance: vec![vec![1.0, 0.0], vec![0.0, 1.0]],
+            m,
+            n,
+        };
+        assert_eq!(
+            refused(subgroup_phase_ii_dto(&groups(), reference(10.0, 2.5), a)),
+            ("malformed_input", Some("reference.n".into()), None)
+        );
+        assert_eq!(
+            refused(subgroup_phase_ii_dto(&groups(), reference(-1.0, 3.0), a)),
+            ("parameter_out_of_range", Some("reference.m".into()), None)
+        );
+        assert_eq!(
+            refused(subgroup_phase_ii_dto(&groups(), reference(10.0, 4.0), a)),
+            ("dimension_mismatch", Some("subgroups".into()), Some(0))
         );
     }
 }

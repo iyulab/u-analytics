@@ -48,6 +48,16 @@ public class RequestContractTests
     private static readonly HotellingEstimates Reference =
         new([4.5, 4.5], [[6.0, 5.8], [5.8, 5.7]], 8);
 
+    private static readonly double[][][] Grouped =
+    [
+        [[1.0, 1.1], [1.2, 1.0], [0.9, 1.3]], [[2.0, 2.2], [2.1, 1.9], [1.8, 2.1]],
+        [[3.1, 3.0], [2.9, 3.3], [3.0, 3.1]], [[4.0, 4.2], [4.2, 3.9], [3.8, 4.1]],
+        [[5.0, 5.2], [5.1, 4.9], [4.9, 5.1]],
+    ];
+
+    private static readonly HotellingSubgroupEstimates SubgroupReference =
+        new([3.0, 3.1], [[0.04, 0.01], [0.01, 0.05]], 5, 3);
+
     private static readonly RunRule[] AllRules = Enum.GetValues<RunRule>();
 
     private static double[][][] Gage()
@@ -150,6 +160,8 @@ public class RequestContractTests
         ["ToleranceInterval(OneSided)"] = c => c.ToleranceInterval(Series, 0.95, 0.9, Sided.OneSided),
         ["HotellingPhaseI"] = c => c.HotellingPhaseI(Correlated, 0.01),
         ["HotellingPhaseII"] = c => c.HotellingPhaseII(Correlated[..3], Reference, 0.01),
+        ["HotellingSubgroupPhaseI"] = c => c.HotellingSubgroupPhaseI(Grouped, 0.01),
+        ["HotellingSubgroupPhaseII"] = c => c.HotellingSubgroupPhaseII(Grouped[..2], SubgroupReference, 0.01),
         ["Type1GageStudy"] = c => c.Type1GageStudy(Series, 10, 8, 12, 0.15, 4),
         ["JarqueBeraTest"] = c => c.JarqueBeraTest(Series),
         ["ShapiroWilkTest"] = c => c.ShapiroWilkTest(Series),

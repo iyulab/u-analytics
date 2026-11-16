@@ -147,6 +147,31 @@ public sealed record HotellingChartResult(
     bool InControl,
     HotellingEstimates Estimates);
 
+/// <summary>
+/// What a Hotelling T² Phase II chart of subgroups monitors against: the mean of each variable,
+/// the covariance pooled within the subgroups (the average of their sample covariances,
+/// <c>p</c> rows of <c>p</c>), the number <see cref="M"/> of subgroups and their size
+/// <see cref="N"/>. It is the <see cref="HotellingSubgroupChartResult.Estimates"/> of a subgroup
+/// Phase I chart.
+/// </summary>
+public sealed record HotellingSubgroupEstimates(
+    IReadOnlyList<double> Mean,
+    IReadOnlyList<IReadOnlyList<double>> Covariance,
+    int M,
+    int N);
+
+/// <summary>
+/// A Hotelling T² chart of subgroups: <c>T² = n (x̄ − μ)ᵀ S⁻¹ (x̄ − μ)</c> of each subgroup mean
+/// (in the order given) against one upper limit <see cref="Ucl"/> (the lower limit is 0), the
+/// positions that exceed it, and the <see cref="Estimates"/> the statistics are measured against.
+/// </summary>
+public sealed record HotellingSubgroupChartResult(
+    IReadOnlyList<double> T2,
+    double Ucl,
+    IReadOnlyList<int> OutOfControl,
+    bool InControl,
+    HotellingSubgroupEstimates Estimates);
+
 // ── Attributes charts ──
 
 /// <summary>

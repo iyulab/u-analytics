@@ -47,7 +47,10 @@ use crate::wire::{
     SpectralResidualInputDto, StlInputDto, WireError,
 };
 use crate::wire::{
-    hotelling::{phase_i_dto, phase_ii_dto, HotellingReferenceDto},
+    hotelling::{
+        phase_i_dto, phase_ii_dto, subgroup_phase_i_dto, subgroup_phase_ii_dto,
+        HotellingReferenceDto, HotellingSubgroupReferenceDto,
+    },
     short_run::{
         attributes_options, deviation_dto, group_rows, standardized_dto, standardized_p_dto,
         standardized_u_dto, variables_options, VariablesOptions,
@@ -732,6 +735,66 @@ pub fn hotelling_phase_ii(
     let observations = read_number_rows(&observations, "observations").map_err(js_err)?;
     let reference: HotellingReferenceDto = from_js(reference, "reference")?;
     to_js(&phase_ii_dto(&observations, reference, alpha).map_err(js_err)?)
+}
+
+/// Hotelling T² chart for subgroups, Phase I: `T²` of every subgroup mean against the grand
+/// mean with the covariance pooled *within* the subgroups (the average of their sample
+/// covariances), `T² = n (x̄ − x̿)ᵀ S⁻¹ (x̄ − x̿)`, against `p (m − 1)(n − 1) / (m n − m − p + 1) ·
+/// F⁻¹(1 − α; p, m n − m − p + 1)` (Alt 1985). Variation between subgroups does not enter the
+/// covariance, so a drifting mean signals instead of being absorbed.
+///
+/// # Input
+///
+/// - `subgroups`: `m` subgroups, each `n >= 2` rows of `p` numbers, every subgroup the same
+///   size; at least `m + p` observations in all
+/// - `alpha` (optional): the false-alarm probability per point, in (0, 1); default 0.0027
+///
+/// # Errors
+///
+/// As [`hotelling_phase_i`], with `subgroups` for `data` and the subgroup as `index` of
+/// `dimension_mismatch` (another size, another width) and `value_not_finite`;
+/// `insufficient_data` for fewer than 2 rows per subgroup or fewer than `m + p` rows in all.
+///
+/// # Output JSON
+///
+/// `t2` (one per subgroup), `ucl`, `out_of_control`, `in_control`, `estimates` (`mean`,
+/// `covariance`, `m`, `n`) — the `reference` a subgroup Phase II chart takes.
+#[wasm_bindgen(unchecked_return_type = "HotellingSubgroupChartDto")]
+pub fn hotelling_subgroup_phase_i(
+    #[wasm_bindgen(unchecked_param_type = "number[][][]")] subgroups: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "number | null")] alpha: Option<f64>,
+) -> Result<JsValue, JsValue> {
+    let subgroups: Vec<Vec<Vec<f64>>> = from_js(subgroups, "subgroups")?;
+    to_js(&subgroup_phase_i_dto(&subgroups, alpha).map_err(js_err)?)
+}
+
+/// Hotelling T² chart for subgroups, Phase II: new `subgroups` of `reference.n` rows against the
+/// estimates of a [`hotelling_subgroup_phase_i`] chart (after the signals with a known cause
+/// were removed), with the limit `p (m + 1)(n − 1) / (m n − m − p + 1) · F⁻¹(1 − α; p, m n − m − p + 1)`.
+///
+/// # Input
+///
+/// - `subgroups`: new subgroups of `reference.n` rows of `p` numbers (may be empty: the limit alone)
+/// - `reference`: `{ mean, covariance, m, n }` — the `estimates` of the Phase I result
+/// - `alpha` (optional): as for [`hotelling_subgroup_phase_i`]
+///
+/// # Errors
+///
+/// As [`hotelling_subgroup_phase_i`], and `malformed_input` (`reference.m` or `reference.n` not
+/// a whole number), `dimension_mismatch` (`reference.mean`, `reference.covariance`).
+///
+/// # Output JSON
+///
+/// As [`hotelling_subgroup_phase_i`].
+#[wasm_bindgen(unchecked_return_type = "HotellingSubgroupChartDto")]
+pub fn hotelling_subgroup_phase_ii(
+    #[wasm_bindgen(unchecked_param_type = "number[][][]")] subgroups: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "HotellingSubgroupReferenceDto")] reference: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "number | null")] alpha: Option<f64>,
+) -> Result<JsValue, JsValue> {
+    let subgroups: Vec<Vec<Vec<f64>>> = from_js(subgroups, "subgroups")?;
+    let reference: HotellingSubgroupReferenceDto = from_js(reference, "reference")?;
+    to_js(&subgroup_phase_ii_dto(&subgroups, reference, alpha).map_err(js_err)?)
 }
 
 fn short_run_variables_options(
@@ -4428,6 +4491,26 @@ mod engine_card_tests {
                 optional("alpha", s.of::<Option<f64>>()),
             ],
             s.of::<hotelling::HotellingChartDto>(),
+        );
+        s.op(
+            "hotelling_subgroup_phase_i",
+            vec![
+                arg("subgroups", s.of::<Vec<Vec<Vec<f64>>>>()),
+                optional("alpha", s.of::<Option<f64>>()),
+            ],
+            s.of::<hotelling::HotellingSubgroupChartDto>(),
+        );
+        s.op(
+            "hotelling_subgroup_phase_ii",
+            vec![
+                arg("subgroups", s.of::<Vec<Vec<Vec<f64>>>>()),
+                arg(
+                    "reference",
+                    s.of::<hotelling::HotellingSubgroupReferenceDto>(),
+                ),
+                optional("alpha", s.of::<Option<f64>>()),
+            ],
+            s.of::<hotelling::HotellingSubgroupChartDto>(),
         );
         s.op(
             "run_rules",

@@ -263,6 +263,34 @@ public class BehaviourTests
     }
 
     [Fact]
+    public void A_subgroup_hotelling_chart_sees_a_drift_between_subgroups_and_refuses_with_the_engines_codes()
+    {
+        double[][][] groups =
+        [
+            [[1.0, 1.1], [1.2, 1.0], [0.9, 1.3]], [[2.0, 2.2], [2.1, 1.9], [1.8, 2.1]],
+            [[3.1, 3.0], [2.9, 3.3], [3.0, 3.1]], [[4.0, 4.2], [4.2, 3.9], [3.8, 4.1]],
+            [[5.0, 5.2], [5.1, 4.9], [4.9, 5.1]],
+        ];
+        var one = _client.HotellingSubgroupPhaseI(groups);
+        Assert.Equal(5, one.T2.Count);
+        Assert.Equal((5, 3), (one.Estimates.M, one.Estimates.N));
+        // The estimates are the reference of Phase II, whose limit (for new subgroups) is the larger.
+        var two = _client.HotellingSubgroupPhaseII(groups[..2], one.Estimates);
+        Assert.Equal(one.T2.Take(2), two.T2);
+        Assert.True(two.Ucl > one.Ucl);
+        Assert.Empty(_client.HotellingSubgroupPhaseII([], one.Estimates).T2);
+
+        var alpha = Assert.Throws<AnalyticsException>(() => _client.HotellingSubgroupPhaseI(groups, 1));
+        Assert.Equal(("parameter_out_of_range", "alpha"), (alpha.ErrorCode, alpha.Parameter));
+        double[][][] odd = [groups[0], groups[1][..2], groups[2], groups[3], groups[4]];
+        var size = Assert.Throws<AnalyticsException>(() => _client.HotellingSubgroupPhaseI(odd));
+        Assert.Equal(("dimension_mismatch", "subgroups", 1), (size.ErrorCode, size.Parameter, size.Index));
+        var small = Assert.Throws<AnalyticsException>(() =>
+            _client.HotellingSubgroupPhaseII(groups[..1], one.Estimates with { N = 4 }));
+        Assert.Equal(("dimension_mismatch", "subgroups"), (small.ErrorCode, small.Parameter));
+    }
+
+    [Fact]
     public void A_hotelling_chart_flags_the_point_that_breaks_the_correlation_and_refuses_with_the_engines_codes()
     {
         double[][] rows =

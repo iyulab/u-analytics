@@ -267,4 +267,29 @@ ok(fractionM && fractionM.code === 'malformed_input' && fractionM.parameter === 
 const flatColumn = refusal(() => m.hotelling_phase_i([[1, 5], [2, 5], [3, 5], [4, 5], [5, 5]]))
 ok(flatColumn && flatColumn.code === 'degenerate_data', `constant column: ${flatColumn ? flatColumn.code : 'no error'}`)
 
+// Hotelling T² for subgroups: a nested JS array crosses the boundary, the estimates of Phase I
+// are the reference of Phase II (`m` and `n` stay whole), and a subgroup of another size names itself.
+const sub = [
+  [[1, 1.1], [1.2, 1], [0.9, 1.3]], [[2, 2.2], [2.1, 1.9], [1.8, 2.1]], [[3.1, 3], [2.9, 3.3], [3, 3.1]],
+  [[4, 4.2], [4.2, 3.9], [3.8, 4.1]], [[5, 5.2], [5.1, 4.9], [4.9, 5.1]],
+]
+const s1 = m.hotelling_subgroup_phase_i(sub)
+ok(s1.t2.length === 5 && s1.estimates.m === 5 && s1.estimates.n === 3 && s1.estimates.mean.length === 2,
+  `hotelling_subgroup_phase_i ${JSON.stringify(s1)}`)
+for (const absent of [undefined, null]) {
+  ok(JSON.stringify(m.hotelling_subgroup_phase_i(sub, absent)) === JSON.stringify(s1),
+    `hotelling_subgroup_phase_i alpha=${absent} differs from the default`)
+}
+const s2 = m.hotelling_subgroup_phase_ii(sub.slice(0, 2), s1.estimates)
+ok(JSON.stringify(s2.t2) === JSON.stringify(s1.t2.slice(0, 2)) && s2.ucl > s1.ucl, `hotelling_subgroup_phase_ii ${JSON.stringify(s2)}`)
+ok(m.hotelling_subgroup_phase_ii([], s1.estimates).t2.length === 0, 'no subgroups: the limit alone')
+const oddSize = refusal(() => m.hotelling_subgroup_phase_i([sub[0], sub[1].slice(0, 2), sub[2], sub[3], sub[4]]))
+ok(oddSize && oddSize.code === 'dimension_mismatch' && oddSize.parameter === 'subgroups' && oddSize.index === 1 &&
+  oddSize.expected === 3 && oddSize.got === 2, `subgroup of another size: ${oddSize ? oddSize.code + ' ' + oddSize.index : 'no error'}`)
+const fractionN = refusal(() => m.hotelling_subgroup_phase_ii(sub.slice(0, 1), { ...s1.estimates, n: 2.5 }))
+ok(fractionN && fractionN.code === 'malformed_input' && fractionN.parameter === 'reference.n',
+  `fractional n: ${fractionN ? fractionN.code + ' ' + fractionN.parameter : 'no error'}`)
+const oneRow = refusal(() => m.hotelling_subgroup_phase_i(sub.map(g => g.slice(0, 1))))
+ok(oneRow && oneRow.code === 'insufficient_data', `one row per subgroup: ${oneRow ? oneRow.code : 'no error'}`)
+
 console.log(`binding behaviour gate: ok (${checks} checks)`)

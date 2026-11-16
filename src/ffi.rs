@@ -1352,6 +1352,44 @@ wire_export!(
     |r| crate::wire::hotelling::phase_ii_dto(&r.observations, r.reference, r.alpha)
 );
 
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HotellingSubgroupPhaseIReq {
+    subgroups: Vec<Vec<Vec<f64>>>,
+    #[serde(default)]
+    alpha: Option<f64>,
+}
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HotellingSubgroupPhaseIIReq {
+    subgroups: Vec<Vec<Vec<f64>>>,
+    reference: crate::wire::hotelling::HotellingSubgroupReferenceDto,
+    #[serde(default)]
+    alpha: Option<f64>,
+}
+
+wire_export!(
+    /// Hotelling T² chart for subgroups, Phase I: `{subgroups, alpha?}` → `{t2, ucl,
+    /// out_of_control, in_control, estimates: {mean, covariance, m, n}}`, the WebAssembly
+    /// binding's result. `subgroups` is `m` subgroups of `n >= 2` rows each; `alpha` in (0, 1),
+    /// default 0.0027. `estimates` is the `reference` of Phase II.
+    uanalytics_hotelling_subgroup_phase_i,
+    HotellingSubgroupPhaseIReq,
+    |r| crate::wire::hotelling::subgroup_phase_i_dto(&r.subgroups, r.alpha)
+);
+
+wire_export!(
+    /// Hotelling T² chart for subgroups, Phase II: `{subgroups, reference: {mean, covariance, m,
+    /// n}, alpha?}` → `{t2, ucl, out_of_control, in_control, estimates}`, the WebAssembly
+    /// binding's result. `reference.m` and `reference.n` are whole numbers.
+    uanalytics_hotelling_subgroup_phase_ii,
+    HotellingSubgroupPhaseIIReq,
+    |r| crate::wire::hotelling::subgroup_phase_ii_dto(&r.subgroups, r.reference, r.alpha)
+);
+
 wire_export!(
     /// One-sample t test of `data` against `mu0`: → `{statistic, df, p_value}`, the WebAssembly binding's result.
     uanalytics_one_sample_t_test,
@@ -3729,6 +3767,58 @@ mod tests {
         assert_eq!(
             (b["code"].as_str(), b["min"].as_f64(), b["got"].as_f64()),
             (Some("insufficient_data"), Some(4.0), Some(3.0)),
+            "{b}"
+        );
+    }
+
+    #[test]
+    fn hotelling_subgroups_round_trip_with_the_wasm_codes() {
+        let groups = r#"[[[1.0, 1.1], [1.2, 1.0], [0.9, 1.3]], [[2.0, 2.2], [2.1, 1.9], [1.8, 2.1]],
+                         [[3.1, 3.0], [2.9, 3.3], [3.0, 3.1]], [[4.0, 4.2], [4.2, 3.9], [3.8, 4.1]],
+                         [[5.0, 5.2], [5.1, 4.9], [4.9, 5.1]]]"#;
+        let (code, one) = call(
+            uanalytics_hotelling_subgroup_phase_i,
+            &format!(r#"{{"subgroups": {groups}}}"#),
+        );
+        assert_eq!(code, 0, "{one}");
+        assert_eq!(one["t2"].as_array().map(Vec::len), Some(5), "{one}");
+        assert_eq!(one["estimates"]["m"].as_u64(), Some(5));
+        assert_eq!(one["estimates"]["n"].as_u64(), Some(3));
+        let (code, two) = call(
+            uanalytics_hotelling_subgroup_phase_ii,
+            &format!(
+                r#"{{"subgroups": {groups}, "reference": {}, "alpha": 0.01}}"#,
+                one["estimates"]
+            ),
+        );
+        assert_eq!(code, 0, "{two}");
+        assert_eq!(two["t2"], one["t2"]);
+        let refuse = |entry: Entry, request: &str| {
+            let (code, b) = call(entry, request);
+            assert_eq!(code, -3, "{b}");
+            b
+        };
+        let b = refuse(
+            uanalytics_hotelling_subgroup_phase_ii,
+            r#"{"subgroups": [[[1, 2], [3, 4]]], "reference":
+                {"mean": [0, 0], "covariance": [[1, 0], [0, 1]], "m": 10, "n": 2.5}}"#,
+        );
+        assert_eq!(
+            (b["code"].as_str(), b["parameter"].as_str()),
+            (Some("malformed_input"), Some("reference.n")),
+            "{b}"
+        );
+        let b = refuse(
+            uanalytics_hotelling_subgroup_phase_i,
+            r#"{"subgroups": [[[1, 2], [3, 4]], [[1, 2]]]}"#,
+        );
+        assert_eq!(
+            (
+                b["code"].as_str(),
+                b["parameter"].as_str(),
+                b["index"].as_u64()
+            ),
+            (Some("dimension_mismatch"), Some("subgroups"), Some(1)),
             "{b}"
         );
     }

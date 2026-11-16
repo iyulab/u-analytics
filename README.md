@@ -41,7 +41,7 @@ Control charts for monitoring process stability:
 - **Overdispersion-adjusted**: Laney P' and U' (φ coefficient corrects for between-subgroup variation)
 - **Rare events**: G chart (geometric distribution) and T chart (exponential) for low-defect processes
 - **Short runs**: one chart for a process that runs in groups (a part number, a recipe) — deviation from the group's aim, standardized Z-MR, and standardized P and U against each group's own centre
-- **Multivariate**: Hotelling T² for individual observations of correlated variables — Phase I and Phase II against exact small-sample limits
+- **Multivariate**: Hotelling T² for correlated variables — individual observations (Phase I and II against exact small-sample limits) and subgroups (covariance pooled within the subgroups)
 - **Run rules**: Nelson (8 rules), Western Electric (4 rules — its run rule is eight points on one side, Nelson's nine); the 3-sigma test alone by default
 
 ```rust
@@ -113,6 +113,24 @@ assert_eq!(chart.out_of_control, vec![8]);
 let cleaned = phase_i(&history[..8], 0.0027).unwrap();
 let next = phase_ii(&[vec![4.5, 4.4], vec![4.5, 1.5]], &cleaned.estimates, 0.0027).unwrap();
 assert_eq!(next.out_of_control, vec![1]);
+```
+
+When the observations come in subgroups, the chart takes their means and measures the spread
+*within* the subgroups, so a mean that drifts between subgroups is a signal rather than part of
+the covariance:
+
+```rust
+use u_analytics::spc::hotelling::subgroup_phase_i;
+
+// Six subgroups of three observations of two variables; the means move together by 1.5 a step.
+let subgroups: Vec<Vec<Vec<f64>>> = (0..6)
+    .map(|i| {
+        let b = i as f64 * 1.5;
+        vec![vec![b + 0.1, b + 0.3], vec![b - 0.2, b + 0.1], vec![b + 0.3, b - 0.1]]
+    })
+    .collect();
+let chart = subgroup_phase_i(&subgroups, 0.0027).unwrap();
+assert_eq!((chart.estimates.m, chart.estimates.n), (6, 3));
 ```
 
 ### Process Capability
@@ -804,6 +822,25 @@ const next = hotelling_phase_ii([[4.5, 4.4], [4.5, 1.5]], cleaned.estimates);
 console.log(next.out_of_control, next.ucl > one.ucl);     // [1] true
 ```
 
+Subgroups of `n ≥ 2` observations use the same two functions with a `subgroup` in the name:
+
+```ts
+hotelling_subgroup_phase_i(subgroups: number[][][], alpha?: number | null): HotellingSubgroupChart
+hotelling_subgroup_phase_ii(subgroups: number[][][], reference: HotellingSubgroupReference, alpha?: number | null): HotellingSubgroupChart
+
+// subgroups[i]: the rows of subgroup i, every subgroup the same size n
+type HotellingSubgroupReference = { mean: number[], covariance: number[][], m: number, n: number }  // m subgroups of n
+type HotellingSubgroupChart = { t2: number[], ucl: number, out_of_control: number[], in_control: boolean,
+                                estimates: HotellingSubgroupReference }
+```
+
+`T² = n (x̄ − x̿)ᵀ S⁻¹ (x̄ − x̿)` for each subgroup mean, with `S` the average of the within-subgroup
+covariance matrices, against `p(m − 1)(n − 1)/(mn − m − p + 1) · F⁻¹(1 − α; p, mn − m − p + 1)`
+(Phase I) or the same with `m + 1` (Phase II; Alt 1985). The Phase I limit is Alt's F approximation,
+not an exact distribution; it needs `n ≥ 2` and at least `m + p` observations in all
+(`insufficient_data`). A subgroup of another size or width is `dimension_mismatch` with the
+subgroup as `index`; `reference.m` and `reference.n` must be whole numbers.
+
 ### CUSUM and EWMA — sequential shift detection
 
 The Shewhart charts above judge each point on its own, which makes them slow to
@@ -1447,6 +1484,8 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_short_run_u_chart` | `short_run_u_chart(samples, groups, { centers? })` | `{ samples: [[defects, units], …], groups, centers? }` |
 | `uanalytics_hotelling_phase_i` | `hotelling_phase_i(data, alpha?)` | `{ data, alpha? }` |
 | `uanalytics_hotelling_phase_ii` | `hotelling_phase_ii(observations, reference, alpha?)` | `{ observations, reference: { mean, covariance, m }, alpha? }` |
+| `uanalytics_hotelling_subgroup_phase_i` | `hotelling_subgroup_phase_i(subgroups, alpha?)` | `{ subgroups, alpha? }` |
+| `uanalytics_hotelling_subgroup_phase_ii` | `hotelling_subgroup_phase_ii(subgroups, reference, alpha?)` | `{ subgroups, reference: { mean, covariance, m, n }, alpha? }` |
 | `uanalytics_run_rules` | `run_rules(values, limits, { rules? })` | `{ values, limits: { ucl, cl, lcl }, rules? }` |
 | `uanalytics_p_chart` | `p_chart(samples, { p_bar? })` | `{ samples: [[defectives, sample_size], …], p_bar? }` |
 | `uanalytics_laney_p_chart` | `laney_p_chart(samples, { p_bar?, phi? })` | `{ samples: [[defectives, sample_size], …], p_bar?, phi? }` |
@@ -1523,7 +1562,7 @@ results — `uanalytics_one_sample_t_test` `{data, mu0}`, `uanalytics_two_sample
 The .NET client (`bindings/csharp/UAnalytics`, package `UAnalytics`) wraps each
 entry point as a method on `AnalyticsClient` — `XbarRChart`, `ImrChart`, `PChart(samples, pBar)`, `LaneyPChart(samples, pBar, phi)`,
 `ShortRunDeviationChart`, `ShortRunStandardizedChart`, `ShortRunPChart`, `ShortRunUChart`,
-`HotellingPhaseI`, `HotellingPhaseII`,
+`HotellingPhaseI`, `HotellingPhaseII`, `HotellingSubgroupPhaseI`, `HotellingSubgroupPhaseII`,
 `ProcessCapability`, `DetectChangepoints`, … — serialising the arguments to the
 request above and returning the response as a typed record. A non-zero status
 surfaces as `AnalyticsException` carrying the native status (`Status`), the `error`

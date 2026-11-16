@@ -35,6 +35,16 @@ public class ContractTests
     private static readonly HotellingEstimates Reference =
         new([4.5, 4.5], [[6.0, 5.8], [5.8, 5.7]], 8);
 
+    private static readonly double[][][] Grouped =
+    [
+        [[1.0, 1.1], [1.2, 1.0], [0.9, 1.3]], [[2.0, 2.2], [2.1, 1.9], [1.8, 2.1]],
+        [[3.1, 3.0], [2.9, 3.3], [3.0, 3.1]], [[4.0, 4.2], [4.2, 3.9], [3.8, 4.1]],
+        [[5.0, 5.2], [5.1, 4.9], [4.9, 5.1]],
+    ];
+
+    private static readonly HotellingSubgroupEstimates SubgroupReference =
+        new([3.0, 3.1], [[0.04, 0.01], [0.01, 0.05]], 5, 3);
+
     private static double[][][] Gage()
     {
         // 10 parts × 3 operators × 2 trials, deterministic.
@@ -132,6 +142,8 @@ public class ContractTests
         ["HotellingPhaseII"] = c => Out(
             c.HotellingPhaseII(Correlated[..3], Reference, 0.01),
             AnalyticsJson.Default.HotellingChartResult),
+        ["HotellingSubgroupPhaseI"] = c => Out(c.HotellingSubgroupPhaseI(Grouped, 0.01), AnalyticsJson.Default.HotellingSubgroupChartResult),
+        ["HotellingSubgroupPhaseII"] = c => Out(c.HotellingSubgroupPhaseII(Grouped[..2], SubgroupReference, 0.01), AnalyticsJson.Default.HotellingSubgroupChartResult),
         ["Type1GageStudy"] = c => Out(c.Type1GageStudy(Series, 10, 8, 12), AnalyticsJson.Default.Type1GageResult),
         ["Type1GageStudy(options)"] = c => Out(c.Type1GageStudy(Series, 10, 8, 12, 0.15, 4), AnalyticsJson.Default.Type1GageResult),
         ["Type1GageStudy(bias fills the band)"] = c => Out(c.Type1GageStudy(Series, 14, 8, 12), AnalyticsJson.Default.Type1GageResult),

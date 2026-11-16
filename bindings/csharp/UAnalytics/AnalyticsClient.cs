@@ -615,6 +615,39 @@ public sealed class AnalyticsClient : IDisposable
             ("alpha", Request.Num("alpha", alpha)));
 
     /// <summary>
+    /// Hotelling T² chart for subgroups, Phase I: <c>T² = n (x̄ − x̿)ᵀ S⁻¹ (x̄ − x̿)</c> of every
+    /// subgroup mean, with <c>S</c> the average of the within-subgroup covariance matrices — so
+    /// variation between subgroups is not part of it and a drifting mean signals — against
+    /// <c>p(m − 1)(n − 1)/(mn − m − p + 1) · F⁻¹(1 − α; p, mn − m − p + 1)</c> (Alt 1985).
+    /// <paramref name="subgroups"/> are <c>m</c> subgroups of <c>n ≥ 2</c> rows of <c>p</c> variables,
+    /// every subgroup the same size, at least <c>m + p</c> rows in all. Take
+    /// <see cref="HotellingSubgroupChartResult.Estimates"/> to <see cref="HotellingSubgroupPhaseII"/>
+    /// after removing the signals with a known cause. <paramref name="alpha"/>: <c>null</c> is 0.0027.
+    /// </summary>
+    public HotellingSubgroupChartResult HotellingSubgroupPhaseI(double[][][] subgroups, double? alpha = null)
+        => Call(NativeInterop.uanalytics_hotelling_subgroup_phase_i, AnalyticsJson.Default.HotellingSubgroupChartResult,
+            ("subgroups", Request.Rows("subgroups", subgroups)), ("alpha", Request.Num("alpha", alpha)));
+
+    /// <summary>
+    /// Hotelling T² chart for subgroups, Phase II: new <paramref name="subgroups"/> of
+    /// <c>reference.N</c> rows against <paramref name="reference"/> (the
+    /// <see cref="HotellingSubgroupChartResult.Estimates"/> of a Phase I chart) with the limit
+    /// <c>p(m + 1)(n − 1)/(mn − m − p + 1) · F⁻¹(1 − α; p, mn − m − p + 1)</c>. May be empty: the limit alone.
+    /// </summary>
+    public HotellingSubgroupChartResult HotellingSubgroupPhaseII(double[][][] subgroups,
+        HotellingSubgroupEstimates reference, double? alpha = null)
+        => Call(NativeInterop.uanalytics_hotelling_subgroup_phase_ii, AnalyticsJson.Default.HotellingSubgroupChartResult,
+            ("subgroups", Request.Rows("subgroups", subgroups)),
+            ("reference", new JsonObject
+            {
+                ["mean"] = Request.Nums("reference.mean", reference.Mean),
+                ["covariance"] = Request.Rows("reference.covariance", reference.Covariance),
+                ["m"] = JsonValue.Create(reference.M),
+                ["n"] = JsonValue.Create(reference.N),
+            }),
+            ("alpha", Request.Num("alpha", alpha)));
+
+    /// <summary>
     /// Type 1 gage study: the capability of a measurement device from repeated
     /// <paramref name="measurements"/> of one reference part whose true value is
     /// <paramref name="reference"/>, against the specification limits <paramref name="lsl"/> and
