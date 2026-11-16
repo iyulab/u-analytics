@@ -17,6 +17,11 @@
 //!   monitored against them: `UCL = p (m + 1)(m − 1) / (m (m − p)) · F⁻¹(1 − α; p, m − p)`,
 //!   which needs `m > p`.
 //!
+//! Observations taken in rational subgroups of `n >= 2` are charted by their means: [`subgroup_phase_i`]
+//! and [`subgroup_phase_ii`] give `T² = n (x̄ − μ)ᵀ S⁻¹ (x̄ − μ)` with `S` the average of the
+//! within-subgroup covariance matrices, against the F limits of Alt (1985). Variation between
+//! subgroups does not enter `S`, so a drifting mean shows as a signal instead of being absorbed.
+//!
 //! The limits are exact distribution quantiles, not asymptotic chi-squared ones, so they hold
 //! for small `m`. A significance `α` is the per-point false-alarm probability when the process
 //! is in control and normal.
@@ -25,6 +30,8 @@
 //!
 //! - Tracy, N.D., Young, J.C. & Mason, R.L. (1992). "Multivariate control charts for
 //!   individual observations", *Journal of Quality Technology* 24(2), pp. 88-95.
+//! - Alt, F.B. (1985). "Multivariate quality control", in *The Encyclopedia of Statistical
+//!   Sciences*, Wiley (the limits for subgroups).
 //! - Montgomery, D.C. (2019). *Introduction to Statistical Quality Control*, 8th ed., ch. 11.
 //! - Hotelling, H. (1947). "Multivariate quality control", in *Techniques of Statistical
 //!   Analysis*, McGraw-Hill.
@@ -293,21 +300,10 @@ pub fn phase_i(data: &[Vec<f64>], alpha: f64) -> Result<HotellingChart, Hotellin
     })
 }
 
-/// The Phase II chart of `observations` against `estimates` (from [`phase_i`] after the causes
-/// of its signals were removed, or from [`estimate_from`]): `T²` of each new observation and the
-/// exact F limit at significance `alpha`.
-///
-/// # Errors
-///
-/// `alpha` outside `(0, 1)`; fewer than `p + 1` observations behind the estimates; an
-/// observation or an estimate of the wrong length or not finite; a singular covariance.
-pub fn phase_ii(
-    observations: &[Vec<f64>],
-    estimates: &HotellingEstimates,
-    alpha: f64,
-) -> Result<HotellingChart, HotellingError> {
-    check_alpha(alpha)?;
-    let p = estimates.mean.len();
+/// The mean and covariance of a reference, checked: non-empty, finite, a square `p × p` matrix.
+/// Returns `p`.
+fn check_reference(mean: &[f64], covariance: &[Vec<f64>]) -> Result<usize, HotellingError> {
+    let p = mean.len();
     if p == 0 {
         return Err(HotellingError::DimensionMismatch {
             parameter: "mean",
@@ -316,21 +312,21 @@ pub fn phase_ii(
             index: None,
         });
     }
-    if estimates.mean.iter().any(|v| !v.is_finite()) {
+    if mean.iter().any(|v| !v.is_finite()) {
         return Err(HotellingError::NonFinite {
             parameter: "mean",
             index: None,
         });
     }
-    if estimates.covariance.len() != p {
+    if covariance.len() != p {
         return Err(HotellingError::DimensionMismatch {
             parameter: "covariance",
             expected: p,
-            got: estimates.covariance.len(),
+            got: covariance.len(),
             index: None,
         });
     }
-    for (i, row) in estimates.covariance.iter().enumerate() {
+    for (i, row) in covariance.iter().enumerate() {
         if row.len() != p {
             return Err(HotellingError::DimensionMismatch {
                 parameter: "covariance",
@@ -346,6 +342,24 @@ pub fn phase_ii(
             });
         }
     }
+    Ok(p)
+}
+
+/// The Phase II chart of `observations` against `estimates` (from [`phase_i`] after the causes
+/// of its signals were removed, or from [`estimate_from`]): `T²` of each new observation and the
+/// exact F limit at significance `alpha`.
+///
+/// # Errors
+///
+/// `alpha` outside `(0, 1)`; fewer than `p + 1` observations behind the estimates; an
+/// observation or an estimate of the wrong length or not finite; a singular covariance.
+pub fn phase_ii(
+    observations: &[Vec<f64>],
+    estimates: &HotellingEstimates,
+    alpha: f64,
+) -> Result<HotellingChart, HotellingError> {
+    check_alpha(alpha)?;
+    let p = check_reference(&estimates.mean, &estimates.covariance)?;
     if !observations.is_empty() {
         let width = check_table(observations, "observations")?;
         if width != p {
@@ -382,6 +396,320 @@ pub fn estimate_from(data: &[Vec<f64>]) -> Result<HotellingEstimates, HotellingE
         });
     }
     Ok(estimate(data, p))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Subgrouped observations
+// ---------------------------------------------------------------------------------------------
+
+/// What a subgroup Phase II chart monitors against: the grand mean, the pooled within-subgroup
+/// covariance, and the number of subgroups `m` and their common size `n` they come from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubgroupEstimates {
+    /// The mean of each variable (the mean of the subgroup means).
+    pub mean: Vec<f64>,
+    /// The average of the within-subgroup sample covariance matrices (each with denominator
+    /// `n − 1`), row-major, `p × p`.
+    pub covariance: Vec<Vec<f64>>,
+    /// The number of subgroups the estimates come from.
+    pub m: usize,
+    /// The number of observations in each subgroup.
+    pub n: usize,
+}
+
+/// A Hotelling T² chart of subgroups: one statistic per subgroup against one upper limit.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubgroupHotellingChart {
+    /// `T² = n (x̄ − μ)ᵀ S⁻¹ (x̄ − μ)` of each subgroup mean, in the order given.
+    pub t2: Vec<f64>,
+    /// The upper control limit (the lower limit is 0).
+    pub ucl: f64,
+    /// Positions (from 0) of the subgroups whose `T²` exceeds the limit.
+    pub out_of_control: Vec<usize>,
+    /// The estimates the statistics are measured against.
+    pub estimates: SubgroupEstimates,
+}
+
+impl SubgroupHotellingChart {
+    /// Whether every subgroup is within the limit.
+    pub fn is_in_control(&self) -> bool {
+        self.out_of_control.is_empty()
+    }
+}
+
+/// Subgroup size and width of a table of subgroups, each a table of `n` rows of `p` finite
+/// values: all the same `n >= 2` and `p`. A refusal names the subgroup as `index`.
+fn check_subgroups(
+    subgroups: &[Vec<Vec<f64>>],
+    parameter: &'static str,
+) -> Result<(usize, usize), HotellingError> {
+    let n = subgroups.first().map_or(0, Vec::len);
+    if n < 2 {
+        return Err(HotellingError::TooFew { min: 2, got: n });
+    }
+    let mut p = 0;
+    for (i, subgroup) in subgroups.iter().enumerate() {
+        if subgroup.len() != n {
+            return Err(HotellingError::DimensionMismatch {
+                parameter,
+                expected: n,
+                got: subgroup.len(),
+                index: Some(i),
+            });
+        }
+        let width = check_table(subgroup, parameter).map_err(|e| match e {
+            HotellingError::DimensionMismatch {
+                parameter,
+                expected,
+                got,
+                ..
+            } => HotellingError::DimensionMismatch {
+                parameter,
+                expected,
+                got,
+                index: Some(i),
+            },
+            HotellingError::NonFinite { parameter, .. } => HotellingError::NonFinite {
+                parameter,
+                index: Some(i),
+            },
+            other => other,
+        })?;
+        if i == 0 {
+            p = width;
+        } else if width != p {
+            return Err(HotellingError::DimensionMismatch {
+                parameter,
+                expected: p,
+                got: width,
+                index: Some(i),
+            });
+        }
+    }
+    Ok((n, p))
+}
+
+/// The mean of each subgroup, and the covariance matrices of the subgroups averaged.
+fn subgroup_summary(subgroups: &[Vec<Vec<f64>>], p: usize) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
+    let means: Vec<Vec<f64>> = subgroups.iter().map(|g| estimate(g, p).mean).collect();
+    let mut pooled = vec![vec![0.0; p]; p];
+    for g in subgroups {
+        let s = estimate(g, p).covariance;
+        for (row, srow) in pooled.iter_mut().zip(&s) {
+            for (acc, v) in row.iter_mut().zip(srow) {
+                *acc += v;
+            }
+        }
+    }
+    let m = subgroups.len() as f64;
+    for row in &mut pooled {
+        for v in row {
+            *v /= m;
+        }
+    }
+    (means, pooled)
+}
+
+/// The degrees of freedom of the subgroup limits' F distribution, `m n − m − p + 1`, and the
+/// refusal when there are too few observations for the pooled covariance (`m (n − 1) < p`).
+fn subgroup_df(m: usize, n: usize, p: usize) -> Result<f64, HotellingError> {
+    if m * (n - 1) < p {
+        return Err(HotellingError::TooFew {
+            min: m + p,
+            got: m * n,
+        });
+    }
+    Ok((m * n - m - p + 1) as f64)
+}
+
+/// The Phase I upper control limit for `m` subgroups of `n` observations of `p` variables
+/// (Alt 1985; Montgomery 2019, ch. 11): `p (m − 1)(n − 1) / (m n − m − p + 1) ·
+/// F⁻¹(1 − α; p, m n − m − p + 1)`. Needs `n >= 2` and `m (n − 1) >= p`.
+///
+/// # Errors
+///
+/// `alpha` outside `(0, 1)`; `n < 2`; fewer than `m + p` observations in all.
+pub fn subgroup_phase_i_limit(
+    m: usize,
+    n: usize,
+    p: usize,
+    alpha: f64,
+) -> Result<f64, HotellingError> {
+    subgroup_limit(m, n, p, alpha, m as f64 - 1.0)
+}
+
+/// The Phase II upper control limit for new subgroups of `n` against estimates from `m`
+/// subgroups of `n` observations of `p` variables: `p (m + 1)(n − 1) / (m n − m − p + 1) ·
+/// F⁻¹(1 − α; p, m n − m − p + 1)`. Needs `n >= 2` and `m (n − 1) >= p`.
+///
+/// # Errors
+///
+/// As [`subgroup_phase_i_limit`].
+pub fn subgroup_phase_ii_limit(
+    m: usize,
+    n: usize,
+    p: usize,
+    alpha: f64,
+) -> Result<f64, HotellingError> {
+    subgroup_limit(m, n, p, alpha, m as f64 + 1.0)
+}
+
+/// `p · factor · (n − 1) / df · F⁻¹(1 − α; p, df)`, the two limits differing in `factor` only
+/// (`m − 1` for the subgroups that gave the estimates, `m + 1` for new ones).
+fn subgroup_limit(
+    m: usize,
+    n: usize,
+    p: usize,
+    alpha: f64,
+    factor: f64,
+) -> Result<f64, HotellingError> {
+    check_alpha(alpha)?;
+    if p == 0 {
+        return Err(HotellingError::DimensionMismatch {
+            parameter: "variables",
+            expected: 1,
+            got: 0,
+            index: None,
+        });
+    }
+    if n < 2 {
+        return Err(HotellingError::TooFew { min: 2, got: n });
+    }
+    let df = subgroup_df(m, n, p)?;
+    let f = f_distribution_quantile(1.0 - alpha, p as f64, df);
+    Ok(p as f64 * factor * (n as f64 - 1.0) / df * f)
+}
+
+/// The Phase I chart of `subgroups` — each a table of `n` rows of `p` variables, all the same
+/// `n >= 2` — judging each subgroup mean against the grand mean with the covariance pooled
+/// within the subgroups (the average of their sample covariances): `T² = n (x̄ᵢ − x̿)ᵀ S⁻¹
+/// (x̄ᵢ − x̿)` against the limit of [`subgroup_phase_i_limit`]. A subgroup above the limit is
+/// `out_of_control`; remove the ones with a known cause and rebuild before using the estimates
+/// for [`subgroup_phase_ii`].
+///
+/// The pooled covariance measures variation *within* subgroups, so a shift between subgroups
+/// cannot inflate it: the chart sees a drifting mean that the chart of individual observations
+/// would absorb into its own covariance.
+///
+/// # Errors
+///
+/// `alpha` outside `(0, 1)`; subgroups of different sizes (the subgroup as `index`), of fewer
+/// than 2 rows, of rows of different lengths or not finite; fewer than `m + p` observations;
+/// a pooled covariance that cannot be inverted.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::spc::hotelling::subgroup_phase_i;
+///
+/// // Eight subgroups of three observations of two variables that move together.
+/// let subgroups: Vec<Vec<Vec<f64>>> = (0..8)
+///     .map(|i| {
+///         let b = i as f64;
+///         vec![
+///             vec![b, b + 0.1],
+///             vec![b + 0.2, b + 0.1],
+///             vec![b + 0.1, b + 0.3],
+///         ]
+///     })
+///     .collect();
+/// let chart = subgroup_phase_i(&subgroups, 0.0027).unwrap();
+/// assert_eq!(chart.t2.len(), 8);
+/// assert_eq!(chart.estimates.n, 3);
+/// ```
+pub fn subgroup_phase_i(
+    subgroups: &[Vec<Vec<f64>>],
+    alpha: f64,
+) -> Result<SubgroupHotellingChart, HotellingError> {
+    check_alpha(alpha)?;
+    if subgroups.is_empty() {
+        return Err(HotellingError::DimensionMismatch {
+            parameter: "subgroups",
+            expected: 1,
+            got: 0,
+            index: None,
+        });
+    }
+    let (n, p) = check_subgroups(subgroups, "subgroups")?;
+    let m = subgroups.len();
+    let ucl = subgroup_phase_i_limit(m, n, p, alpha)?;
+    let (means, covariance) = subgroup_summary(subgroups, p);
+    let grand = estimate(&means, p).mean;
+    let t2 = subgroup_t_squared(&means, &grand, &covariance, n)?;
+    let out_of_control = (0..t2.len()).filter(|&i| t2[i] > ucl).collect();
+    Ok(SubgroupHotellingChart {
+        t2,
+        ucl,
+        out_of_control,
+        estimates: SubgroupEstimates {
+            mean: grand,
+            covariance,
+            m,
+            n,
+        },
+    })
+}
+
+/// `n (x̄ − μ)ᵀ S⁻¹ (x̄ − μ)` for each subgroup mean.
+fn subgroup_t_squared(
+    means: &[Vec<f64>],
+    mean: &[f64],
+    covariance: &[Vec<f64>],
+    n: usize,
+) -> Result<Vec<f64>, HotellingError> {
+    let t2 = t_squared(means, mean, covariance)?;
+    Ok(t2.into_iter().map(|v| v * n as f64).collect())
+}
+
+/// The Phase II chart of new `subgroups` of `estimates.n` observations against `estimates` (from
+/// [`subgroup_phase_i`] after the causes of its signals were removed): `T²` of each subgroup mean
+/// and the F limit of [`subgroup_phase_ii_limit`] at significance `alpha`. `subgroups` may be empty.
+///
+/// # Errors
+///
+/// `alpha` outside `(0, 1)`; fewer than `estimates.m + p` observations behind the estimates; a
+/// subgroup of a size other than `estimates.n` (the subgroup as `index`), of the wrong width or
+/// not finite; a singular covariance.
+pub fn subgroup_phase_ii(
+    subgroups: &[Vec<Vec<f64>>],
+    estimates: &SubgroupEstimates,
+    alpha: f64,
+) -> Result<SubgroupHotellingChart, HotellingError> {
+    check_alpha(alpha)?;
+    let p = check_reference(&estimates.mean, &estimates.covariance)?;
+    let ucl = subgroup_phase_ii_limit(estimates.m, estimates.n, p, alpha)?;
+    let means = if subgroups.is_empty() {
+        Vec::new()
+    } else {
+        for (i, subgroup) in subgroups.iter().enumerate() {
+            if subgroup.len() != estimates.n {
+                return Err(HotellingError::DimensionMismatch {
+                    parameter: "subgroups",
+                    expected: estimates.n,
+                    got: subgroup.len(),
+                    index: Some(i),
+                });
+            }
+        }
+        let (_, width) = check_subgroups(subgroups, "subgroups")?;
+        if width != p {
+            return Err(HotellingError::DimensionMismatch {
+                parameter: "subgroups",
+                expected: p,
+                got: width,
+                index: Some(0),
+            });
+        }
+        subgroups.iter().map(|g| estimate(g, p).mean).collect()
+    };
+    let t2 = subgroup_t_squared(&means, &estimates.mean, &estimates.covariance, estimates.n)?;
+    let out_of_control = (0..t2.len()).filter(|&i| t2[i] > ucl).collect();
+    Ok(SubgroupHotellingChart {
+        t2,
+        ucl,
+        out_of_control,
+        estimates: estimates.clone(),
+    })
 }
 
 #[cfg(test)]
@@ -717,5 +1045,242 @@ mod tests {
             phase_ii(&[vec![1.0, 1.0]], &thin, 0.05).unwrap_err(),
             HotellingError::TooFew { min: 3, got: 2 }
         );
+    }
+
+    // ----- subgroups -----
+
+    /// `m` subgroups of `n` observations of `p` correlated variables: a common mean path, a
+    /// common within-subgroup noise.
+    fn subgroups(rng: &mut Lcg, m: usize, n: usize, p: usize) -> Vec<Vec<Vec<f64>>> {
+        (0..m)
+            .map(|_| {
+                (0..n)
+                    .map(|_| {
+                        let common = rng.bell();
+                        (0..p)
+                            .map(|j| {
+                                10.0 + j as f64 + common * (1.0 + j as f64 * 0.3) + rng.bell() * 0.5
+                            })
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn subgroup_t_squared_is_n_times_the_mahalanobis_distance_of_the_mean() {
+        let mut rng = Lcg(21);
+        let data = subgroups(&mut rng, 12, 4, 3);
+        let chart = subgroup_phase_i(&data, 0.01).expect("a chart");
+        let p = 3;
+        // The definition, from scratch: the subgroup means, the grand mean, the average of the
+        // within-subgroup covariances, and an elimination solve for the distance.
+        let means: Vec<Vec<f64>> = data
+            .iter()
+            .map(|g| {
+                (0..p)
+                    .map(|j| g.iter().map(|r| r[j]).sum::<f64>() / g.len() as f64)
+                    .collect()
+            })
+            .collect();
+        let grand: Vec<f64> = (0..p)
+            .map(|j| means.iter().map(|x| x[j]).sum::<f64>() / means.len() as f64)
+            .collect();
+        let mut pooled = vec![vec![0.0; p]; p];
+        for (g, mean) in data.iter().zip(&means) {
+            for a in 0..p {
+                for b in 0..p {
+                    let s: f64 = g.iter().map(|r| (r[a] - mean[a]) * (r[b] - mean[b])).sum();
+                    pooled[a][b] += s / (g.len() - 1) as f64 / data.len() as f64;
+                }
+            }
+        }
+        for (i, x) in means.iter().enumerate() {
+            let want = 4.0 * mahalanobis_by_elimination(x, &grand, &pooled);
+            assert!(
+                (chart.t2[i] - want).abs() <= 1e-9 * want.max(1.0),
+                "subgroup {i}: {} vs {want}",
+                chart.t2[i]
+            );
+        }
+        for (a, b) in chart.estimates.mean.iter().zip(&grand) {
+            assert!((a - b).abs() < 1e-12);
+        }
+        assert_eq!((chart.estimates.m, chart.estimates.n), (12, 4));
+    }
+
+    #[test]
+    fn the_subgroup_limits_are_the_one_minus_alpha_quantiles_of_their_distribution() {
+        for (m, n, p) in [(8, 3, 2), (20, 5, 3), (50, 4, 6)] {
+            for alpha in [0.0027, 0.05] {
+                let df = (m * n - m - p + 1) as f64;
+                for (limit, factor) in [
+                    (subgroup_phase_i_limit(m, n, p, alpha), m as f64 - 1.0),
+                    (subgroup_phase_ii_limit(m, n, p, alpha), m as f64 + 1.0),
+                ] {
+                    let ucl = limit.expect("a limit");
+                    let f = ucl * df / (p as f64 * factor * (n as f64 - 1.0));
+                    let cdf = f_distribution_cdf(f, p as f64, df);
+                    assert!(
+                        (cdf - (1.0 - alpha)).abs() < 1e-9,
+                        "m {m} n {n} p {p} alpha {alpha}: cdf {cdf}"
+                    );
+                }
+            }
+        }
+        // New subgroups are farther from estimates than the subgroups that made them.
+        assert!(
+            subgroup_phase_ii_limit(10, 4, 2, 0.01).unwrap()
+                > subgroup_phase_i_limit(10, 4, 2, 0.01).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_subgroup_with_a_shifted_mean_is_flagged_and_the_rest_are_not() {
+        let mut rng = Lcg(33);
+        let mut data = subgroups(&mut rng, 25, 5, 2);
+        for row in &mut data[17] {
+            row[0] += 4.0;
+            row[1] -= 4.0;
+        }
+        let chart = subgroup_phase_i(&data, 0.0027).expect("a chart");
+        assert!(
+            chart.out_of_control.contains(&17),
+            "{:?}",
+            chart.out_of_control
+        );
+        assert!(
+            chart.out_of_control.len() <= 2,
+            "{:?}",
+            chart.out_of_control
+        );
+        // The same estimates, a Phase II chart: the shifted subgroup is far out, a typical one is in.
+        let clean: Vec<Vec<Vec<f64>>> = data
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != 17)
+            .map(|(_, g)| g.clone())
+            .collect();
+        let base = subgroup_phase_i(&clean, 0.0027).expect("cleaned");
+        let next = subgroup_phase_ii(
+            &[data[17].clone(), clean[0].clone()],
+            &base.estimates,
+            0.0027,
+        )
+        .expect("a chart");
+        assert_eq!(next.out_of_control, vec![0]);
+        assert!(subgroup_phase_ii(&[], &base.estimates, 0.0027)
+            .unwrap()
+            .t2
+            .is_empty());
+    }
+
+    #[test]
+    fn in_control_subgroups_signal_about_alpha_of_the_time() {
+        let mut rng = Lcg(77);
+        let (alpha, mut signals, mut total) = (0.05, 0, 0);
+        for _ in 0..60 {
+            let data = subgroups(&mut rng, 30, 4, 3);
+            let chart = subgroup_phase_i(&data, alpha).expect("a chart");
+            signals += chart.out_of_control.len();
+            total += data.len();
+        }
+        let rate = signals as f64 / total as f64;
+        // 1800 points: the standard error is about 0.005.
+        assert!((rate - alpha).abs() < 0.02, "signal rate {rate}");
+    }
+
+    #[test]
+    fn subgroup_refusals_name_the_subgroup() {
+        let mut rng = Lcg(5);
+        let good = subgroups(&mut rng, 6, 3, 2);
+        assert_eq!(
+            subgroup_phase_i(&good, 1.0).unwrap_err(),
+            HotellingError::InvalidAlpha { got: 1.0 }
+        );
+        assert!(matches!(
+            subgroup_phase_i(&[], 0.01),
+            Err(HotellingError::DimensionMismatch {
+                parameter: "subgroups",
+                ..
+            })
+        ));
+        // One observation per subgroup has no within-subgroup covariance.
+        let single: Vec<Vec<Vec<f64>>> = good.iter().map(|g| vec![g[0].clone()]).collect();
+        assert_eq!(
+            subgroup_phase_i(&single, 0.01).unwrap_err(),
+            HotellingError::TooFew { min: 2, got: 1 }
+        );
+        // A subgroup of another size, width or with a NaN is named.
+        let mut odd = good.clone();
+        odd[4].pop();
+        assert_eq!(
+            subgroup_phase_i(&odd, 0.01).unwrap_err(),
+            HotellingError::DimensionMismatch {
+                parameter: "subgroups",
+                expected: 3,
+                got: 2,
+                index: Some(4)
+            }
+        );
+        let mut narrow = good.clone();
+        narrow[2][1].pop();
+        assert_eq!(
+            subgroup_phase_i(&narrow, 0.01).unwrap_err(),
+            HotellingError::DimensionMismatch {
+                parameter: "subgroups",
+                expected: 2,
+                got: 1,
+                index: Some(2)
+            }
+        );
+        let mut nan = good.clone();
+        nan[5][0][1] = f64::NAN;
+        assert_eq!(
+            subgroup_phase_i(&nan, 0.01).unwrap_err(),
+            HotellingError::NonFinite {
+                parameter: "subgroups",
+                index: Some(5)
+            }
+        );
+        // Too few observations for the pooled covariance of 4 variables: m (n - 1) = 3 < 4.
+        let thin = subgroups(&mut rng, 3, 2, 4);
+        assert_eq!(
+            subgroup_phase_i(&thin, 0.01).unwrap_err(),
+            HotellingError::TooFew { min: 7, got: 6 }
+        );
+        // A constant variable has no within-subgroup variation.
+        let flat: Vec<Vec<Vec<f64>>> = good
+            .iter()
+            .map(|g| g.iter().map(|r| vec![r[0], 5.0]).collect())
+            .collect();
+        assert_eq!(
+            subgroup_phase_i(&flat, 0.01).unwrap_err(),
+            HotellingError::Degenerate
+        );
+        // Phase II: a new subgroup of the wrong size, and of the wrong width.
+        let base = subgroup_phase_i(&good, 0.01).expect("a chart");
+        let mut short = good[..2].to_vec();
+        short[1].pop();
+        assert_eq!(
+            subgroup_phase_ii(&short, &base.estimates, 0.01).unwrap_err(),
+            HotellingError::DimensionMismatch {
+                parameter: "subgroups",
+                expected: 3,
+                got: 2,
+                index: Some(1)
+            }
+        );
+        let wide: Vec<Vec<Vec<f64>>> = vec![vec![vec![1.0, 2.0, 3.0]; 3]];
+        assert!(matches!(
+            subgroup_phase_ii(&wide, &base.estimates, 0.01),
+            Err(HotellingError::DimensionMismatch {
+                parameter: "subgroups",
+                expected: 2,
+                got: 3,
+                ..
+            })
+        ));
     }
 }

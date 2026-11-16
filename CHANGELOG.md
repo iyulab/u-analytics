@@ -26,6 +26,11 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   Gaussian-elimination solve of the definition, that `p = 1` is the squared z-score, invariance under an affine map of the variables,
   that each limit is the `1 − α` quantile of its distribution, the arcsine case (`m = 3`, `p = 1`) and the in-control signal rate.
   MEWMA is not part of this cut.
+- `spc::hotelling::subgroup_phase_i` / `subgroup_phase_ii`: the same chart for observations taken in subgroups of `n >= 2`. `T² = n (x̄ − μ)ᵀ S⁻¹
+  (x̄ − μ)` of each subgroup mean, with `S` the average of the within-subgroup covariance matrices, against `p(m − 1)(n − 1) /
+  (mn − m − p + 1) · F⁻¹(1 − α; p, mn − m − p + 1)` for the subgroups that made the estimates and the same with `m + 1` for new ones
+  (Alt 1985); `subgroup_phase_i_limit` / `subgroup_phase_ii_limit` give the limits alone. A shift between subgroups does not enter
+  the pooled covariance, so it signals instead of being absorbed. Checked against NumPy and SciPy for three shapes at three levels.
 
 ## [0.36.0] - 2026-11-14
 
