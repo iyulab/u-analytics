@@ -504,7 +504,18 @@ uses neither sigma and is reported with or without `sigma_within`. Without a
 
 `xbar_r_chart` returns `sigma_hat` (`R-bar / d2`) for exactly this purpose, and
 `sigma_hat_df`, its degrees of freedom, for the Cp/Cpk intervals -- so the two
-compose:
+compose.
+
+**Limits use the textbook table constants; `sigma_hat` uses the precise `d2`.**
+`xbar_r_chart` and `imr_chart` place their limits with the three-digit published
+factors (`A2`, `E2` -- `A2(5) = 0.577`, `E2 = 2.660`, as tabulated in
+Montgomery), whereas `sigma_hat` divides by the unrounded `d2`
+(`d2(2) = 2/sqrt(pi)`, `d2(5) = 2.3259`). The limit half-width is therefore not
+exactly `3 * sigma_hat` -- it differs by about 0.03 % for an X-bar chart of five
+and 0.05 % for an individuals chart. When you need the half-width to be exactly
+three sigma (for instance to reproduce a limit from `sigma_hat` to the last
+digit), pass the `sigma` option: the limits are then `3 * sigma / sqrt(n)`
+(`3 * sigma` for individuals), with no table constant involved.
 
 ```js
 const chart = xbar_r_chart(subgroups);

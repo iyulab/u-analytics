@@ -35,6 +35,7 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 ### Changed
 
 - Requires u-numflow 0.17.
+- Documented that the `xbar_r_chart` and `imr_chart` limits use the published three-digit table factors (`A2`, `E2`) while `sigma_hat` divides by the unrounded `d2`, so the limit half-width is within 0.05 % of, not exactly, `3 * sigma_hat`; passing `sigma` gives exact `3 * sigma / sqrt(n)` limits. No behaviour change.
 - The Anderson-Darling statistic (`anderson_darling_fit`, and the family ranking and goodness-of-fit test built on it) takes each tail from the family's own `cdf` and survival function in u-numflow instead of a hand-written copy per family; the values agree to rounding, and the Beta upper tail is now formed from the exact side of the pair.
 
 ## [0.36.0] - 2026-11-14
