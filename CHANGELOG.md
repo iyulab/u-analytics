@@ -8,6 +8,10 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-11-18
+
+The .NET client is `UAnalytics` 0.31.0.
+
 ### Added
 
 - `spc::hotelling`: Hotelling's T² control chart for individual observations of correlated variables, in the Rust API and on every
