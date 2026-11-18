@@ -1193,57 +1193,15 @@ impl Fitted {
     /// `(ln F(x), ln (1 − F(x)))`, each tail evaluated directly so that a value
     /// far out contributes its true log-probability rather than `ln 0`.
     fn ln_tails(&self, x: f64) -> (f64, f64) {
+        // Each family's own `cdf` and survival function: u-numflow forms the
+        // upper tail directly, and handles the edge of the support.
         let (cdf, sf) = match self {
-            Self::Normal(d) => {
-                let z = (x - d.mu()) / d.sigma();
-                (
-                    special::standard_normal_cdf(z),
-                    special::standard_normal_sf(z),
-                )
-            }
-            Self::LogNormal(d) => {
-                if x <= 0.0 {
-                    (0.0, 1.0)
-                } else {
-                    let z = (x.ln() - d.mu()) / d.sigma();
-                    (
-                        special::standard_normal_cdf(z),
-                        special::standard_normal_sf(z),
-                    )
-                }
-            }
-            Self::Weibull(d) => {
-                if x <= 0.0 {
-                    (0.0, 1.0)
-                } else {
-                    let h = (x / d.scale()).powf(d.shape());
-                    (-(-h).exp_m1(), (-h).exp())
-                }
-            }
-            Self::Gamma(d) => {
-                if x <= 0.0 {
-                    (0.0, 1.0)
-                } else {
-                    let t = d.rate() * x;
-                    (
-                        special::regularized_lower_gamma(d.shape(), t),
-                        special::regularized_upper_gamma(d.shape(), t),
-                    )
-                }
-            }
+            Self::Normal(d) => (d.cdf(x), d.survival(x)),
+            Self::LogNormal(d) => (d.cdf(x), d.survival(x)),
+            Self::Weibull(d) => (d.cdf(x), d.reliability(x)),
+            Self::Gamma(d) => (d.cdf(x), d.survival(x)),
             Self::Exponential(d) => (d.cdf(x), d.survival(x)),
-            Self::Beta(d) => {
-                if x <= 0.0 {
-                    (0.0, 1.0)
-                } else if x >= 1.0 {
-                    (1.0, 0.0)
-                } else {
-                    (
-                        special::regularized_incomplete_beta(x, d.alpha, d.beta),
-                        special::regularized_incomplete_beta(1.0 - x, d.beta, d.alpha),
-                    )
-                }
-            }
+            Self::Beta(d) => (d.cdf(x), d.survival(x)),
         };
         (
             cdf.max(f64::MIN_POSITIVE).ln(),

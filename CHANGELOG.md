@@ -32,6 +32,11 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
   (Alt 1985); `subgroup_phase_i_limit` / `subgroup_phase_ii_limit` give the limits alone. A shift between subgroups does not enter
   the pooled covariance, so it signals instead of being absorbed. Checked against NumPy and SciPy for three shapes at three levels. On every surface: WebAssembly `hotelling_subgroup_phase_i(subgroups, alpha?)` / `hotelling_subgroup_phase_ii(subgroups, reference, alpha?)` (the result's `estimates` `{mean, covariance, m, n}` is the Phase II `reference`), C ABI `uanalytics_hotelling_subgroup_phase_i` / `uanalytics_hotelling_subgroup_phase_ii`, and .NET `HotellingSubgroupPhaseI` / `HotellingSubgroupPhaseII` returning `HotellingSubgroupChartResult`; refusals use the shared vocabulary with the subgroup as `index`.
 
+### Changed
+
+- Requires u-numflow 0.17.
+- The Anderson-Darling statistic (`anderson_darling_fit`, and the family ranking and goodness-of-fit test built on it) takes each tail from the family's own `cdf` and survival function in u-numflow instead of a hand-written copy per family; the values agree to rounding, and the Beta upper tail is now formed from the exact side of the pair.
+
 ## [0.36.0] - 2026-11-14
 
 The .NET client is `UAnalytics` 0.30.0.
