@@ -263,6 +263,39 @@ public class BehaviourTests
     }
 
     [Fact]
+    public void Hotelling_contributions_rank_the_variables_after_a_signal_and_refuse_with_the_engines_codes()
+    {
+        // Correlation 0.9: one variable up while the other falls — T² = 20, each entry 19 (not shares).
+        var reference = new HotellingEstimates([0.0, 0.0], [[1.0, 0.9], [0.9, 1.0]], 50);
+        var c = _client.HotellingContributions([1.0, -1.0], reference);
+        Assert.Equal(20.0, c.T2, 9);
+        Assert.All(c.DropOne, v => Assert.Equal(19.0, v, 9));
+        Assert.True(c.Z[0] > 0 && c.Z[1] < 0);
+        Assert.Equal(c.DropOne[0], c.Z[0] * c.Z[0], 9);
+        Assert.Equal(1.0, c.Unconditional[0], 9);
+        Assert.True(c.DropOne.Sum() > c.T2);
+
+        // A subgroup of 4 carries its size: T² and the entries are 4 times, Z is 2 times.
+        var sub = new HotellingSubgroupEstimates([0.0, 0.0], [[1.0, 0.9], [0.9, 1.0]], 20, 4);
+        var s = _client.HotellingSubgroupContributions([1.0, -1.0], sub);
+        Assert.Equal(80.0, s.T2, 9);
+        Assert.Equal(2 * c.Z[0], s.Z[0], 9);
+
+        var wrongLength = Assert.Throws<AnalyticsException>(() => _client.HotellingContributions([1.0], reference));
+        Assert.Equal(("dimension_mismatch", "observation"), (wrongLength.ErrorCode, wrongLength.Parameter));
+        var nan = Assert.Throws<AnalyticsException>(() => _client.HotellingContributions([1.0, double.NaN], reference));
+        Assert.Equal(("value_not_finite", "observation"), (nan.ErrorCode, nan.Parameter));
+        var singular = Assert.Throws<AnalyticsException>(() =>
+            _client.HotellingContributions([1.0, 2.0], reference with { Covariance = [[1.0, 1.0], [1.0, 1.0]] }));
+        Assert.Equal(("degenerate_data", "observation"), (singular.ErrorCode, singular.Parameter));
+        var oneEach = Assert.Throws<AnalyticsException>(() =>
+            _client.HotellingSubgroupContributions([1.0, 2.0], sub with { N = 1 }));
+        Assert.Equal(("insufficient_data", "reference.n"), (oneEach.ErrorCode, oneEach.Parameter));
+        var shortMean = Assert.Throws<AnalyticsException>(() => _client.HotellingSubgroupContributions([1.0], sub));
+        Assert.Equal(("dimension_mismatch", "subgroup_mean"), (shortMean.ErrorCode, shortMean.Parameter));
+    }
+
+    [Fact]
     public void A_subgroup_hotelling_chart_sees_a_drift_between_subgroups_and_refuses_with_the_engines_codes()
     {
         double[][][] groups =

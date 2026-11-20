@@ -133,6 +133,29 @@ let chart = subgroup_phase_i(&subgroups, 0.0027).unwrap();
 assert_eq!((chart.estimates.m, chart.estimates.n), (6, 3));
 ```
 
+After a signal the next question is which variable moved. `contributions` ranks the variables by what
+each adds to the `T²` of the row that signalled, against the estimates it was judged by:
+
+```rust
+use u_analytics::spc::hotelling::{contributions, phase_i};
+
+let history = vec![
+    vec![1.0, 1.1], vec![2.0, 1.9], vec![3.0, 3.2], vec![4.0, 3.9],
+    vec![5.0, 5.1], vec![6.0, 5.8], vec![7.0, 7.2], vec![8.0, 7.9],
+    vec![4.5, 1.5],
+];
+let chart = phase_i(&history, 0.0027).unwrap();
+let c = contributions(&history[8], &chart.estimates).unwrap();
+assert!((c.t2 - chart.t2[8]).abs() < 1e-9);
+
+// On its own the first variable sits at its mean (`unconditional` 0), yet given the second it is far
+// too high: the relation between the two broke, and `drop_one` shows it for both. `z` says which way.
+assert!(c.unconditional[0] < 1e-12 && c.drop_one[0] > 5.0);
+assert!(c.z[0] > 0.0 && c.z[1] < 0.0);
+// The entries are not shares of T²: here they add up to more than it.
+assert!(c.drop_one.iter().sum::<f64>() > c.t2);
+```
+
 ### Process Capability
 
 Capability indices quantifying process performance against specifications:
@@ -852,6 +875,41 @@ not an exact distribution; it needs `n ≥ 2` and at least `m + p` observations 
 (`insufficient_data`). A subgroup of another size or width is `dimension_mismatch` with the
 subgroup as `index`; `reference.m` and `reference.n` must be whole numbers.
 
+**Which variable moved.** After a signal, `hotelling_contributions` ranks the variables by what each
+adds to the `T²` of the row that signalled (`hotelling_subgroup_contributions` does the same for a
+subgroup mean, with the subgroup size as a factor):
+
+```ts
+hotelling_contributions(observation: number[], reference: HotellingReference): HotellingContributions
+hotelling_subgroup_contributions(subgroup_mean: number[], reference: HotellingSubgroupReference): HotellingContributions
+
+// one entry per variable, in the order of the observation
+type HotellingContributions = {
+  t2: number,                // the T² of the observation (n times it for a subgroup mean)
+  drop_one: number[],        // T² minus the T² of the other variables = z²; not shares of t2
+  z: number[],               // the same deviation in standard deviations given the others; + = above what they predict
+  unconditional: number[] }  // the variable on its own: its squared standardised distance from its mean
+```
+
+It is a **ranking, not a test**: the entries do not add up to `t2` and have no limit, and with strongly
+correlated variables one that did not move still gets a large `drop_one` (the others predict it) — read it
+next to `unconditional`. `drop_one` is the squared deviation of the variable from what the others predict
+(the last term of the decomposition of `T²` by one variable at a time, whatever the order of the variables);
+it is checked in the tests against the definition, and no other package's implementation is compared. The
+decomposition into the terms of every subset and any limit for a term are not computed. Refusals as for the
+charts: `dimension_mismatch` (`observation`, or `subgroup_mean`, not as long as `reference.mean`),
+`value_not_finite`, `malformed_input` (`reference.m` or `reference.n` not whole), `insufficient_data`
+(`reference.n` below 2), `degenerate_data` for a covariance that cannot be inverted.
+
+```js
+const { hotelling_phase_i, hotelling_contributions } = require("@iyulab/u-analytics");
+
+const history = [[1, 1.1], [2, 1.9], [3, 3.2], [4, 3.9], [5, 5.1], [6, 5.8], [7, 7.2], [8, 7.9], [4.5, 1.5]];
+const chart = hotelling_phase_i(history);                       // the last row signals
+const c = hotelling_contributions(history[8], chart.estimates);
+console.log(c.unconditional[0] < 1e-9, c.z.map(Math.sign));    // true [ 1, -1 ]: the pair broke, not either range
+```
+
 ### CUSUM and EWMA — sequential shift detection
 
 The Shewhart charts above judge each point on its own, which makes them slow to
@@ -1497,6 +1555,8 @@ function's arguments as one JSON object, the response is the same JSON.
 | `uanalytics_hotelling_phase_ii` | `hotelling_phase_ii(observations, reference, alpha?)` | `{ observations, reference: { mean, covariance, m }, alpha? }` |
 | `uanalytics_hotelling_subgroup_phase_i` | `hotelling_subgroup_phase_i(subgroups, alpha?)` | `{ subgroups, alpha? }` |
 | `uanalytics_hotelling_subgroup_phase_ii` | `hotelling_subgroup_phase_ii(subgroups, reference, alpha?)` | `{ subgroups, reference: { mean, covariance, m, n }, alpha? }` |
+| `uanalytics_hotelling_contributions` | `hotelling_contributions(observation, reference)` | `{ observation, reference: { mean, covariance, m } }` |
+| `uanalytics_hotelling_subgroup_contributions` | `hotelling_subgroup_contributions(subgroup_mean, reference)` | `{ subgroup_mean, reference: { mean, covariance, m, n } }` |
 | `uanalytics_run_rules` | `run_rules(values, limits, { rules? })` | `{ values, limits: { ucl, cl, lcl }, rules? }` |
 | `uanalytics_p_chart` | `p_chart(samples, { p_bar? })` | `{ samples: [[defectives, sample_size], …], p_bar? }` |
 | `uanalytics_laney_p_chart` | `laney_p_chart(samples, { p_bar?, phi? })` | `{ samples: [[defectives, sample_size], …], p_bar?, phi? }` |
@@ -1574,6 +1634,7 @@ The .NET client (`bindings/csharp/UAnalytics`, package `UAnalytics`) wraps each
 entry point as a method on `AnalyticsClient` — `XbarRChart`, `ImrChart`, `PChart(samples, pBar)`, `LaneyPChart(samples, pBar, phi)`,
 `ShortRunDeviationChart`, `ShortRunStandardizedChart`, `ShortRunPChart`, `ShortRunUChart`,
 `HotellingPhaseI`, `HotellingPhaseII`, `HotellingSubgroupPhaseI`, `HotellingSubgroupPhaseII`,
+`HotellingContributions`, `HotellingSubgroupContributions`,
 `ProcessCapability`, `DetectChangepoints`, … — serialising the arguments to the
 request above and returning the response as a typed record. A non-zero status
 surfaces as `AnalyticsException` carrying the native status (`Status`), the `error`

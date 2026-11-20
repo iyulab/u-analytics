@@ -648,6 +648,47 @@ public sealed class AnalyticsClient : IDisposable
             ("alpha", Request.Num("alpha", alpha)));
 
     /// <summary>
+    /// Which variable moved after a Hotelling T² signal: what each variable contributes to the
+    /// <c>T²</c> of one <paramref name="observation"/> (one number per variable — the row of a chart
+    /// that signalled) against <paramref name="reference"/> (the
+    /// <see cref="HotellingChartResult.Estimates"/> of a Phase I chart). Per variable:
+    /// <c>DropOne</c> (<c>T²</c> minus the <c>T²</c> of the other variables, the squared deviation of the
+    /// variable from what the others predict), <c>Z</c> (that deviation, signed: positive when the variable
+    /// is above what the others predict; <c>Z² = DropOne</c>) and <c>Unconditional</c> (the variable's own
+    /// squared standardised distance). A ranking, <b>not a test</b>: the entries do not add up to
+    /// <c>T²</c> and have no limit; with strongly correlated variables one that did not move still gets a
+    /// large <c>DropOne</c> — read it next to <c>Unconditional</c>.
+    /// </summary>
+    public HotellingContributionsResult HotellingContributions(double[] observation, HotellingEstimates reference)
+        => Call(NativeInterop.uanalytics_hotelling_contributions, AnalyticsJson.Default.HotellingContributionsResult,
+            ("observation", Request.Nums("observation", observation)),
+            ("reference", new JsonObject
+            {
+                ["mean"] = Request.Nums("reference.mean", reference.Mean),
+                ["covariance"] = Request.Rows("reference.covariance", reference.Covariance),
+                ["m"] = JsonValue.Create(reference.M),
+            }));
+
+    /// <summary>
+    /// <see cref="HotellingContributions"/> for the mean of one subgroup of <c>reference.N</c> observations
+    /// (<paramref name="subgroupMean"/>, one number per variable): the entries of
+    /// <c>T² = n (x̄ − μ)ᵀ S⁻¹ (x̄ − μ)</c> — <c>DropOne</c> and <c>Unconditional</c> carry the factor
+    /// <c>n</c>, <c>Z</c> its square root. <paramref name="reference"/> is the
+    /// <see cref="HotellingSubgroupChartResult.Estimates"/> of a subgroup Phase I chart (<c>N ≥ 2</c>).
+    /// </summary>
+    public HotellingContributionsResult HotellingSubgroupContributions(double[] subgroupMean,
+        HotellingSubgroupEstimates reference)
+        => Call(NativeInterop.uanalytics_hotelling_subgroup_contributions, AnalyticsJson.Default.HotellingContributionsResult,
+            ("subgroup_mean", Request.Nums("subgroup_mean", subgroupMean)),
+            ("reference", new JsonObject
+            {
+                ["mean"] = Request.Nums("reference.mean", reference.Mean),
+                ["covariance"] = Request.Rows("reference.covariance", reference.Covariance),
+                ["m"] = JsonValue.Create(reference.M),
+                ["n"] = JsonValue.Create(reference.N),
+            }));
+
+    /// <summary>
     /// Type 1 gage study: the capability of a measurement device from repeated
     /// <paramref name="measurements"/> of one reference part whose true value is
     /// <paramref name="reference"/>, against the specification limits <paramref name="lsl"/> and

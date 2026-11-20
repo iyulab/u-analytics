@@ -10,7 +10,11 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ### Added
 
-- `spc::hotelling::contributions(observation, estimates)` and `subgroup_contributions(subgroup_mean, estimates)`: which variable
+- `spc::hotelling::contributions(observation, estimates)` and `subgroup_contributions(subgroup_mean, estimates)`, on every surface
+  (WebAssembly `hotelling_contributions(observation, reference)` / `hotelling_subgroup_contributions(subgroup_mean, reference)`, C ABI
+  `uanalytics_hotelling_contributions` / `uanalytics_hotelling_subgroup_contributions`, .NET `HotellingContributions` /
+  `HotellingSubgroupContributions` returning `HotellingContributionsResult`; the `reference` is the `estimates` of a Phase I chart,
+  refusals use the shared vocabulary and the engine card lists both operations): which variable
   moved after a T² signal. Per variable they give `drop_one` (T² minus the T² of the other variables, which equals the squared
   deviation of the variable from what the others predict, whatever the order of the variables), `z` (that deviation in standard
   deviations, signed; `z² = drop_one`) and `unconditional` (the variable's own squared standardised distance from its mean), with the

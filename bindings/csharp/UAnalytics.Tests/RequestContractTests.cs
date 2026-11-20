@@ -162,6 +162,8 @@ public class RequestContractTests
         ["HotellingPhaseII"] = c => c.HotellingPhaseII(Correlated[..3], Reference, 0.01),
         ["HotellingSubgroupPhaseI"] = c => c.HotellingSubgroupPhaseI(Grouped, 0.01),
         ["HotellingSubgroupPhaseII"] = c => c.HotellingSubgroupPhaseII(Grouped[..2], SubgroupReference, 0.01),
+        ["HotellingContributions"] = c => c.HotellingContributions(Correlated[3], Reference),
+        ["HotellingSubgroupContributions"] = c => c.HotellingSubgroupContributions(Grouped[1][0], SubgroupReference),
         ["Type1GageStudy"] = c => c.Type1GageStudy(Series, 10, 8, 12, 0.15, 4),
         ["JarqueBeraTest"] = c => c.JarqueBeraTest(Series),
         ["ShapiroWilkTest"] = c => c.ShapiroWilkTest(Series),

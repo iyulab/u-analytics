@@ -144,6 +144,8 @@ public class ContractTests
             AnalyticsJson.Default.HotellingChartResult),
         ["HotellingSubgroupPhaseI"] = c => Out(c.HotellingSubgroupPhaseI(Grouped, 0.01), AnalyticsJson.Default.HotellingSubgroupChartResult),
         ["HotellingSubgroupPhaseII"] = c => Out(c.HotellingSubgroupPhaseII(Grouped[..2], SubgroupReference, 0.01), AnalyticsJson.Default.HotellingSubgroupChartResult),
+        ["HotellingContributions"] = c => Out(c.HotellingContributions(Correlated[3], Reference), AnalyticsJson.Default.HotellingContributionsResult),
+        ["HotellingSubgroupContributions"] = c => Out(c.HotellingSubgroupContributions(Grouped[1][0], SubgroupReference), AnalyticsJson.Default.HotellingContributionsResult),
         ["Type1GageStudy"] = c => Out(c.Type1GageStudy(Series, 10, 8, 12), AnalyticsJson.Default.Type1GageResult),
         ["Type1GageStudy(options)"] = c => Out(c.Type1GageStudy(Series, 10, 8, 12, 0.15, 4), AnalyticsJson.Default.Type1GageResult),
         ["Type1GageStudy(bias fills the band)"] = c => Out(c.Type1GageStudy(Series, 14, 8, 12), AnalyticsJson.Default.Type1GageResult),
