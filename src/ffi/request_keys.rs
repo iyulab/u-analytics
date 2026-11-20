@@ -571,6 +571,16 @@ pub(super) fn entry_points() -> Vec<(&'static str, Entry, Value)> {
             json!({ "subgroups": [[[1.0, 1.1], [1.2, 1.0], [0.9, 1.3]]], "reference": { "mean": [3.0, 3.1], "covariance": [[0.04, 0.01], [0.01, 0.05]], "m": 5, "n": 3 } }),
         ),
         ep(
+            "uanalytics_hotelling_contributions",
+            uanalytics_hotelling_contributions,
+            json!({ "observation": [5.0, 1.5], "reference": { "mean": [4.5, 4.5], "covariance": [[6.0, 5.8], [5.8, 5.7]], "m": 8 } }),
+        ),
+        ep(
+            "uanalytics_hotelling_subgroup_contributions",
+            uanalytics_hotelling_subgroup_contributions,
+            json!({ "subgroup_mean": [1.0, 1.1], "reference": { "mean": [3.0, 3.1], "covariance": [[0.04, 0.01], [0.01, 0.05]], "m": 5, "n": 3 } }),
+        ),
+        ep(
             "uanalytics_type1_gage_study",
             uanalytics_type1_gage_study,
             json!({ "measurements": series(), "reference": 10, "lsl": 8, "usl": 12 }),

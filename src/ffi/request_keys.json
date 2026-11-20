@@ -247,6 +247,18 @@
         "seed": {}
       }
     },
+    "uanalytics_hotelling_contributions": {
+      "properties": {
+        "observation": {},
+        "reference": {
+          "properties": {
+            "covariance": {},
+            "m": {},
+            "mean": {}
+          }
+        }
+      }
+    },
     "uanalytics_hotelling_phase_i": {
       "properties": {
         "alpha": {},
@@ -264,6 +276,19 @@
             "mean": {}
           }
         }
+      }
+    },
+    "uanalytics_hotelling_subgroup_contributions": {
+      "properties": {
+        "reference": {
+          "properties": {
+            "covariance": {},
+            "m": {},
+            "mean": {},
+            "n": {}
+          }
+        },
+        "subgroup_mean": {}
       }
     },
     "uanalytics_hotelling_subgroup_phase_i": {

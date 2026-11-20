@@ -700,6 +700,130 @@
       }
     },
     {
+      "id": "hotelling_contributions",
+      "summary": "Which variable moved after a Hotelling T-squared signal: what each variable contributes to the T-squared of one observation against the mean and covariance of the in-control process (the estimates of a Phase I chart), as drop_one (T-squared minus the T-squared of the other variables), a signed z of the same deviation, and the variable's own unconditional squared distance. A ranking, not a test.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/hotelling_contributions.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/hotelling_contributions.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Each drop_one entry is T-squared minus the T-squared of the other variables, each computed from the definition by Gaussian elimination on the covariance and its sub-matrix; z has the square root of drop_one as its magnitude (z squared equals drop_one exactly) and unconditional is the variable's own squared standardised distance.",
+            "reference_kind": "literature",
+            "reference": "The definitions: T-squared of the observation minus T-squared of the observation on the other variables (a sub-matrix of the covariance), and the block-inverse identity (S^-1 r)_j^2 / (S^-1)_jj",
+            "method": "for 180 random positive definite covariances and observations (2 to 7 variables) compares each entry with the elimination-based quantity",
+            "tolerance": "relative 1e-8",
+            "test": "src/spc/hotelling.rs::tests::each_contribution_is_what_the_definition_says"
+          },
+          {
+            "claim": "The entries are not shares of T-squared (hand-worked at correlation 0.9: the entries sum to 0.105 against T-squared 1.05, and to 38 against 20), a variable that did not move gets rho squared of the one that did, and the entries do not change when a variable is rescaled or shifted.",
+            "reference_kind": "literature",
+            "reference": "Hand arithmetic from the definition at correlation 0.9; the Mahalanobis distance is affine invariant",
+            "method": "checks the worked examples, the ratio rho squared at three correlations, and an affine map of one variable",
+            "tolerance": "1e-12 for the worked examples, relative 1e-8 for the map",
+            "test": "src/spc/hotelling.rs::tests::the_entries_are_not_shares_of_t_squared"
+          }
+        ],
+        "limits": [
+          "A ranking to read after a signal, not a test: the entries do not add up to T-squared and none has a limit or a distribution; with strongly correlated variables one that did not move still gets a large drop_one.",
+          "Only the contribution of each variable given all the others (and on its own) is computed: the full decomposition into the terms of every subset (Mason, Tracy and Young) and any limit for a term are not, because the distribution of those terms has not been confirmed against the papers.",
+          "The identity is checked against the definition and hand-worked examples; no other software's implementation is compared (the order rules of the packages that decompose T-squared are not documented), and the papers that introduced the decomposition were not read for this implementation."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "hotelling_subgroup_contributions",
+      "summary": "Which variable moved after a Hotelling T-squared signal of a subgroup: the contributions of one subgroup mean to n times its squared Mahalanobis distance against the grand mean and pooled covariance (the estimates of a subgroup Phase I chart), as drop_one, a signed z and unconditional, with the subgroup size as the factor. A ranking, not a test.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/hotelling_subgroup_contributions.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/hotelling_subgroup_contributions.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Each drop_one entry is T-squared minus the T-squared of the other variables, each computed from the definition by Gaussian elimination on the covariance and its sub-matrix; z has the square root of drop_one as its magnitude (z squared equals drop_one exactly) and unconditional is the variable's own squared standardised distance.",
+            "reference_kind": "literature",
+            "reference": "The definitions: T-squared of the observation minus T-squared of the observation on the other variables (a sub-matrix of the covariance), and the block-inverse identity (S^-1 r)_j^2 / (S^-1)_jj",
+            "method": "for 180 random positive definite covariances and observations (2 to 7 variables) compares each entry with the elimination-based quantity",
+            "tolerance": "relative 1e-8",
+            "test": "src/spc/hotelling.rs::tests::each_contribution_is_what_the_definition_says"
+          },
+          {
+            "claim": "The entries are not shares of T-squared (hand-worked at correlation 0.9: the entries sum to 0.105 against T-squared 1.05, and to 38 against 20), a variable that did not move gets rho squared of the one that did, and the entries do not change when a variable is rescaled or shifted.",
+            "reference_kind": "literature",
+            "reference": "Hand arithmetic from the definition at correlation 0.9; the Mahalanobis distance is affine invariant",
+            "method": "checks the worked examples, the ratio rho squared at three correlations, and an affine map of one variable",
+            "tolerance": "1e-12 for the worked examples, relative 1e-8 for the map",
+            "test": "src/spc/hotelling.rs::tests::the_entries_are_not_shares_of_t_squared"
+          },
+          {
+            "claim": "For a subgroup mean the entries carry the subgroup size n (drop_one and unconditional times n, z times the square root of n) and the T-squared equals that of the subgroup chart for the same mean.",
+            "reference_kind": "literature",
+            "reference": "The definition of the subgroup statistic, T-squared = n (xbar - mu)' S^-1 (xbar - mu) (Alt 1985; Montgomery, ch. 11)",
+            "method": "compares each entry with n times the individual entry and the T-squared with that of subgroup_phase_ii",
+            "tolerance": "relative 1e-9",
+            "test": "src/spc/hotelling.rs::tests::a_subgroup_carries_the_size_of_the_subgroup"
+          }
+        ],
+        "limits": [
+          "A ranking to read after a signal, not a test: the entries do not add up to T-squared and none has a limit or a distribution; with strongly correlated variables one that did not move still gets a large drop_one.",
+          "Only the contribution of each variable given all the others (and on its own) is computed: the full decomposition into the terms of every subset (Mason, Tracy and Young) and any limit for a term are not, because the distribution of those terms has not been confirmed against the papers.",
+          "The identity is checked against the definition and hand-worked examples; no other software's implementation is compared (the order rules of the packages that decompose T-squared are not documented), and the papers that introduced the decomposition were not read for this implementation."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
       "id": "run_rules",
       "summary": "The run tests a series breaks against control limits the caller supplies, point by point. Run tests: the 3-sigma test alone unless options.rules names a set (western_electric, nelson) or lists tests.",
       "input": {

@@ -1390,6 +1390,42 @@ wire_export!(
     |r| crate::wire::hotelling::subgroup_phase_ii_dto(&r.subgroups, r.reference, r.alpha)
 );
 
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HotellingContributionsReq {
+    observation: Vec<f64>,
+    reference: crate::wire::hotelling::HotellingReferenceDto,
+}
+
+#[cfg(feature = "ffi")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HotellingSubgroupContributionsReq {
+    subgroup_mean: Vec<f64>,
+    reference: crate::wire::hotelling::HotellingSubgroupReferenceDto,
+}
+
+wire_export!(
+    /// Which variable moved after a Hotelling T² signal: `{observation, reference: {mean,
+    /// covariance, m}}` → `{t2, drop_one, z, unconditional}`, the WebAssembly binding's result.
+    /// `observation` is one number per variable; `reference` is the `estimates` of a Phase I
+    /// result. A ranking, not a test: the entries do not add up to `t2` and have no limit.
+    uanalytics_hotelling_contributions,
+    HotellingContributionsReq,
+    |r| crate::wire::hotelling::contributions_dto(&r.observation, r.reference)
+);
+
+wire_export!(
+    /// Which variable moved after a Hotelling T² signal of a subgroup: `{subgroup_mean,
+    /// reference: {mean, covariance, m, n}}` → `{t2, drop_one, z, unconditional}` of `T² = n (x̄ −
+    /// μ)ᵀ S⁻¹ (x̄ − μ)`, the WebAssembly binding's result. `reference.m` and `reference.n` are
+    /// whole numbers, `n >= 2`.
+    uanalytics_hotelling_subgroup_contributions,
+    HotellingSubgroupContributionsReq,
+    |r| crate::wire::hotelling::subgroup_contributions_dto(&r.subgroup_mean, r.reference)
+);
+
 wire_export!(
     /// One-sample t test of `data` against `mu0`: → `{statistic, df, p_value}`, the WebAssembly binding's result.
     uanalytics_one_sample_t_test,

@@ -1740,6 +1740,47 @@
       ],
       "type": "object"
     },
+    "HotellingContributionsDto": {
+      "description": "What each variable contributes to the `T²` of one observation (or one subgroup mean): a\nranking to read after a signal, not a test — the entries do not add up to `t2` and have\nno limit. One entry per variable, in the order of the observation.",
+      "properties": {
+        "drop_one": {
+          "description": "`T²` minus the `T²` of the other variables: the squared deviation of the variable from\nwhat the others predict (`z²`). Not shares of `t2`: the entries do not add up to it.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "t2": {
+          "description": "The `T²` of the observation (`n (x̄ − μ)ᵀ S⁻¹ (x̄ − μ)` for a subgroup mean).",
+          "format": "double",
+          "type": "number"
+        },
+        "unconditional": {
+          "description": "The variable on its own: its squared standardised distance from its mean, whatever the\nothers did.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "z": {
+          "description": "That deviation in standard deviations of the variable given the others, signed:\npositive when the variable is above what the others predict.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "t2",
+        "drop_one",
+        "z",
+        "unconditional"
+      ],
+      "type": "object"
+    },
     "HotellingReferenceDto": {
       "additionalProperties": false,
       "description": "What a Phase II chart monitors against: the mean and covariance of the\nin-control process and the number of observations they were estimated\nfrom (which sets the limit). It is the `estimates` of a Phase I result.",
@@ -5140,6 +5181,30 @@
     "goodness_of_fit.output": {
       "$ref": "#/$defs/GoodnessOfFitResultDto"
     },
+    "hotelling_contributions.input": {
+      "additionalProperties": false,
+      "description": "The arguments of hotelling_contributions(observation, reference), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "observation": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "reference": {
+          "$ref": "#/$defs/HotellingReferenceDto"
+        }
+      },
+      "required": [
+        "observation",
+        "reference"
+      ],
+      "type": "object"
+    },
+    "hotelling_contributions.output": {
+      "$ref": "#/$defs/HotellingContributionsDto"
+    },
     "hotelling_phase_i.input": {
       "additionalProperties": false,
       "description": "The arguments of hotelling_phase_i(data, alpha), by name; the WebAssembly function takes them in that order.",
@@ -5203,6 +5268,30 @@
     },
     "hotelling_phase_ii.output": {
       "$ref": "#/$defs/HotellingChartDto"
+    },
+    "hotelling_subgroup_contributions.input": {
+      "additionalProperties": false,
+      "description": "The arguments of hotelling_subgroup_contributions(subgroup_mean, reference), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "reference": {
+          "$ref": "#/$defs/HotellingSubgroupReferenceDto"
+        },
+        "subgroup_mean": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "subgroup_mean",
+        "reference"
+      ],
+      "type": "object"
+    },
+    "hotelling_subgroup_contributions.output": {
+      "$ref": "#/$defs/HotellingContributionsDto"
     },
     "hotelling_subgroup_phase_i.input": {
       "additionalProperties": false,
