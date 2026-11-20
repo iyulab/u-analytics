@@ -292,4 +292,28 @@ ok(fractionN && fractionN.code === 'malformed_input' && fractionN.parameter === 
 const oneRow = refusal(() => m.hotelling_subgroup_phase_i(sub.map(g => g.slice(0, 1))))
 ok(oneRow && oneRow.code === 'insufficient_data', `one row per subgroup: ${oneRow ? oneRow.code : 'no error'}`)
 
+// Which variable moved: a plain array in (the observation), the estimates of a Phase I chart as the
+// reference, one entry per variable out; the point that broke the correlation has its first variable
+// at the mean (unconditional 0) yet a large drop_one, and the signs say which way each departs.
+const hc = m.hotelling_contributions(line[8], h1.estimates)
+ok(Math.abs(hc.t2 - h1.t2[8]) < 1e-9 && hc.drop_one.length === 2 && hc.z.length === 2 && hc.unconditional.length === 2,
+  `hotelling_contributions ${JSON.stringify(hc)}`)
+ok(hc.unconditional[0] < 1e-9 && hc.drop_one[0] > 5 && hc.z[0] > 0 && hc.z[1] < 0,
+  `hotelling_contributions reading ${JSON.stringify(hc)}`)
+ok(Math.abs(hc.drop_one[0] - hc.z[0] * hc.z[0]) < 1e-12, 'drop_one is z squared')
+ok(hc.drop_one[0] + hc.drop_one[1] > hc.t2, 'the entries are not shares of t2')
+ok(JSON.stringify(m.hotelling_contributions(new Float64Array(line[8]), h1.estimates)) === JSON.stringify(hc),
+  'a Float64Array observation reads like an array')
+const hs = m.hotelling_subgroup_contributions([1, -1], { mean: [0, 0], covariance: [[1, 0.9], [0.9, 1]], m: 20, n: 4 })
+ok(Math.abs(hs.t2 - 80) < 1e-9 && Math.abs(hs.drop_one[0] - 76) < 1e-9, `hotelling_subgroup_contributions ${JSON.stringify(hs)}`)
+const shortObs = refusal(() => m.hotelling_contributions([1], h1.estimates))
+ok(shortObs && shortObs.code === 'dimension_mismatch' && shortObs.parameter === 'observation' && shortObs.expected === 2 && shortObs.got === 1,
+  `a short observation: ${shortObs ? shortObs.code + ' ' + shortObs.parameter : 'no error'}`)
+const nullObs = refusal(() => m.hotelling_contributions([1, null], h1.estimates))
+ok(nullObs && nullObs.code === 'malformed_input' && nullObs.parameter === 'observation' && nullObs.index === 1,
+  `null in an observation: ${nullObs ? nullObs.code + ' ' + nullObs.parameter + ' ' + nullObs.index : 'no error'}`)
+const oneEach = refusal(() => m.hotelling_subgroup_contributions([1, 2], { ...s1.estimates, n: 1 }))
+ok(oneEach && oneEach.code === 'insufficient_data' && oneEach.parameter === 'reference.n',
+  `a subgroup size of one: ${oneEach ? oneEach.code + ' ' + oneEach.parameter : 'no error'}`)
+
 console.log(`binding behaviour gate: ok (${checks} checks)`)

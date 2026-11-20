@@ -172,6 +172,26 @@ public sealed record HotellingSubgroupChartResult(
     bool InControl,
     HotellingSubgroupEstimates Estimates);
 
+/// <summary>
+/// Which variable moved after a Hotelling T² signal: what each variable contributes to the
+/// <c>T²</c> of one observation (<see cref="T2"/>), one entry per variable in the order of the
+/// observation. A ranking to read, <b>not a test</b>: the entries do not add up to <see cref="T2"/>
+/// and have no limit, and with strongly correlated variables one that did not move still gets a
+/// large <see cref="DropOne"/> (the others predict it) — read it next to <see cref="Unconditional"/>.
+/// </summary>
+/// <param name="T2">The <c>T²</c> of the observation (<c>n (x̄ − μ)ᵀ S⁻¹ (x̄ − μ)</c> for a subgroup mean).</param>
+/// <param name="DropOne"><c>T²</c> minus the <c>T²</c> of the other variables: the squared deviation of the
+/// variable from what the others predict, <c>Z²</c>. Not shares of <see cref="T2"/>.</param>
+/// <param name="Z">That deviation in standard deviations of the variable given the others, signed: positive when
+/// the variable is above what the others predict.</param>
+/// <param name="Unconditional">The variable on its own: its squared standardised distance from its mean,
+/// whatever the others did.</param>
+public sealed record HotellingContributionsResult(
+    double T2,
+    IReadOnlyList<double> DropOne,
+    IReadOnlyList<double> Z,
+    IReadOnlyList<double> Unconditional);
+
 // ── Attributes charts ──
 
 /// <summary>

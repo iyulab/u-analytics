@@ -6710,7 +6710,8 @@ pub(crate) mod type1_gage {
 pub(crate) mod hotelling {
     use super::*;
     use crate::spc::hotelling::{
-        phase_i, phase_ii, subgroup_phase_i, subgroup_phase_ii, HotellingChart, HotellingError,
+        contributions, phase_i, phase_ii, subgroup_contributions, subgroup_phase_i,
+        subgroup_phase_ii, HotellingChart, HotellingContributions, HotellingError,
         HotellingEstimates, SubgroupEstimates, SubgroupHotellingChart,
     };
 
@@ -6790,7 +6791,7 @@ pub(crate) mod hotelling {
         let named = |parameter: &'static str| match parameter {
             "mean" => "reference.mean",
             "covariance" => "reference.covariance",
-            other if other == "data" || other == "observations" => rows,
+            other if other == "data" || other == "observations" || other == "observation" => rows,
             other => other,
         };
         match error {
@@ -6997,6 +6998,84 @@ pub(crate) mod hotelling {
         subgroup_phase_ii(subgroups, &estimates, alpha.unwrap_or(DEFAULT_ALPHA))
             .map(subgroup_chart_dto)
             .map_err(|e| refusal(e, "subgroups", "reference"))
+    }
+
+    /// What each variable contributes to the `T²` of one observation (or one subgroup mean): a
+    /// ranking to read after a signal, not a test — the entries do not add up to `t2` and have
+    /// no limit. One entry per variable, in the order of the observation.
+    #[derive(Serialize, Debug)]
+    #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+    #[cfg_attr(all(test, feature = "wasm"), derive(schemars::JsonSchema))]
+    #[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+    pub(crate) struct HotellingContributionsDto {
+        /// The `T²` of the observation (`n (x̄ − μ)ᵀ S⁻¹ (x̄ − μ)` for a subgroup mean).
+        pub(crate) t2: f64,
+        /// `T²` minus the `T²` of the other variables: the squared deviation of the variable from
+        /// what the others predict (`z²`). Not shares of `t2`: the entries do not add up to it.
+        pub(crate) drop_one: Vec<f64>,
+        /// That deviation in standard deviations of the variable given the others, signed:
+        /// positive when the variable is above what the others predict.
+        pub(crate) z: Vec<f64>,
+        /// The variable on its own: its squared standardised distance from its mean, whatever the
+        /// others did.
+        pub(crate) unconditional: Vec<f64>,
+    }
+
+    fn contributions_dto_of(c: HotellingContributions) -> HotellingContributionsDto {
+        HotellingContributionsDto {
+            t2: c.t2,
+            drop_one: c.drop_one,
+            z: c.z,
+            unconditional: c.unconditional,
+        }
+    }
+
+    /// The contributions of one `observation` (one number per variable) to its `T²` against
+    /// `reference`. `reference.m` must be a whole number (`malformed_input`); an observation of
+    /// another length than the reference's mean is `dimension_mismatch`, a covariance that
+    /// cannot be inverted `degenerate_data`.
+    pub(crate) fn contributions_dto(
+        observation: &[f64],
+        reference: HotellingReferenceDto,
+    ) -> Result<HotellingContributionsDto, WireError> {
+        let HotellingReferenceDto {
+            mean,
+            covariance,
+            m,
+        } = reference;
+        let estimates = HotellingEstimates {
+            mean,
+            covariance,
+            m: whole_field("reference.m", m)?,
+        };
+        contributions(observation, &estimates)
+            .map(contributions_dto_of)
+            .map_err(|e| refusal(e, "observation", "reference"))
+    }
+
+    /// The contributions of the mean of one subgroup of `reference.n` observations to its `T²`
+    /// against `reference`: the entries of `n (x̄ − μ)ᵀ S⁻¹ (x̄ − μ)`. `reference.m` and
+    /// `reference.n` must be whole numbers (`malformed_input`), `n` at least 2
+    /// (`insufficient_data`).
+    pub(crate) fn subgroup_contributions_dto(
+        subgroup_mean: &[f64],
+        reference: HotellingSubgroupReferenceDto,
+    ) -> Result<HotellingContributionsDto, WireError> {
+        let HotellingSubgroupReferenceDto {
+            mean,
+            covariance,
+            m,
+            n,
+        } = reference;
+        let estimates = SubgroupEstimates {
+            mean,
+            covariance,
+            m: whole_field("reference.m", m)?,
+            n: whole_field("reference.n", n)?,
+        };
+        subgroup_contributions(subgroup_mean, &estimates)
+            .map(contributions_dto_of)
+            .map_err(|e| refusal(e, "subgroup_mean", "reference.n"))
     }
 }
 
@@ -9035,6 +9114,135 @@ mod hotelling_wire {
         assert_eq!(
             refused(subgroup_phase_ii_dto(&groups(), reference(10.0, 4.0), a)),
             ("dimension_mismatch", Some("subgroups".into()), Some(0))
+        );
+    }
+}
+
+#[cfg(test)]
+mod hotelling_contributions_wire {
+    use super::hotelling::{
+        contributions_dto, phase_i_dto, subgroup_contributions_dto, HotellingReferenceDto,
+        HotellingSubgroupReferenceDto,
+    };
+    use super::*;
+
+    fn reference(m: f64) -> HotellingReferenceDto {
+        HotellingReferenceDto {
+            mean: vec![0.0, 0.0],
+            covariance: vec![vec![1.0, 0.9], vec![0.9, 1.0]],
+            m,
+        }
+    }
+
+    fn sub_reference(m: f64, n: f64) -> HotellingSubgroupReferenceDto {
+        HotellingSubgroupReferenceDto {
+            mean: vec![0.0, 0.0],
+            covariance: vec![vec![1.0, 0.9], vec![0.9, 1.0]],
+            m,
+            n,
+        }
+    }
+
+    fn refused(
+        e: Result<impl std::fmt::Debug, WireError>,
+    ) -> (&'static str, Option<String>, Option<usize>) {
+        let e = e.expect_err("a refusal");
+        (e.code, e.parameter.as_deref().map(str::to_owned), e.index)
+    }
+
+    #[test]
+    fn the_result_has_the_documented_keys_and_the_chart_t_squared() {
+        let c = contributions_dto(&[1.0, -1.0], reference(50.0)).expect("contributions");
+        let json = serde_json::to_value(&c).expect("serialises");
+        let mut keys: Vec<&str> = json
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["drop_one", "t2", "unconditional", "z"]);
+        assert!((c.t2 - 20.0).abs() < 1e-9);
+        assert!(c.drop_one.iter().all(|v| (v - 19.0).abs() < 1e-9));
+        // The reference a chart returned is what the contributions take.
+        let data = vec![
+            vec![1.0, 1.1],
+            vec![2.0, 1.9],
+            vec![3.0, 3.2],
+            vec![4.0, 3.9],
+            vec![5.0, 5.1],
+            vec![6.0, 5.8],
+            vec![7.0, 7.2],
+            vec![8.0, 7.9],
+            vec![4.5, 1.5],
+        ];
+        let chart = phase_i_dto(&data, None).expect("chart");
+        let json = serde_json::to_value(&chart.estimates).expect("serialises");
+        let reference: HotellingReferenceDto = serde_json::from_value(json).expect("reads back");
+        let c = contributions_dto(&data[8], reference).expect("contributions");
+        assert!((c.t2 - chart.t2[8]).abs() <= 1e-9 * chart.t2[8]);
+        // The point that broke the correlation: the second variable is far below what the
+        // first predicts, and that is what the ranking shows.
+        assert!(c.drop_one[1] > c.unconditional[1]);
+        assert!(c.z[1] < 0.0);
+    }
+
+    #[test]
+    fn refusals_name_their_reason_and_argument() {
+        assert_eq!(
+            refused(contributions_dto(&[1.0], reference(50.0))),
+            ("dimension_mismatch", Some("observation".into()), None)
+        );
+        assert_eq!(
+            refused(contributions_dto(&[1.0, f64::NAN], reference(50.0))),
+            ("value_not_finite", Some("observation".into()), None)
+        );
+        assert_eq!(
+            refused(contributions_dto(&[1.0, 2.0], reference(50.5))),
+            ("malformed_input", Some("reference.m".into()), None)
+        );
+        let mut singular = reference(50.0);
+        singular.covariance = vec![vec![1.0, 1.0], vec![1.0, 1.0]];
+        assert_eq!(
+            refused(contributions_dto(&[1.0, 2.0], singular)),
+            ("degenerate_data", Some("observation".into()), None)
+        );
+        let mut short_mean = reference(50.0);
+        short_mean.mean = vec![0.0, 0.0, 0.0];
+        assert_eq!(
+            refused(contributions_dto(&[1.0, 2.0], short_mean)),
+            (
+                "dimension_mismatch",
+                Some("reference.covariance".into()),
+                None
+            )
+        );
+    }
+
+    #[test]
+    fn a_subgroup_mean_carries_the_subgroup_size_and_names_its_own_argument() {
+        let single = contributions_dto(&[1.0, -1.0], reference(50.0)).expect("contributions");
+        let many = subgroup_contributions_dto(&[1.0, -1.0], sub_reference(20.0, 4.0))
+            .expect("contributions");
+        assert!((many.t2 - 4.0 * single.t2).abs() < 1e-9);
+        assert!((many.z[0] - 2.0 * single.z[0]).abs() < 1e-9);
+        assert_eq!(
+            refused(subgroup_contributions_dto(&[1.0], sub_reference(20.0, 4.0))),
+            ("dimension_mismatch", Some("subgroup_mean".into()), None)
+        );
+        assert_eq!(
+            refused(subgroup_contributions_dto(
+                &[1.0, 2.0],
+                sub_reference(20.0, 4.5)
+            )),
+            ("malformed_input", Some("reference.n".into()), None)
+        );
+        assert_eq!(
+            refused(subgroup_contributions_dto(
+                &[1.0, 2.0],
+                sub_reference(20.0, 1.0)
+            )),
+            ("insufficient_data", Some("reference.n".into()), None)
         );
     }
 }

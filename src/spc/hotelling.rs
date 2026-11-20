@@ -181,15 +181,9 @@ fn estimate(rows: &[Vec<f64>], p: usize) -> HotellingEstimates {
     }
 }
 
-/// `(x − μ)ᵀ S⁻¹ (x − μ)` for every row, by a Cholesky factorisation of `S` (the factor is
-/// built once; each row is one pair of triangular solves). A covariance that is not positive
-/// definite is `Degenerate`.
-fn t_squared(
-    rows: &[Vec<f64>],
-    mean: &[f64],
-    covariance: &[Vec<f64>],
-) -> Result<Vec<f64>, HotellingError> {
-    let p = mean.len();
+/// The lower Cholesky factor `L` of the `p × p` covariance (`S = L Lᵀ`). A covariance that is
+/// not positive definite is `Degenerate`.
+fn factor_of(p: usize, covariance: &[Vec<f64>]) -> Result<Matrix, HotellingError> {
     let flat: Vec<f64> = covariance.iter().flatten().copied().collect();
     let s = Matrix::new(p, p, flat).map_err(|_| HotellingError::Degenerate)?;
     let factor = s.cholesky().map_err(|_| HotellingError::Degenerate)?;
@@ -203,6 +197,19 @@ fn t_squared(
             return Err(HotellingError::Degenerate);
         }
     }
+    Ok(factor)
+}
+
+/// `(x − μ)ᵀ S⁻¹ (x − μ)` for every row, by a Cholesky factorisation of `S` (the factor is
+/// built once; each row is one pair of triangular solves). A covariance that is not positive
+/// definite is `Degenerate`.
+fn t_squared(
+    rows: &[Vec<f64>],
+    mean: &[f64],
+    covariance: &[Vec<f64>],
+) -> Result<Vec<f64>, HotellingError> {
+    let p = mean.len();
+    let factor = factor_of(p, covariance)?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         let centred: Vec<f64> = row.iter().zip(mean).map(|(x, m)| x - m).collect();
@@ -710,6 +717,177 @@ pub fn subgroup_phase_ii(
         out_of_control,
         estimates: estimates.clone(),
     })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Which variable moved
+// ---------------------------------------------------------------------------------------------
+
+/// What each variable contributes to the `T²` of one observation: a ranking to read after a
+/// signal, not a test. The three vectors have one entry per variable, in the order of the
+/// observation.
+///
+/// The entries do **not** add up to `t2` (they are not shares of it), and none has a limit of its
+/// own. With strongly correlated variables a variable that did not move still gets a large
+/// `drop_one`, because the others predict it (smearing): read `drop_one` next to `unconditional`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HotellingContributions {
+    /// The `T²` of the observation (`n (x̄ − μ)ᵀ S⁻¹ (x̄ − μ)` for a subgroup mean).
+    pub t2: f64,
+    /// `T² − T²₋ⱼ`: how much `T²` falls when variable `j` is left out, `T²₋ⱼ` being the statistic
+    /// of the other `p − 1` variables. It is the squared standardised deviation of variable `j`
+    /// from what the other variables predict (`z_j²`), whatever the order the variables are in.
+    pub drop_one: Vec<f64>,
+    /// `z_j`: that deviation in standard deviations of variable `j` given the others, with the
+    /// sign of its direction. `z_j² = drop_one_j`.
+    pub z: Vec<f64>,
+    /// The variable on its own: `n (x_j − μ_j)² / S_jj`, the squared standardised distance from
+    /// its mean whatever the others did (`n = 1` for an individual observation).
+    pub unconditional: Vec<f64>,
+}
+
+/// The contributions of `x − μ` to `scale · rᵀ S⁻¹ r`, by the Cholesky factor of `S` alone.
+///
+/// With `w = S⁻¹ r`, `z_j = √scale · w_j / √(S⁻¹)_jj` and `(S⁻¹)_jj = ‖L⁻¹ e_j‖²`: one pair of
+/// triangular solves for `w` and one more per variable, `O(p³)` in all.
+fn contributions_of(
+    observation: &[f64],
+    mean: &[f64],
+    covariance: &[Vec<f64>],
+    scale: f64,
+) -> Result<HotellingContributions, HotellingError> {
+    let p = check_reference(mean, covariance)?;
+    if observation.len() != p {
+        return Err(HotellingError::DimensionMismatch {
+            parameter: "observation",
+            expected: p,
+            got: observation.len(),
+            index: None,
+        });
+    }
+    if observation.iter().any(|v| !v.is_finite()) {
+        return Err(HotellingError::NonFinite {
+            parameter: "observation",
+            index: None,
+        });
+    }
+    let factor = factor_of(p, covariance)?;
+    let r: Vec<f64> = observation.iter().zip(mean).map(|(x, m)| x - m).collect();
+    // L u = r, then Lᵀ w = u: w = S⁻¹ r and T² = scale · uᵀu.
+    let mut u = vec![0.0; p];
+    for i in 0..p {
+        let mut sum = r[i];
+        for (j, uj) in u.iter().enumerate().take(i) {
+            sum -= factor.get(i, j) * uj;
+        }
+        u[i] = sum / factor.get(i, i);
+    }
+    let mut w = vec![0.0; p];
+    for i in (0..p).rev() {
+        let mut sum = u[i];
+        for (j, wj) in w.iter().enumerate().skip(i + 1) {
+            sum -= factor.get(j, i) * wj;
+        }
+        w[i] = sum / factor.get(i, i);
+    }
+    let t2 = scale * u.iter().map(|v| v * v).sum::<f64>();
+    let root = scale.sqrt();
+    let mut z = Vec::with_capacity(p);
+    let mut column = vec![0.0; p];
+    for (j, wj) in w.iter().enumerate() {
+        // x = L⁻¹ e_j (zero above row j): (S⁻¹)_jj = ‖x‖².
+        let mut norm = 0.0;
+        for i in j..p {
+            let mut sum = if i == j { 1.0 } else { 0.0 };
+            for (k, xk) in column.iter().enumerate().take(i).skip(j) {
+                sum -= factor.get(i, k) * xk;
+            }
+            column[i] = sum / factor.get(i, i);
+            norm += column[i] * column[i];
+        }
+        z.push(root * wj / norm.sqrt());
+    }
+    let drop_one = z.iter().map(|v| v * v).collect();
+    let unconditional = (0..p)
+        .map(|j| scale * r[j] * r[j] / covariance[j][j])
+        .collect();
+    Ok(HotellingContributions {
+        t2,
+        drop_one,
+        z,
+        unconditional,
+    })
+}
+
+/// Which variable moved: the contributions of one `observation` to its `T²` against `estimates`
+/// (from [`phase_i`] or [`estimate_from`], the same ones [`phase_ii`] takes).
+///
+/// `drop_one` is `T²` minus the `T²` of the other variables, equal to the squared standardised
+/// deviation of the variable from what the others predict; `z` is that deviation with its sign;
+/// `unconditional` is the variable's own squared standardised distance. See
+/// [`HotellingContributions`] for how to read them — a ranking, not a test: the entries do not
+/// add up to `T²` and have no limit.
+///
+/// The identity `T² − T²₋ⱼ = (S⁻¹r)ⱼ² / (S⁻¹)ⱼⱼ` follows from the block inverse of `S`; it is
+/// checked in the tests against the definition (the two statistics by Gaussian elimination), not
+/// taken from the literature, which decomposes `T²` the same way (Mason, Tracy & Young 1995;
+/// Runger, Alt & Montgomery 1996).
+///
+/// # Errors
+///
+/// An observation or an estimate of the wrong length or not finite; a singular covariance.
+///
+/// # Examples
+///
+/// ```
+/// use u_analytics::spc::hotelling::{contributions, HotellingEstimates};
+///
+/// // Two variables, correlation 0.9; the first rises while the second falls.
+/// let estimates = HotellingEstimates {
+///     mean: vec![0.0, 0.0],
+///     covariance: vec![vec![1.0, 0.9], vec![0.9, 1.0]],
+///     m: 50,
+/// };
+/// let c = contributions(&[1.0, -1.0], &estimates).unwrap();
+/// assert!((c.t2 - 20.0).abs() < 1e-9);
+/// // Each is 19 against T² = 20: the entries are not shares of it.
+/// assert!((c.drop_one[0] - 19.0).abs() < 1e-9);
+/// // The first variable's own distance is 1; given the second it is far larger, and the sign
+/// // says the first is above what the second predicts.
+/// assert!((c.unconditional[0] - 1.0).abs() < 1e-12);
+/// assert!(c.z[0] > 0.0 && c.z[1] < 0.0);
+/// ```
+pub fn contributions(
+    observation: &[f64],
+    estimates: &HotellingEstimates,
+) -> Result<HotellingContributions, HotellingError> {
+    contributions_of(observation, &estimates.mean, &estimates.covariance, 1.0)
+}
+
+/// [`contributions`] for the mean of a subgroup of `estimates.n` observations: the entries are
+/// those of `T² = n (x̄ − μ)ᵀ S⁻¹ (x̄ − μ)` (`drop_one` and `unconditional` carry the factor `n`,
+/// `z` its square root).
+///
+/// # Errors
+///
+/// A subgroup size `n` below 2; a mean or an estimate of the wrong length or not finite; a
+/// singular covariance.
+pub fn subgroup_contributions(
+    subgroup_mean: &[f64],
+    estimates: &SubgroupEstimates,
+) -> Result<HotellingContributions, HotellingError> {
+    if estimates.n < 2 {
+        return Err(HotellingError::TooFew {
+            min: 2,
+            got: estimates.n,
+        });
+    }
+    contributions_of(
+        subgroup_mean,
+        &estimates.mean,
+        &estimates.covariance,
+        estimates.n as f64,
+    )
 }
 
 #[cfg(test)]
@@ -1282,5 +1460,278 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Which variable moved
+    // -----------------------------------------------------------------------------------------
+
+    /// A positive definite covariance `B Bᵀ + ½ I` and a mean, from the seeded source.
+    fn random_estimates(rng: &mut Lcg, p: usize) -> HotellingEstimates {
+        let b: Vec<Vec<f64>> = (0..p)
+            .map(|_| (0..p).map(|_| rng.bell()).collect())
+            .collect();
+        let covariance = (0..p)
+            .map(|i| {
+                (0..p)
+                    .map(|j| {
+                        let dot: f64 = (0..p).map(|k| b[i][k] * b[j][k]).sum();
+                        dot + if i == j { 0.5 } else { 0.0 }
+                    })
+                    .collect()
+            })
+            .collect();
+        HotellingEstimates {
+            mean: (0..p).map(|_| rng.bell()).collect(),
+            covariance,
+            m: 50,
+        }
+    }
+
+    /// `T²` of the observation on the variables but `j`, from the definition, by elimination.
+    fn t_squared_without(x: &[f64], e: &HotellingEstimates, j: usize) -> f64 {
+        let keep: Vec<usize> = (0..x.len()).filter(|&k| k != j).collect();
+        let sub_x: Vec<f64> = keep.iter().map(|&k| x[k]).collect();
+        let sub_mean: Vec<f64> = keep.iter().map(|&k| e.mean[k]).collect();
+        let sub_s: Vec<Vec<f64>> = keep
+            .iter()
+            .map(|&a| keep.iter().map(|&b| e.covariance[a][b]).collect())
+            .collect();
+        mahalanobis_by_elimination(&sub_x, &sub_mean, &sub_s)
+    }
+
+    #[test]
+    fn each_contribution_is_what_the_definition_says() {
+        let mut rng = Lcg(11);
+        let mut checked = 0;
+        for p in 2..=7usize {
+            for _ in 0..30 {
+                let e = random_estimates(&mut rng, p);
+                let x: Vec<f64> = e.mean.iter().map(|m| m + 3.0 * rng.bell()).collect();
+                let c = contributions(&x, &e).unwrap();
+                let full = mahalanobis_by_elimination(&x, &e.mean, &e.covariance);
+                assert!((c.t2 - full).abs() <= 1e-9 * full.max(1.0), "t2 p {p}");
+                for j in 0..p {
+                    let want = full - t_squared_without(&x, &e, j);
+                    assert!(
+                        (c.drop_one[j] - want).abs() <= 1e-8 * full.max(1.0),
+                        "p {p} j {j}: {} vs {want}",
+                        c.drop_one[j]
+                    );
+                    let r = x[j] - e.mean[j];
+                    let own = r * r / e.covariance[j][j];
+                    assert!((c.unconditional[j] - own).abs() <= 1e-12 * own.max(1.0));
+                    assert_eq!(c.drop_one[j], c.z[j] * c.z[j]);
+                    checked += 1;
+                }
+            }
+        }
+        assert_eq!(checked, 30 * (2 + 3 + 4 + 5 + 6 + 7));
+    }
+
+    #[test]
+    fn the_sign_is_the_direction_the_variable_departs_from_what_the_others_predict() {
+        // Correlation 0.9: with the second variable at its mean the first predicts 0 for it, so
+        // a first variable above its mean puts the second *below* what it predicts.
+        let e = HotellingEstimates {
+            mean: vec![0.0, 0.0],
+            covariance: vec![vec![1.0, 0.9], vec![0.9, 1.0]],
+            m: 50,
+        };
+        let c = contributions(&[1.0, 0.0], &e).unwrap();
+        assert!(c.z[0] > 0.0 && c.z[1] < 0.0, "{:?}", c.z);
+        let c = contributions(&[-1.0, 0.0], &e).unwrap();
+        assert!(c.z[0] < 0.0 && c.z[1] > 0.0, "{:?}", c.z);
+    }
+
+    #[test]
+    fn the_entries_are_not_shares_of_t_squared() {
+        // Worked by hand at correlation 0.9 (S⁻¹ = [[1, −.9], [−.9, 1]] / 0.19).
+        let e = HotellingEstimates {
+            mean: vec![0.0, 0.0],
+            covariance: vec![vec![1.0, 0.9], vec![0.9, 1.0]],
+            m: 50,
+        };
+        // Both up together: they predict each other, T² = 0.2 / 0.19.
+        let c = contributions(&[1.0, 1.0], &e).unwrap();
+        assert!((c.t2 - 0.2 / 0.19).abs() < 1e-12);
+        for v in &c.drop_one {
+            assert!((v - (0.2 / 0.19 - 1.0)).abs() < 1e-12, "{v}");
+        }
+        assert!(c.drop_one.iter().sum::<f64>() < c.t2);
+        // One up, one down: T² = 3.8 / 0.19 = 20, each entry 19, the sum 38 is twice T².
+        let c = contributions(&[1.0, -1.0], &e).unwrap();
+        assert!((c.t2 - 20.0).abs() < 1e-12);
+        for v in &c.drop_one {
+            assert!((v - 19.0).abs() < 1e-12, "{v}");
+        }
+        assert!(c.drop_one.iter().sum::<f64>() > c.t2);
+    }
+
+    #[test]
+    fn a_variable_that_did_not_move_gets_rho_squared_of_the_one_that_did() {
+        // The smearing the documentation warns of: only the first variable moved.
+        for rho in [0.5, 0.9, 0.99] {
+            let e = HotellingEstimates {
+                mean: vec![0.0, 0.0],
+                covariance: vec![vec![1.0, rho], vec![rho, 1.0]],
+                m: 50,
+            };
+            let c = contributions(&[2.0, 0.0], &e).unwrap();
+            assert!(
+                (c.drop_one[1] / c.drop_one[0] - rho * rho).abs() < 1e-12,
+                "rho {rho}"
+            );
+            // On its own the second variable shows nothing.
+            assert_eq!(c.unconditional[1], 0.0);
+        }
+    }
+
+    #[test]
+    fn uncorrelated_variables_contribute_what_they_do_on_their_own() {
+        let e = HotellingEstimates {
+            mean: vec![1.0, -2.0, 0.5],
+            covariance: vec![
+                vec![4.0, 0.0, 0.0],
+                vec![0.0, 0.25, 0.0],
+                vec![0.0, 0.0, 9.0],
+            ],
+            m: 30,
+        };
+        let c = contributions(&[3.0, -1.0, 0.0], &e).unwrap();
+        for j in 0..3 {
+            assert!((c.drop_one[j] - c.unconditional[j]).abs() < 1e-12);
+        }
+        // One variable: its whole T².
+        let one = HotellingEstimates {
+            mean: vec![2.0],
+            covariance: vec![vec![0.5]],
+            m: 10,
+        };
+        let c = contributions(&[3.0], &one).unwrap();
+        assert!((c.t2 - 2.0).abs() < 1e-12 && (c.drop_one[0] - 2.0).abs() < 1e-12);
+        assert!((c.z[0] - 2f64.sqrt()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn contributions_do_not_change_when_a_variable_is_rescaled_or_shifted() {
+        let mut rng = Lcg(23);
+        for p in [2usize, 4, 6] {
+            let e = random_estimates(&mut rng, p);
+            let x: Vec<f64> = e.mean.iter().map(|m| m + 2.0 * rng.bell()).collect();
+            let c = contributions(&x, &e).unwrap();
+            // Variable `k` in other units (x ↦ a x + b).
+            let (k, a, b) = (p / 2, 37.0, -1_000.0);
+            let mut e2 = e.clone();
+            let mut x2 = x.clone();
+            e2.mean[k] = a * e.mean[k] + b;
+            x2[k] = a * x[k] + b;
+            for i in 0..p {
+                if i != k {
+                    e2.covariance[i][k] *= a;
+                    e2.covariance[k][i] *= a;
+                }
+            }
+            e2.covariance[k][k] *= a * a;
+            let c2 = contributions(&x2, &e2).unwrap();
+            assert!((c.t2 - c2.t2).abs() <= 1e-8 * c.t2.max(1.0));
+            for j in 0..p {
+                assert!((c.drop_one[j] - c2.drop_one[j]).abs() <= 1e-8 * c.t2.max(1.0));
+                assert!((c.z[j].abs() - c2.z[j].abs()).abs() <= 1e-8 * c.z[j].abs().max(1.0));
+                assert!((c.unconditional[j] - c2.unconditional[j]).abs() <= 1e-8 * c.t2.max(1.0));
+            }
+        }
+    }
+
+    #[test]
+    fn the_individual_contributions_belong_to_the_t_squared_of_the_charts() {
+        let mut rng = Lcg(5);
+        let data = correlated(&mut rng, 40, 4);
+        let chart = phase_i(&data, 0.01).unwrap();
+        let c = contributions(&data[7], &chart.estimates).unwrap();
+        assert!((c.t2 - chart.t2[7]).abs() <= 1e-9 * chart.t2[7].max(1.0));
+        let two = phase_ii(&[data[7].clone()], &chart.estimates, 0.01).unwrap();
+        assert!((c.t2 - two.t2[0]).abs() <= 1e-9 * c.t2.max(1.0));
+    }
+
+    #[test]
+    fn a_subgroup_carries_the_size_of_the_subgroup() {
+        let mut rng = Lcg(9);
+        let e = random_estimates(&mut rng, 3);
+        let x: Vec<f64> = e.mean.iter().map(|m| m + rng.bell()).collect();
+        let single = contributions(&x, &e).unwrap();
+        let n = 5usize;
+        let sub = SubgroupEstimates {
+            mean: e.mean.clone(),
+            covariance: e.covariance.clone(),
+            m: 20,
+            n,
+        };
+        let many = subgroup_contributions(&x, &sub).unwrap();
+        let nf = n as f64;
+        assert!((many.t2 - nf * single.t2).abs() <= 1e-9 * many.t2.max(1.0));
+        for j in 0..3 {
+            assert!((many.drop_one[j] - nf * single.drop_one[j]).abs() <= 1e-9 * many.t2.max(1.0));
+            assert!(
+                (many.z[j] - nf.sqrt() * single.z[j]).abs() <= 1e-9 * single.z[j].abs().max(1.0)
+            );
+            assert!(
+                (many.unconditional[j] - nf * single.unconditional[j]).abs()
+                    <= 1e-9 * many.t2.max(1.0)
+            );
+        }
+        // The chart of subgroups gives the same T² for the same mean.
+        let rows: Vec<Vec<f64>> = (0..n)
+            .map(|i| x.iter().map(|v| v + (i as f64 - 2.0) * 0.1).collect())
+            .collect();
+        let mean_of_rows: Vec<f64> = (0..3)
+            .map(|j| rows.iter().map(|r| r[j]).sum::<f64>() / nf)
+            .collect();
+        let chart = subgroup_phase_ii(&[rows], &sub, 0.01).unwrap();
+        let by_mean = subgroup_contributions(&mean_of_rows, &sub).unwrap();
+        assert!((chart.t2[0] - by_mean.t2).abs() <= 1e-9 * by_mean.t2.max(1.0));
+    }
+
+    #[test]
+    fn contribution_refusals_name_what_is_wrong() {
+        let e = HotellingEstimates {
+            mean: vec![0.0, 0.0],
+            covariance: vec![vec![1.0, 0.5], vec![0.5, 1.0]],
+            m: 20,
+        };
+        assert_eq!(
+            contributions(&[1.0], &e).unwrap_err(),
+            HotellingError::DimensionMismatch {
+                parameter: "observation",
+                expected: 2,
+                got: 1,
+                index: None
+            }
+        );
+        assert_eq!(
+            contributions(&[1.0, f64::NAN], &e).unwrap_err(),
+            HotellingError::NonFinite {
+                parameter: "observation",
+                index: None
+            }
+        );
+        let singular = HotellingEstimates {
+            covariance: vec![vec![1.0, 1.0], vec![1.0, 1.0]],
+            ..e.clone()
+        };
+        assert_eq!(
+            contributions(&[1.0, 2.0], &singular).unwrap_err(),
+            HotellingError::Degenerate
+        );
+        let bad_n = SubgroupEstimates {
+            mean: e.mean.clone(),
+            covariance: e.covariance.clone(),
+            m: 20,
+            n: 1,
+        };
+        assert_eq!(
+            subgroup_contributions(&[1.0, 2.0], &bad_n).unwrap_err(),
+            HotellingError::TooFew { min: 2, got: 1 }
+        );
     }
 }

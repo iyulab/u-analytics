@@ -8,6 +8,21 @@ Maintained from 0.5.0 onward; earlier entries list release dates only (see git h
 
 ## [Unreleased]
 
+### Added
+
+- `spc::hotelling::contributions(observation, estimates)` and `subgroup_contributions(subgroup_mean, estimates)`, on every surface
+  (WebAssembly `hotelling_contributions(observation, reference)` / `hotelling_subgroup_contributions(subgroup_mean, reference)`, C ABI
+  `uanalytics_hotelling_contributions` / `uanalytics_hotelling_subgroup_contributions`, .NET `HotellingContributions` /
+  `HotellingSubgroupContributions` returning `HotellingContributionsResult`; the `reference` is the `estimates` of a Phase I chart,
+  refusals use the shared vocabulary and the engine card lists both operations): which variable
+  moved after a T² signal. Per variable they give `drop_one` (T² minus the T² of the other variables, which equals the squared
+  deviation of the variable from what the others predict, whatever the order of the variables), `z` (that deviation in standard
+  deviations, signed; `z² = drop_one`) and `unconditional` (the variable's own squared standardised distance from its mean), with the
+  `t2` they belong to; the estimates are the ones `phase_ii` takes. A ranking to read after a signal, not a test: the entries do not
+  add up to `t2` and have no limit, and with strongly correlated variables one that did not move still gets a large `drop_one`.
+  One Cholesky factor and `O(p³)` in all; the identity is checked in the tests against the definition (the two statistics by
+  Gaussian elimination).
+
 ## [0.37.0] - 2026-11-18
 
 The .NET client is `UAnalytics` 0.31.0.

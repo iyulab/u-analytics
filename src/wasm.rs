@@ -48,8 +48,9 @@ use crate::wire::{
 };
 use crate::wire::{
     hotelling::{
-        phase_i_dto, phase_ii_dto, subgroup_phase_i_dto, subgroup_phase_ii_dto,
-        HotellingReferenceDto, HotellingSubgroupReferenceDto,
+        contributions_dto, phase_i_dto, phase_ii_dto, subgroup_contributions_dto,
+        subgroup_phase_i_dto, subgroup_phase_ii_dto, HotellingReferenceDto,
+        HotellingSubgroupReferenceDto,
     },
     short_run::{
         attributes_options, deviation_dto, group_rows, standardized_dto, standardized_p_dto,
@@ -795,6 +796,71 @@ pub fn hotelling_subgroup_phase_ii(
     let subgroups: Vec<Vec<Vec<f64>>> = from_js(subgroups, "subgroups")?;
     let reference: HotellingSubgroupReferenceDto = from_js(reference, "reference")?;
     to_js(&subgroup_phase_ii_dto(&subgroups, reference, alpha).map_err(js_err)?)
+}
+
+/// Which variable moved after a Hotelling T² signal: what each variable contributes to the
+/// `T²` of one observation against `reference`, as a ranking — not a test. Per variable:
+/// `drop_one` (`T²` minus the `T²` of the other variables, the squared deviation of the variable
+/// from what the others predict), `z` (that deviation in standard deviations, signed: positive
+/// when the variable is above what the others predict; `z² = drop_one`) and `unconditional` (the
+/// variable's own squared standardised distance from its mean).
+///
+/// The entries are **not** shares of `T²`: they do not add up to it, and none has a limit. With
+/// strongly correlated variables one that did not move still gets a large `drop_one` (the others
+/// predict it): read `drop_one` next to `unconditional`.
+///
+/// # Input
+///
+/// - `observation`: one number per variable (the row of a chart that signalled)
+/// - `reference`: `{ mean, covariance, m }` — the `estimates` of a [`hotelling_phase_i`] result,
+///   or the `reference` of [`hotelling_phase_ii`]; `m` whole
+///
+/// # Errors
+///
+/// `dimension_mismatch` (`observation`, not as long as `reference.mean`; `reference.mean`,
+/// `reference.covariance`), `value_not_finite` (`observation`, `reference.covariance` row),
+/// `malformed_input` (`reference.m`, not a whole number), `degenerate_data` (`observation`, a
+/// covariance that cannot be inverted).
+///
+/// # Output JSON
+///
+/// `t2`, `drop_one`, `z`, `unconditional` (one entry per variable, in the order of `observation`).
+#[wasm_bindgen(unchecked_return_type = "HotellingContributionsDto")]
+pub fn hotelling_contributions(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] observation: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "HotellingReferenceDto")] reference: JsValue,
+) -> Result<JsValue, JsValue> {
+    let observation = read_numbers(&observation, "observation").map_err(js_err)?;
+    let reference: HotellingReferenceDto = from_js(reference, "reference")?;
+    to_js(&contributions_dto(&observation, reference).map_err(js_err)?)
+}
+
+/// [`hotelling_contributions`] for the mean of one subgroup of `reference.n` observations: the
+/// entries of `T² = n (x̄ − μ)ᵀ S⁻¹ (x̄ − μ)` (`drop_one` and `unconditional` carry the factor `n`,
+/// `z` its square root).
+///
+/// # Input
+///
+/// - `subgroup_mean`: one number per variable (the mean of the subgroup that signalled)
+/// - `reference`: `{ mean, covariance, m, n }` — the `estimates` of a [`hotelling_subgroup_phase_i`]
+///   result; `m` and `n` whole, `n >= 2`
+///
+/// # Errors
+///
+/// As [`hotelling_contributions`], with `subgroup_mean` for `observation`; `malformed_input`
+/// (`reference.n`, not a whole number), `insufficient_data` (`reference.n`, below 2).
+///
+/// # Output JSON
+///
+/// As [`hotelling_contributions`].
+#[wasm_bindgen(unchecked_return_type = "HotellingContributionsDto")]
+pub fn hotelling_subgroup_contributions(
+    #[wasm_bindgen(unchecked_param_type = "number[] | Float64Array")] subgroup_mean: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "HotellingSubgroupReferenceDto")] reference: JsValue,
+) -> Result<JsValue, JsValue> {
+    let subgroup_mean = read_numbers(&subgroup_mean, "subgroup_mean").map_err(js_err)?;
+    let reference: HotellingSubgroupReferenceDto = from_js(reference, "reference")?;
+    to_js(&subgroup_contributions_dto(&subgroup_mean, reference).map_err(js_err)?)
 }
 
 fn short_run_variables_options(
@@ -4511,6 +4577,25 @@ mod engine_card_tests {
                 optional("alpha", s.of::<Option<f64>>()),
             ],
             s.of::<hotelling::HotellingSubgroupChartDto>(),
+        );
+        s.op(
+            "hotelling_contributions",
+            vec![
+                arg("observation", numbers()),
+                arg("reference", s.of::<hotelling::HotellingReferenceDto>()),
+            ],
+            s.of::<hotelling::HotellingContributionsDto>(),
+        );
+        s.op(
+            "hotelling_subgroup_contributions",
+            vec![
+                arg("subgroup_mean", numbers()),
+                arg(
+                    "reference",
+                    s.of::<hotelling::HotellingSubgroupReferenceDto>(),
+                ),
+            ],
+            s.of::<hotelling::HotellingContributionsDto>(),
         );
         s.op(
             "run_rules",
